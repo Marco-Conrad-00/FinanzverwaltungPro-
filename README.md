@@ -1,6 +1,6 @@
 # Finanzverwaltung Pro
 
-Deutschsprachige **Electron-Desktop-App** zur privaten Finanzverwaltung – Einnahmen/Ausgaben, Fixkosten, Sparen & Depot mit Live-Kursen (ETFs, Aktien, Krypto), Mehrjahres-Verwaltung, Zählerstände und lokale Backups.
+Deutschsprachige **Electron-Desktop-App** zur privaten Finanzverwaltung – Einnahmen/Ausgaben, Fixkosten, Sparen & Depot mit Live-Kursen (ETFs, Aktien, Krypto), Mehrjahres-Verwaltung, Zählerstände und lokale Backups.Zählerstände erfassen und eigene Tabellen anlegen. 
 
 > **Datenschutz:** Alle Daten bleiben lokal (`%APPDATA%\finanzverwaltung-pro\data.json`). Keine Cloud, kein Tracking.
 
