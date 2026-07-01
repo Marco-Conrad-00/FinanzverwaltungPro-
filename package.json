@@ -1,13 +1,11 @@
 {
   "name": "finanzverwaltung-pro",
-  "version": "2.0.0",
-  "description": "Deutschsprachige Electron-Desktop-App zur privaten Finanzverwaltung (Einnahmen/Ausgaben, Fixkosten, Sparen & Depot mit Live-Kursen).",
-  "author": "Marco Conrad",
-  "license": "MIT",
+  "version": "1.0.1",
   "main": "src/main.js",
   "scripts": {
     "start": "electron .",
-    "build": "electron-builder --win --x64"
+    "build": "electron-builder --win --x64",
+    "publish": "electron-builder --win --x64 --publish always"
   },
   "build": {
     "appId": "de.finanzverwaltung.pro",
@@ -15,6 +13,13 @@
     "directories": {
       "output": "dist"
     },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "Marco-Conrad-00",
+        "repo": "FinanzverwaltungPro-"
+      }
+    ],
     "win": {
       "target": [
         {
@@ -44,8 +49,7 @@
     "electron": "^28.0.0",
     "electron-builder": "^24.0.0"
   },
-  "repository": {
-    "type": "git",
-    "url": "https://github.com/Marco-Conrad-00/FinanzverwaltungPro-.git"
+  "dependencies": {
+    "electron-updater": "^6.1.7"
   }
 }

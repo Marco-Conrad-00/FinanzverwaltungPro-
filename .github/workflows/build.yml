@@ -35,11 +35,17 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: FinanzverwaltungPro-Setup
-          path: dist/*.exe
+          path: |
+            dist/*.exe
+            dist/latest.yml
+            dist/*.blockmap
 
       # Bei Tag-Push zusaetzlich ein GitHub Release mit der .exe erstellen.
       - name: Publish Release
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/*.exe
+          files: |
+            dist/*.exe
+            dist/latest.yml
+            dist/*.blockmap

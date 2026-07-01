@@ -225,7 +225,7 @@
     <div class="modal-title">Wiederkehrende Einnahme</div>
     <div class="form-grid form-grid-2">
       <label class="field" style="grid-column:1/-1">Quelle / Beschreibung
-        <input type="text" id="re_source" placeholder="z.B. Bergmensch, Nebenjob…"/>
+        <input type="text" id="re_source" placeholder="z.B. Arbeitgeber, Nebenjob…"/>
       </label>
       <label class="field">Typ
         <select id="re_type">
@@ -244,6 +244,9 @@
       </label>
       <label class="field" style="grid-column:1/-1">Notiz
         <input type="text" id="re_note" placeholder="Optional…"/>
+      </label>
+      <label class="field" style="grid-column:1/-1">Konto
+        <select id="re_konto"></select>
       </label>
     </div>
     <div class="modal-footer">
@@ -299,6 +302,7 @@
       <label class="field">Kategorie / Anlageart
         <select id="sp_kat" onchange="onSparKatChange()">
           <option>Tagesgeld</option><option>Festgeld</option><option>ETF</option>
+          <option>Fonds</option>
           <option>Aktien</option><option>Krypto</option><option>Depot allgemein</option>
           <option>Girokonto</option><option>Bargeld</option><option>Sparziel</option><option>Sonstiges</option>
         </select>
@@ -432,11 +436,23 @@
       <label class="field">Fällig am (Tag)
         <input type="number" id="fk_day" min="1" max="31" value="1" />
       </label>
+      <label class="field">Rhythmus
+        <select id="fk_interval">
+          <option value="1">monatlich</option>
+          <option value="2">alle 2 Monate</option>
+          <option value="3">alle 3 Monate</option>
+          <option value="6">alle 6 Monate</option>
+          <option value="12">jährlich</option>
+        </select>
+      </label>
       <label class="field">Gültig von
         <input type="month" id="fk_start" />
       </label>
       <label class="field">Gültig bis
         <input type="month" id="fk_end" />
+      </label>
+      <label class="field" style="grid-column:1/-1">Von Konto (woher das Geld abgeht)
+        <select id="fk_konto"></select>
       </label>
     </div>
     <!-- Sparen-Details (sichtbar bei Kategorie = Sparen) -->
@@ -447,6 +463,7 @@
           <select id="fk_spar_typ" onchange="onFkSparTypChange()">
             <option value="bargeld">Bargeld / Tagesgeld / Festgeld</option>
             <option value="etf">ETF</option>
+            <option value="fonds">Fonds</option>
             <option value="aktie">Einzelaktie</option>
             <option value="krypto">Krypto</option>
           </select>
@@ -456,6 +473,10 @@
             <option value="cashflow">Laufender Cashflow (monatlich abgezogen)</option>
             <option value="startgeld">Vom Startguthaben (Einmalbetrag)</option>
           </select>
+        </label>
+        <label class="field" style="grid-column:1/-1">Zielkonto (wohin gespart wird)
+          <select id="fk_spar_zielkonto"></select>
+          <span style="font-size:11px;color:var(--muted)">Internes Konto = Transfer (Geld bleibt erhalten). „Extern" = Geld verlässt alle Konten (echte Ausgabe, z.B. externes Depot).</span>
         </label>
         <!-- Wertpapier-Suche (nur bei ETF/Aktien/Krypto) -->
         <div id="fk_wp_wrap" class="hidden" style="grid-column:1/-1;position:relative">
@@ -520,13 +541,14 @@
   <aside class="sidebar">
     <div class="sidebar-logo">
       <p class="eyebrow">Finanzverwaltung</p>
-      <h1 id="userName" onclick="editUserName()" title="Klicken zum Bearbeiten" style="cursor:pointer" >Marco Conrad</h1>
-      <div class="version" id="appVersion">v2.0</div>
+      <h1 id="userName" onclick="editUserName()" title="Klicken zum Bearbeiten" style="cursor:pointer" >Nutzer</h1>
+      <div class="version" id="appVersion">v1.01</div>
     </div>
     <div class="sidebar-section">Übersicht</div>
     <button class="nav-item active" onclick="navigate('dashboard')">📊 Dashboard</button>
     <button class="nav-item" onclick="navigate('einstellungen')">⚙️ Einstellungen</button>
     <button class="nav-item" onclick="navigate('jahresuebersicht')">📅 Jahresübersicht</button>
+    <button class="nav-item" onclick="navigate('suche')">🔍 Suche</button>
     <div class="sidebar-section">Monatsauswertung</div>
     <button class="nav-item" onclick="navigate('buchungen')">📋 Buchungen</button>
     <button class="nav-item" onclick="navigate('einkaeufe')">🛒 Einkäufe</button>
@@ -536,6 +558,7 @@
     <div class="sidebar-section">Planung</div>
     <button class="nav-item" onclick="navigate('fixkosten')">🔁 Fixkosten</button>
     <button class="nav-item" onclick="navigate('sparen')">🏦 Sparen & Depot</button>
+    <button class="nav-item" onclick="navigate('umbuchungen')">🔄 Umbuchungen</button>
     <button class="nav-item" onclick="navigate('zaehler')">⚡ Zählerstände</button>
     <button class="nav-item" onclick="navigate('finanzprodukte')">📋 Finanzprodukte</button>
     <button class="nav-item" onclick="navigate('tabellen')">📝 Eigene Tabellen</button>

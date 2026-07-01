@@ -17,4 +17,7 @@ window.EA = {
   fetchQuote:     (symbol, isin) => ipcRenderer.invoke('fetch-quote', symbol, isin),
   fetchSearch:    (query) => ipcRenderer.invoke('fetch-search', query),
   fetchQuoteAtDate: (symbol, date) => ipcRenderer.invoke('fetch-quote-at-date', symbol, date),
+  checkForUpdates: () => ipcRenderer.invoke('check-for-updates'),
+  onUpdateAvailable: (cb) => ipcRenderer.on('update-available', (_, d) => cb(d)),
+  onUpdateProgress:  (cb) => ipcRenderer.on('update-progress', (_, d) => cb(d)),
 };

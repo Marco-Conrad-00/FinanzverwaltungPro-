@@ -37,7 +37,7 @@ let chartInstances = {};
 // V3 schema: per-year data partitioned into state.years[year]
 // Old code still accesses state.einkaeufe etc. - these are proxied via Object.defineProperty
 
-const YEAR_FIELDS = ['incomeByMonth','einkaeufe','ausgaben','einnahmen','regelEinnahmen','spesen','fixkosten','sparen','zaehler','tabellen','finanzprodukte'];
+const YEAR_FIELDS = ['incomeByMonth','einkaeufe','ausgaben','einnahmen','regelEinnahmen','spesen','fixkosten','sparen','zaehler','tabellen','finanzprodukte','umbuchungen'];
 
 function emptyIncomeByMonth(year) {
   const obj = {};
@@ -46,11 +46,56 @@ function emptyIncomeByMonth(year) {
   }
   return obj;
 }
+// Jahres-Zuordnung Gehalt/Nebenjob → Konto (einmal gewählt, gilt fürs ganze Jahr).
+function getGehaltKonto(yr) {
+  const c = (state.config && state.config.incomeKonten) || {};
+  return (c[(yr||getSelectedYear())] || {}).gehalt || defaultKontoId(yr);
+}
+function getNebenjobKonto(yr) {
+  const c = (state.config && state.config.incomeKonten) || {};
+  return (c[(yr||getSelectedYear())] || {}).nebenjob || defaultKontoId(yr);
+}
+function setIncomeKonto(field, kontoId, yr) {
+  yr = yr || getSelectedYear();
+  if (!state.config) state.config = {};
+  if (!state.config.incomeKonten) state.config.incomeKonten = {};
+  if (!state.config.incomeKonten[yr]) state.config.incomeKonten[yr] = {};
+  state.config.incomeKonten[yr][field] = kontoId;
+}
+
+// ── SPARZIEL ────────────────────────────────────────────────────────────────
+function getSparziel() {
+  const c = state.config || {};
+  return { aktiv: !!c.sparzielAktiv, summe: +c.sparzielSumme || 0 };
+}
+function setSparziel(field, val) {
+  if (!state.config) state.config = {};
+  if (field === 'aktiv')  state.config.sparzielAktiv = !!val;
+  if (field === 'summe')  state.config.sparzielSumme = +val || 0;
+}
+function updateSparzielSumme(val) {
+  setSparziel('summe', val);
+  saveData(); renderPage();
+}
+// Tatsächlich Gespartes im laufenden Jahr, kumuliert bis einschl. aktuellem Monat.
+function sparenKumuliertBisMonat(month) {
+  const yr = (month || currentMonth).slice(0,4);
+  let summe = 0;
+  (state.sparen||[]).forEach(s => {
+    const m = s.month || (s.date ? s.date.slice(0,7) : '');
+    if (!m) return;
+    if (m.slice(0,4) !== yr) return;     // nur laufendes Jahr
+    if (m > month) return;               // nur bis aktueller Monat
+    summe += (+s.amount||0);
+  });
+  return Math.round(summe * 100) / 100;
+}
 
 function createEmptyYearData(year) {
   return {
     status: 'active',           // 'active' | 'closed' | 'planned'
     startBalance: 0,
+    konten: null,  // [{id,name,start,cashflow}] – wird lazy migriert
     closedAt: null,
     incomeByMonth: emptyIncomeByMonth(Number(year)),
     einkaeufe: [],
@@ -63,6 +108,7 @@ function createEmptyYearData(year) {
     zaehler: [],
     tabellen: [],
     finanzprodukte: [],
+    umbuchungen: [],
   };
 }
 
@@ -71,7 +117,7 @@ const DEFAULT_DATA_RAW = {
   currentYear: new Date().getFullYear(),
   selectedYear: new Date().getFullYear(),
   years: { },
-  meta: { year: new Date().getFullYear(), startgeld: 0, userName: '', email: 'marco.conrad00@gmail.com', paypal: 'marco.conrad00@gmail.com', setupDone: false, waehrung: 'EUR' },
+  meta: { year: new Date().getFullYear(), startgeld: 0, userName: '', email: '', paypal: '', setupDone: false, waehrung: 'EUR' },
   config: { theme:'light', accent:'#0f766e', startPage:'dashboard', dateFormat:'de', compactMode:false, autoBackup:false, etfLiveDaten:false, etfAutoRefresh:false, etfInterval:0, lastBackup:'', showStartupModal:true },
   customCats: { ausgabe: [], einnahme: [], einkauf: [] },
   trash: [],
@@ -220,15 +266,15 @@ function restoreFromTrash(trashId) {
   showToast('Eintrag in ' + targetYear + ' wiederhergestellt');
 }
 
-function deleteFromTrashForever(trashId) {
-  if (!confirm('Eintrag endgültig löschen? Kann nicht rückgängig gemacht werden!')) return;
+async function deleteFromTrashForever(trashId) {
+  if (!await uiConfirm({ message: 'Eintrag endgültig löschen? Kann nicht rückgängig gemacht werden!', title: 'Endgültig löschen', icon: '🗑' })) return;
   const sid = String(trashId);
   state.trash = (state.trash||[]).filter(t => String(t.id) !== sid);
   saveData(); renderPage();
 }
 
-function emptyTrash() {
-  if (!confirm('Papierkorb komplett leeren? Alle Einträge werden endgültig gelöscht!')) return;
+async function emptyTrash() {
+  if (!await uiConfirm({ message: 'Papierkorb komplett leeren? Alle Einträge werden endgültig gelöscht!', title: 'Papierkorb leeren', icon: '🗑' })) return;
   state.trash = [];
   saveData(); renderPage();
   showToast('Papierkorb geleert');
@@ -289,12 +335,12 @@ function onToggleAutoBackup() {
   // Turning ON - require path + interval
   if (!state.config.backupPath || !state.config.backupInterval) {
     if (!state.config.backupPath) {
-      alert('Bitte zuerst einen Backup-Ordner auswählen.');
+      uiAlert('Bitte zuerst einen Backup-Ordner auswählen.');
       selectBackupPath(true); // pass flag to enable autoBackup after path is set
       return;
     }
     if (!state.config.backupInterval) {
-      alert('Bitte ein Backup-Intervall wählen (täglich/wöchentlich/monatlich).');
+      uiAlert('Bitte ein Backup-Intervall wählen (täglich/wöchentlich/monatlich).');
       // open the section anyway
       state.config.autoBackup = true; // show config block so user can pick
       saveData();
@@ -313,7 +359,7 @@ async function selectBackupPath(enableAfter) {
   try {
     if (!window.EA || !window.EA.selectFolder) {
       // Fallback for environments without API
-      const path = prompt('Backup-Ordner-Pfad eingeben:', state.config.backupPath || '');
+      const path = await uiPrompt({ title: 'Backup-Ordner', message: 'Backup-Ordner-Pfad eingeben:', value: state.config.backupPath || '' });
       if (path) {
         state.config = state.config || {};
         state.config.backupPath = path;
@@ -334,12 +380,12 @@ async function selectBackupPath(enableAfter) {
     }
   } catch (e) {
     console.error('selectBackupPath:', e);
-    alert('Ordner konnte nicht ausgewählt werden: ' + e.message);
+    uiAlert('Ordner konnte nicht ausgewählt werden: ' + e.message);
   }
 }
 
 async function openBackupFolder() {
-  if (!state.config?.backupPath) { alert('Kein Backup-Ordner gesetzt.'); return; }
+  if (!state.config?.backupPath) { uiAlert('Kein Backup-Ordner gesetzt.'); return; }
   try {
     if (window.EA && window.EA.openFolder) await window.EA.openFolder(state.config.backupPath);
   } catch (e) { console.error(e); }
@@ -558,8 +604,8 @@ async function loadData() {
                    'years','dataVersion','currentYear','selectedYear','backupHistory','yearEditUnlocked'];
   fields.forEach(f => { if (saved[f] !== undefined) state[f] = saved[f]; });
 
-  if (!state.meta.email)  state.meta.email  = 'marco.conrad00@gmail.com';
-  if (!state.meta.paypal) state.meta.paypal = 'marco.conrad00@gmail.com';
+  if (state.meta.email  === undefined) state.meta.email  = '';
+  if (state.meta.paypal === undefined) state.meta.paypal = '';
   if (!state.imports)     state.imports     = [];
   if (!state.etfKurse)    state.etfKurse    = {};
   if (!state.trash)       state.trash       = [];
@@ -671,25 +717,28 @@ function getEinkaufCats()  { return mergeCats(EINKAUF_CATS_DEFAULT,  'einkauf');
 // EXPENSE_CATS getter is already defined below
 
 // ── CATEGORY RULES ────────────────────────────────────────────────────────
+// Generische Erkennungsregeln für den Kontoauszug-Import. Bewusst ohne
+// personenbezogene Daten (keine Arbeitgeber-/Personennamen), damit die App
+// neutral weitergegeben werden kann. Eigene Begriffe lassen sich über die
+// individuelle Kategorisierung in der App ergänzen.
 const CAT_RULES = [
-  { match: /marco conrad|umbuchung|sparplan|trade republic|tagesgeld|fnz/i, cat: '__skip__' },
-  { match: /nicola schneider|simone kazmaier/i, cat: '__skip__' },
-  { match: /guhring|gühring|güring|lorner|bergmensch|gehalt|lohn/i, cat: 'Gehalt', income: true },
-  { match: /rewe|edeka|aldi|lidl|kaufland|netto|penny|norma|e-center|ecenter|e center|danke ihr|aldi sued/i, cat: 'Einkauf Lebensmittel' },
-  { match: /\bdm\b|rossmann|müller reutlingen|bäcker|baecker|konditorei|metzger/i, cat: 'Einkauf Lebensmittel' },
-  { match: /restaurant|cafe christian|baeckerei cafe|bien asien|simsim|kebap|meat and bread|mcdonald|lieferando|imbiss|pizza|sushi/i, cat: 'Essen & Trinken' },
+  { match: /umbuchung|sparplan|trade republic|tagesgeld|übertrag|uebertrag/i, cat: '__skip__' },
+  { match: /gehalt|lohn|salär|salaer|bezüge|bezuege/i, cat: 'Gehalt', income: true },
+  { match: /rewe|edeka|aldi|lidl|kaufland|netto|penny|norma|e-center|ecenter|e center|aldi sued/i, cat: 'Einkauf Lebensmittel' },
+  { match: /\bdm\b|rossmann|müller|bäcker|baecker|konditorei|metzger/i, cat: 'Einkauf Lebensmittel' },
+  { match: /restaurant|cafe|bäckerei|baeckerei|kebap|mcdonald|lieferando|imbiss|pizza|sushi/i, cat: 'Essen & Trinken' },
   { match: /shell|aral|esso|tankstelle|tanken/i, cat: 'Auto' },
   { match: /easypark|parkhaus|parken/i, cat: 'Auto' },
   { match: /jobrad|fahrrad.*leasing/i, cat: 'Kreditrate' },
-  { match: /allianz|huk|versicherung|debeka|nurnberger|nürnberger|nuernberger/i, cat: 'Versicherungen' },
-  { match: /martin volker|miete|nebenkosten whg|e wie einfach|strom/i, cat: 'Miete & Wohnen' },
-  { match: /vodafone|nabu casa|internet/i, cat: 'Miete & Wohnen' },
-  { match: /targobank|kreditrate/i, cat: 'Kreditrate' },
-  { match: /apotheke|arzt|zahnarzt|bfs health/i, cat: 'Gesundheit' },
-  { match: /shape shifters|finion capital|gym|fitness/i, cat: 'Freizeit' },
+  { match: /allianz|huk|versicherung|debeka|nürnberger|nuernberger/i, cat: 'Versicherungen' },
+  { match: /miete|nebenkosten|strom|e wie einfach/i, cat: 'Miete & Wohnen' },
+  { match: /vodafone|telekom|o2|internet/i, cat: 'Miete & Wohnen' },
+  { match: /targobank|kreditrate|kredit/i, cat: 'Kreditrate' },
+  { match: /apotheke|arzt|zahnarzt/i, cat: 'Gesundheit' },
+  { match: /gym|fitness|fitnessstudio/i, cat: 'Freizeit' },
   { match: /spotify|netflix|apple\.com|amazon.*prime|amznprime/i, cat: 'Abos & Software' },
-  { match: /ikea|obi|bauhaus|hornbach|toom|baywa bau|amazon payments|amazon eu/i, cat: 'Einkauf Haushalt' },
-  { match: /vitafy|myprotein|paypal europe/i, cat: 'Sonstige Ausgaben' },
+  { match: /ikea|obi|bauhaus|hornbach|toom|amazon payments|amazon eu/i, cat: 'Einkauf Haushalt' },
+  { match: /myprotein|paypal europe/i, cat: 'Sonstige Ausgaben' },
   { match: /zalando|h&m|c&a|kleidung|schuhe/i, cat: 'Kleidung' },
   { match: /kleinanzeigen|vinted|ebay/i, cat: 'Verkauf', income: true },
 ];
@@ -706,8 +755,24 @@ function classify(desc, amount) {
 }
 
 // ── FIXKOSTEN HELPERS ─────────────────────────────────────────────────────
+// Zählt die Monate zwischen zwei YYYY-MM (a..b), 0 wenn gleich.
+function monthDiff(a, b) {
+  const [ay,am] = a.split('-').map(Number);
+  const [by,bm] = b.split('-').map(Number);
+  return (by-ay)*12 + (bm-am);
+}
+// Ist eine Fixkost im gegebenen Monat fällig? Berücksichtigt Start, Ende und
+// Rhythmus (interval = alle X Monate, voller Betrag im ersten Monat des Intervalls).
+function fixkostenAktivImMonat(f, month) {
+  const start = f.start || month;
+  const end   = f.end || month;
+  if (month < start || month > end) return false;
+  const iv = +f.interval || 1;             // 1 = monatlich (Standard / Altbestand)
+  if (iv <= 1) return true;
+  return (monthDiff(start, month) % iv) === 0;
+}
 function fixkostenForMonth(month) {
-  return state.fixkosten.filter(f => f.start <= month && f.end >= month);
+  return state.fixkosten.filter(f => fixkostenAktivImMonat(f, month));
 }
 function fixkostenTotal(month) {
   return fixkostenForMonth(month).reduce((s, f) => s + f.amount, 0);
@@ -729,13 +794,331 @@ function getVormonatSaldo(month) {
   return Math.round(saldo * 100) / 100;
 }
 
+// ── Multi-Konto-Modell ──────────────────────────────────────────────────────
+// Konten leben pro Jahr in yd.konten = [{id, name, start, cashflow}].
+// 'cashflow:true' = Buchungen dieses Kontos zählen zum Monats-Cashflow.
+// Migration: fehlt die Liste, wird ein Konto "Girokonto" mit dem bisherigen
+// startBalance (cashflow:true) angelegt; bestehende Buchungen ohne kontoId
+// gelten als auf diesem ersten Konto.
+// ── Konten-CRUD (Settings) ──────────────────────────────────────────────────
+function addKonto() {
+  if (!requireUnlocked()) return;
+  const yd = getYearData();
+  getKonten(); // sorgt für Migration
+  yd.konten.push({ id: 'k_' + uid(), name: 'Neues Konto', start: 0, cashflow: false });
+  syncStartgeldAusKonten();
+  saveData(); renderPage();
+}
+function updateKonto(id, field, val) {
+  if (!requireUnlocked()) return;
+  const k = kontoById(id);
+  if (!k) return;
+  if (field === 'start') val = +val || 0;
+  k[field] = val;
+  if (field === 'start') syncStartgeldAusKonten();
+  saveData(); renderPage();
+}
+function deleteKonto(id) {
+  if (!requireUnlocked()) return;
+  const yd = getYearData();
+  const ks = getKonten();
+  if (ks.length <= 1) { showToast('Mindestens ein Konto muss bleiben','info'); return; }
+  // Buchungen dieses Kontos auf das erste verbleibende Konto umhängen
+  const rest = ks.filter(k => k.id !== id);
+  const fallback = (rest.find(k=>k.cashflow) || rest[0]).id;
+  (state.ausgaben||[]).forEach(a => { if ((a.kontoId||defaultKontoId()) === id) a.kontoId = fallback; });
+  (state.einnahmen||[]).forEach(e => { if ((e.kontoId||defaultKontoId()) === id) e.kontoId = fallback; });
+  yd.konten = rest;
+  syncStartgeldAusKonten();
+  saveData(); renderPage();
+  showToast('Konto gelöscht, Buchungen umgehängt','info');
+}
+// Gesamt-Startgeld = Summe aller Konten-Startwerte (hält startBalance konsistent).
+function syncStartgeldAusKonten() {
+  const yd = getYearData();
+  const sum = getKonten().reduce((s,k) => s + (+k.start||0), 0);
+  yd.startBalance = Math.round(sum * 100) / 100;
+  if (state.meta) state.meta.startgeld = yd.startBalance;
+}
+//MARKkontencrud
+function getKonten(yr) {
+  const yd = getYearData(yr);
+  if (!yd) return [];
+  if (!Array.isArray(yd.konten) || yd.konten.length === 0) {
+    yd.konten = [{
+      id: 'k_giro',
+      name: 'Girokonto',
+      start: +(yd.startBalance) || 0,
+      cashflow: true,
+    }];
+  }
+  return yd.konten;
+}
+function getCashflowKontoIds(yr) {
+  return getKonten(yr).filter(k => k.cashflow).map(k => k.id);
+}
+// Default-Konto für neue Buchungen = erstes Cashflow-Konto (oder erstes Konto).
+function defaultKontoId(yr) {
+  const ks = getKonten(yr);
+  const cf = ks.find(k => k.cashflow);
+  return (cf || ks[0] || {id:'k_giro'}).id;
+}
+function kontoById(id, yr) {
+  return getKonten(yr).find(k => k.id === id) || null;
+}
+// Gehört eine Buchung zu einem Cashflow-Konto? (fehlende kontoId = Default/erstes)
+function istCashflowBuchung(b, yr) {
+  const ids = getCashflowKontoIds(yr);
+  const kid = b.kontoId || defaultKontoId(yr);
+  return ids.includes(kid);
+}
+// Netto-Bewegung eines Kontos im Jahr bis einschl. month (Einnahmen − Ausgaben).
+function kontoNetBis(kontoId, month) {
+  const ausg = (state.ausgaben||[]).filter(a => (a.kontoId||defaultKontoId()) === kontoId && !a._korrektur && (!month || a.month <= month))
+    .reduce((s,a) => s + (+a.amount||0), 0);
+  const einn = (state.einnahmen||[]).filter(e => (e.kontoId||defaultKontoId()) === kontoId && !e._korrektur && (!month || e.month <= month) && !['Gehalt','Nebenjob'].includes(e.type))
+    .reduce((s,e) => s + (+e.amount||0), 0);
+  // Wiederkehrende Einnahmen dieses Kontos: für jeden aktiven Monat bis 'month' zählen.
+  let regel = 0;
+  const yr = getSelectedYear();
+  // Ohne explizites 'month': bis heute zählen (nicht bis Dezember!), begrenzt aufs Jahr.
+  const heute = thisMonth();
+  const jahrEnde = yr + '-12';
+  const grenze = month || (heute <= jahrEnde && heute >= (yr + '-01') ? heute : jahrEnde);
+  (state.regelEinnahmen||[]).forEach(r => {
+    if ((r.kontoId||defaultKontoId()) !== kontoId) return;
+    const start = r.startMonth || (yr + '-01');
+    const end = r.endMonth || grenze;
+    // Monate von start bis min(end, grenze) zählen
+    const bisM = (end < grenze) ? end : grenze;
+    if (bisM >= start) monthsBetween(start, bisM).forEach(() => { regel += (+r.amount||0); });
+  });
+  // Fixkosten-Sparen mit Zielkonto = diesem Konto: monatliche Sparbeträge gutschreiben.
+  // Nur Bargeld-Sparen (kein Wertpapierkauf) zählt als Cash-Zufluss aufs Konto.
+  let sparTransfer = 0;
+  (state.fixkosten||[]).forEach(f => {
+    if (!f.sparenLink || f.sparenLink.extern) return;
+    if (f.sparenLink.zielkonto !== kontoId) return;
+    if (f.sparenLink.sparTyp && f.sparenLink.sparTyp !== 'bargeld') return;
+    const start = f.start || (yr + '-01');
+    const end = f.end || grenze;
+    const bisM = (end < grenze) ? end : grenze;
+    if (bisM >= start) monthsBetween(start, bisM).forEach((m) => { if (fixkostenAktivImMonat(f, m)) sparTransfer += (+f.amount||0); });
+  });
+  // Umbuchungen: Abgang bei vonKonto, Zugang bei nachKonto (bis einschl. month)
+  let umb = 0;
+  (state.umbuchungen||[]).forEach(u => {
+    const um = u.month || (u.date||'').slice(0,7);
+    if (month && um > month) return;
+    if (u.nachKonto === kontoId) umb += (+u.amount||0);
+    if (u.vonKonto === kontoId) umb -= (+u.amount||0);
+  });
+  // Gehalt/Nebenjob → zugeordnetes Konto; Fixkosten/Einkäufe/Spesen → Default-Konto.
+  // So ist der Saldo jedes Kontos vollständig über kontoNetBis bestimmt und
+  // unabhängig vom Cashflow-Flag (das nur die Cashflow-Anzeige steuert).
+  let sonst = 0;
+  const def = defaultKontoId();
+  const months = monthsBetween(yr + '-01', grenze);
+  months.forEach(m => {
+    const inc = state.incomeByMonth[m] || { gehalt: 0, nebenjob: 0 };
+    if (getGehaltKonto(yr) === kontoId)   sonst += (+inc.gehalt||0);
+    if (getNebenjobKonto(yr) === kontoId) sonst += (+inc.nebenjob||0);
+    // Fixkosten mindern ihr zugeordnetes Konto (Default für Altbestand ohne kontoId).
+    (state.fixkosten||[]).forEach(f => {
+      if ((f.kontoId||def) !== kontoId) return;
+      if (fixkostenAktivImMonat(f, m)) sonst -= (+f.amount||0);
+    });
+    // Einkäufe mindern ihr zugeordnetes Konto (Default für Altbestand).
+    (state.einkaeufe||[]).forEach(e => {
+      if (e.month !== m) return;
+      if ((e.kontoId||def) === kontoId) sonst -= (+e.amount||0);
+    });
+    // Spesen-Saldo (Spesen − Ausgaben) auf zugeordnetes Konto (Default für Altbestand).
+    (state.spesen||[]).forEach(t => {
+      if (t.month !== m) return;
+      if ((t.kontoId||def) === kontoId) sonst += (+(t.allowance||0) - +(t.ausgaben||0));
+    });
+  });
+  return einn + regel + sparTransfer + umb + sonst - ausg;
+}
+// Aktueller Saldo eines Kontos = Startwert + Netto-Bewegung des Jahres.
+// Cashflow-Konten: voller Geldfluss (Gehalt/Nebenjob/Fixkosten/Einkäufe/Spesen
+// gehören per Definition zum Cashflow-Konto und werden mitgerechnet).
+// Reserve-Konten: nur explizit zugeordnete Ausgaben/Einnahmen.
+function kontoSaldo(kontoId, month) {
+  const k = kontoById(kontoId);
+  if (!k) return 0;
+  // Saldo = Startwert + Netto-Bewegung bis einschl. gewähltem Monat.
+  // Ohne Angabe: aktuell gewählter Monat (currentMonth), nicht der reale Heute-Monat.
+  const grenze = month || (typeof currentMonth !== 'undefined' ? currentMonth : null);
+  let netto = kontoNetBis(kontoId, grenze);
+  let korr = 0;
+  (state.einnahmen||[]).forEach(e => { if (e._korrektur && (e.kontoId||defaultKontoId()) === kontoId && (!grenze || (e.month||'') <= grenze)) korr += (+e.amount||0); });
+  (state.ausgaben||[]).forEach(a => { if (a._korrektur && (a.kontoId||defaultKontoId()) === kontoId && (!grenze || (a.month||'') <= grenze)) korr -= (+a.amount||0); });
+  return Math.round(((+k.start||0) + netto + korr) * 100) / 100;
+}
+// Summe Netto-Bewegung aller NICHT-Cashflow-Konten bis month (für Gesamtsaldo).
+function nichtCashflowNetBis(month) {
+  return getKonten().filter(k => !k.cashflow)
+    .reduce((s,k) => s + kontoNetBis(k.id, month), 0);
+}
+
+// ── Konto-Auswahl-Modal (für Ausgaben + Einnahmen) ──────────────────────────
+// Zeigt alle Konten als Auswahl. Gibt gewählte kontoId zurück (oder null bei Abbruch).
+function askKontoWahl(opts) {
+  return new Promise((resolve) => {
+    const o = opts || {};
+    const ks = getKonten();
+    const aktuelle = o.kontoId || defaultKontoId();
+    const isDark = document.documentElement.classList.contains('theme-dark');
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-overlay';
+    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:99999;display:flex;align-items:center;justify-content:center;padding:20px;backdrop-filter:blur(4px)';
+    const optionsHtml = ks.map(k =>
+      '<button class="konto-wahl-btn" data-kid="' + k.id + '" style="display:flex;justify-content:space-between;align-items:center;width:100%;text-align:left;padding:12px 14px;margin:6px 0;border:1px solid var(--border);border-radius:8px;background:' +
+      (k.id === aktuelle ? 'var(--surface-2)' : 'transparent') + ';color:var(--text);cursor:pointer;font-size:14px">' +
+        '<span><strong>' + (k.name||'Konto') + '</strong>' +
+          (k.cashflow ? ' <span class="badge badge-green" style="font-size:9px">CASHFLOW</span>' : ' <span class="badge badge-muted" style="font-size:9px">Reserve</span>') +
+        '</span>' +
+        '<span style="color:var(--muted)">Saldo: ' + fmtEur(kontoSaldo(k.id)) + '</span>' +
+      '</button>'
+    ).join('') + (o.extraOptions||[]).map(eo =>
+      '<button class="konto-wahl-btn" data-kid="' + eo.value + '" style="display:flex;justify-content:space-between;align-items:center;width:100%;text-align:left;padding:12px 14px;margin:6px 0;border:1px dashed var(--border);border-radius:8px;background:' +
+      (eo.value === aktuelle ? 'var(--surface-2)' : 'transparent') + ';color:var(--text);cursor:pointer;font-size:14px">' +
+        '<span><strong>' + eo.label + '</strong></span>' +
+        (eo.hint ? '<span style="color:var(--muted)">' + eo.hint + '</span>' : '') +
+      '</button>'
+    ).join('');
+    overlay.innerHTML =
+      '<div style="background:var(--surface);color:var(--text);border:1px solid var(--border);border-radius:12px;padding:0;max-width:480px;width:100%;box-shadow:0 20px 60px rgba(0,0,0,.5);animation:fadeIn .15s ease-out">' +
+        '<div style="padding:18px 22px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:12px">' +
+          '<div style="font-size:28px;line-height:1">' + (o.icon||'🏦') + '</div>' +
+          '<h3 style="margin:0;font-size:16px;font-weight:600;color:var(--text)">' + (o.title||'Welches Konto?') + '</h3>' +
+        '</div>' +
+        '<div style="padding:18px 22px;font-size:14px;line-height:1.5;color:var(--text)">' +
+          (o.message ? '<p style="margin:0 0 8px">' + o.message + '</p>' : '') +
+          optionsHtml +
+        '</div>' +
+      '</div>';
+    document.body.appendChild(overlay);
+    function cleanup(kid) { overlay.remove(); resolve(kid); }
+    overlay.querySelectorAll('.konto-wahl-btn').forEach(btn => {
+      btn.addEventListener('click', () => cleanup(btn.getAttribute('data-kid')));
+    });
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) cleanup(null); });
+  });
+}
+
+// Abfrage für Ausgabe: Konto wählen, Ergebnis speichern.
+async function askAusgabeKonto(eintrag) {
+  if (!eintrag) return;
+  const kid = await askKontoWahl({
+    title: 'Ausgabe – welches Konto?',
+    icon: '🏦',
+    message: 'Ausgabe' + (eintrag.desc ? ' (' + eintrag.desc + ')' : '') + ' über ' + fmtEur(+eintrag.amount||0) + ':',
+    kontoId: eintrag.kontoId,
+  });
+  if (kid) { eintrag.kontoId = kid; }
+  saveData(); if (typeof updateBadges==='function') updateBadges(); renderPage();
+  const k = kontoById(eintrag.kontoId);
+  if (k) showToast(k.name + (k.cashflow ? ' (im Cashflow)' : ' (Reserve, nicht im Cashflow)'), 'info');
+}
+
+// Abfrage für Einnahme: erst Konto, dann (nur bei Cashflow-Konto) bar?
+async function askEinnahmeKonto(eintrag) {
+  if (!eintrag) return;
+  const kid = await askKontoWahl({
+    title: 'Einnahme – welches Konto?',
+    icon: '💰',
+    message: 'Einnahme' + (eintrag.source ? ' (' + eintrag.source + ')' : '') + ' über ' + fmtEur(+eintrag.amount||0) + ':',
+    kontoId: eintrag.kontoId,
+  });
+  if (kid) eintrag.kontoId = kid;
+  const k = kontoById(eintrag.kontoId);
+  if (k && !k.cashflow) {
+    eintrag.bar = false;
+    saveData(); if (typeof updateBadges==='function') updateBadges(); renderPage();
+    showToast(k.name + ' gutgeschrieben (Reserve)', 'info');
+    return;
+  }
+  // Cashflow-Konto → bar-Frage
+  const aufsKonto = await uiConfirm({
+    title: 'Einnahme verbuchen', icon: '💰',
+    message: 'Einnahme über ' + fmtEur(+eintrag.amount||0) + ' – wie verbuchen?',
+    details: ['Aufs Konto: zählt zum Cashflow.', 'Bar zur Seite: aus dem Cashflow herausgehalten.'],
+    okLabel: 'Aufs Konto', cancelLabel: 'Bar zur Seite',
+  });
+  eintrag.bar = !aufsKonto;
+  saveData(); if (typeof updateBadges==='function') updateBadges(); renderPage();
+  showToast(eintrag.bar ? 'Bar (nicht im Cashflow)' : 'Aufs Konto verbucht', 'info');
+}
+
+// Schneller Zeilen-Umschalter: Konto-Auswahl per Modal (Ausgabe).
+async function pickAusgabeKonto(id) {
+  if (!requireUnlocked()) return;
+  const a = state.ausgaben.find(x => String(x.id)===String(id)); if (!a) return;
+  await askAusgabeKonto(a);
+}
+async function pickRegelEinnahmeKonto(id) {
+  if (!requireUnlocked()) return;
+  const r = (state.regelEinnahmen||[]).find(x => String(x.id)===String(id));
+  if (!r) return;
+  const kid = await askKontoWahl({
+    title: 'Wiederkehrende Einnahme – welches Konto?',
+    icon: '🔁',
+    message: (r.source||'Einnahme') + ' (' + fmtEur(+r.amount||0) + '/Monat):',
+    kontoId: r.kontoId,
+  });
+  if (kid) { r.kontoId = kid; saveData(); if (typeof updateBadges==='function') updateBadges(); renderPage();
+    const k = kontoById(kid); if (k) showToast(k.name + (k.cashflow?' (im Cashflow)':' (Reserve)'), 'info'); }
+}
+async function pickFixkZielkonto(id) {
+  if (!requireUnlocked()) return;
+  const f = (state.fixkosten||[]).find(x => String(x.id)===String(id));
+  if (!f || !f.sparenLink) return;
+  const kid = await askKontoWahl({
+    title: 'Sparen – Zielkonto wählen',
+    icon: '💸',
+    message: 'Wohin soll „' + (f.name||'Sparen') + '" (' + fmtEur(+f.amount||0) + '/Monat) gespart werden?',
+    kontoId: f.sparenLink.extern ? '__extern__' : f.sparenLink.zielkonto,
+    extraOptions: [{ value:'__extern__', label:'🌍 Extern', hint:'verlässt alle Konten' }],
+  });
+  if (kid) {
+    if (kid === '__extern__') { f.sparenLink.extern = true; f.sparenLink.zielkonto = ''; }
+    else { f.sparenLink.extern = false; f.sparenLink.zielkonto = kid; }
+    saveData(); if (typeof updateBadges==='function') updateBadges(); renderPage();
+    showToast(kid === '__extern__' ? 'Sparen extern (echte Ausgabe)' : 'Zielkonto: ' + (kontoById(kid)?.name||''), 'info');
+  }
+}
+async function pickFixkKonto(id) {
+  if (!requireUnlocked()) return;
+  const f = (state.fixkosten||[]).find(x => String(x.id)===String(id));
+  if (!f) return;
+  const kid = await askKontoWahl({
+    title: 'Fixkost – von welchem Konto?',
+    icon: '🏦',
+    message: '„' + (f.name||'Fixkost') + '" (' + fmtEur(+f.amount||0) + '/Monat) geht ab von:',
+    kontoId: f.kontoId || defaultKontoId(),
+  });
+  if (kid) {
+    f.kontoId = kid;
+    saveData(); if (typeof updateBadges==='function') updateBadges(); renderPage();
+    const k = kontoById(kid); if (k) showToast('Von Konto: ' + k.name, 'info');
+  }
+}
+async function pickEinnahmeKonto(id) {
+  if (!requireUnlocked()) return;
+  const e = state.einnahmen.find(x => String(x.id)===String(id)); if (!e) return;
+  await askEinnahmeKonto(e);
+}
+//MARKkontohelpers
 function monthFinancials(month, includeVormonat = true) {
   const inc = state.incomeByMonth[month] || { gehalt: 0, nebenjob: 0 };
-  const einnahmenExtra = state.einnahmen.filter(e => e.month === month && !['Gehalt','Nebenjob'].includes(e.type));
+  const einnahmenExtra = state.einnahmen.filter(e => e.month === month && !e.bar && !e._korrektur && istCashflowBuchung(e) && !['Gehalt','Nebenjob'].includes(e.type));//MARKcf
   const extraIncome = einnahmenExtra.reduce((s, e) => s + e.amount, 0);
   // Wiederkehrende Einnahmen die diesen Monat aktiv sind
   const regelIncome = (state.regelEinnahmen||[])
-    .filter(r => (!r.startMonth || r.startMonth <= month) && (!r.endMonth || r.endMonth >= month))
+    .filter(r => (!r.startMonth || r.startMonth <= month) && (!r.endMonth || r.endMonth >= month) && istCashflowBuchung(r))
     .reduce((s,r) => s + r.amount, 0);
   const totalIncome = inc.gehalt + inc.nebenjob + extraIncome + regelIncome;
   // For display: combine extra + regel so columns show correct totals
@@ -743,7 +1126,7 @@ function monthFinancials(month, includeVormonat = true) {
 
   const fixTotal = fixkostenTotal(month);
   const einkTotal = state.einkaeufe.filter(e => e.month === month).reduce((s, e) => s + e.amount, 0);
-  const ausgTotal = state.ausgaben.filter(a => a.month === month).reduce((s, a) => s + a.amount, 0);
+  const ausgTotal = state.ausgaben.filter(a => a.month === month && !a._korrektur && istCashflowBuchung(a)).reduce((s, a) => s + a.amount, 0);
 
   const spesen = state.spesen.filter(s => s.month === month);
   const spesenSaldo = spesen.reduce((s, t) => s + (+(t.allowance||0) - +(t.ausgaben||0)), 0);
@@ -753,9 +1136,69 @@ function monthFinancials(month, includeVormonat = true) {
 
   // Kumulativer Saldo: Startgeld + alle Vormonate + aktueller Cashflow
   const vormonatSaldo = includeVormonat ? getVormonatSaldo(month) : 0;
-  const endsaldo = Math.round((vormonatSaldo + cashflow) * 100) / 100;
+  const _ncNet = nichtCashflowNetBis(month);
+  // Korrektur-Buchungen auf Cashflow-Konten sind aus 'cashflow' ausgeschlossen,
+  // müssen aber im Gesamtsaldo zählen → bis 'month' separat summieren.
+  let _korrCf = 0;
+  const _cfIds = getCashflowKontoIds();
+  (state.einnahmen||[]).forEach(e => { if (e._korrektur && e.month <= month && _cfIds.includes(e.kontoId||defaultKontoId())) _korrCf += (+e.amount||0); });
+  (state.ausgaben||[]).forEach(a => { if (a._korrektur && a.month <= month && _cfIds.includes(a.kontoId||defaultKontoId())) _korrCf -= (+a.amount||0); });
+  const endsaldo = Math.round((vormonatSaldo + cashflow + _ncNet + _korrCf) * 100) / 100;
 
   return { totalIncome, inc, extraIncome: extraIncomeTotal, regelIncome, fixTotal, einkTotal, ausgTotal, spesenSaldo, totalExpenses, cashflow, vormonatSaldo, endsaldo };
+}
+
+// ── Cashflow pro Konto für einen Monat ──────────────────────────────────────
+// Das erste Cashflow-Konto (Default) trägt zusätzlich Gehalt/Fixkosten/Einkäufe/
+// Spesen, da diese keine eigene kontoId haben. Weitere Cashflow-Konten zählen
+// nur ihre eigenen Ein-/Ausgaben. Umbuchungen wirken −Betrag beim Quell- und
+// +Betrag beim Zielkonto (gesamt neutral).
+function kontoCashflowMonat(kontoId, month) {
+  const def = defaultKontoId();
+  const ausg = (state.ausgaben||[])
+    .filter(a => (a.kontoId||def) === kontoId && a.month === month && !a._korrektur)
+    .reduce((s,a) => s + (+a.amount||0), 0);
+  const einn = (state.einnahmen||[])
+    .filter(e => (e.kontoId||def) === kontoId && e.month === month && !e._korrektur && !e.bar && !['Gehalt','Nebenjob'].includes(e.type))
+    .reduce((s,e) => s + (+e.amount||0), 0);
+  const regel = (state.regelEinnahmen||[])
+    .filter(r => (r.kontoId||def) === kontoId && (!r.startMonth || r.startMonth <= month) && (!r.endMonth || r.endMonth >= month))
+    .reduce((s,r) => s + (+r.amount||0), 0);
+  // Sparen-Transfer (Bargeld, intern): Zielkonto bekommt den Sparbetrag gutgeschrieben.
+  const sparIn = (state.fixkosten||[])
+    .filter(f => f.sparenLink && !f.sparenLink.extern && f.sparenLink.zielkonto === kontoId
+      && (!f.sparenLink.sparTyp || f.sparenLink.sparTyp === 'bargeld')
+      && fixkostenAktivImMonat(f, month))
+    .reduce((s,f) => s + (+f.amount||0), 0);
+  // Fixkosten dieses Kontos (Quelle = kontoId, Default für Altbestand)
+  const fixK = (state.fixkosten||[])
+    .filter(f => (f.kontoId||def) === kontoId && fixkostenAktivImMonat(f, month))
+    .reduce((s,f) => s + (+f.amount||0), 0);
+  // Umbuchungen: Abgang bei vonKonto, Zugang bei nachKonto
+  const umbAus = (state.umbuchungen||[])
+    .filter(u => u.vonKonto === kontoId && (u.month || (u.date||'').slice(0,7)) === month)
+    .reduce((s,u) => s + (+u.amount||0), 0);
+  const umbEin = (state.umbuchungen||[])
+    .filter(u => u.nachKonto === kontoId && (u.month || (u.date||'').slice(0,7)) === month)
+    .reduce((s,u) => s + (+u.amount||0), 0);
+
+  let cf = einn + regel + sparIn + umbEin - ausg - umbAus - fixK;
+
+  // Gehalt/Nebenjob fließen dem zugeordneten Konto zu.
+  const inc = state.incomeByMonth[month] || { gehalt: 0, nebenjob: 0 };
+  if (getGehaltKonto() === kontoId)   cf += (+inc.gehalt||0);
+  if (getNebenjobKonto() === kontoId) cf += (+inc.nebenjob||0);
+
+  // Einkäufe + Spesen-Saldo dieses Kontos (Default für Altbestand)
+  const eink = (state.einkaeufe||[])
+    .filter(e => (e.kontoId||def) === kontoId && e.month === month)
+    .reduce((s,e) => s + (+e.amount||0), 0);
+  const spesen = (state.spesen||[])
+    .filter(t => (t.kontoId||def) === kontoId && t.month === month)
+    .reduce((s,t) => s + (+(t.allowance||0) - +(t.ausgaben||0)), 0);
+  cf += -eink + spesen;
+
+  return Math.round(cf * 100) / 100;
 }
 
 // ── NAVIGATION ────────────────────────────────────────────────────────────
@@ -852,25 +1295,20 @@ function confirmNewYear() {
   const takeFixkosten = document.getElementById('newYear_takeFixkosten')?.checked;
   const takeRegel = document.getElementById('newYear_takeRegel')?.checked;
   state.years[String(newYr)] = createEmptyYearData(newYr);
-  state.years[String(newYr)] = createEmptyYearData(newYr);
   // Take over data from previous year based on checkboxes
   const prev = String(newYr - 1);
   if (state.years[prev]) {
     const prevYr = state.years[prev];
     if (takeBalance) {
-      // Compute end balance of previous year
-      let bal = +(prevYr.startBalance) || 0;
-      const months = monthsBetween(prev + '-01', prev + '-12');
-      months.forEach(m => {
-        const inc = prevYr.incomeByMonth?.[m] || {};
-        const fix = (prevYr.fixkosten||[]).filter(f => f.start <= m && f.end >= m).reduce((s,f)=>s+(+f.amount||0),0);
-        const eink = (prevYr.einkaeufe||[]).filter(e => e.month === m).reduce((s,e)=>s+(+e.amount||0),0);
-        const ausg = (prevYr.ausgaben||[]).filter(a => a.month === m).reduce((s,a)=>s+(+a.amount||0),0);
-        const einn = (prevYr.einnahmen||[]).filter(e => e.month === m).reduce((s,e)=>s+(+e.amount||0),0);
-        const sp = (prevYr.spesen||[]).filter(s => s.month === m).reduce((s,t)=>s+(+(t.allowance||0))-(+(t.ausgaben||0)),0);
-        bal += (+inc.gehalt||0) + (+inc.nebenjob||0) + einn + sp - fix - eink - ausg;
-      });
-      state.years[String(newYr)].startBalance = Math.round(bal * 100) / 100;
+      // Endstand Vorjahr über die konto-genaue Logik berechnen, sofern das
+      // Vorjahr gerade ausgewählt ist (kontoSaldo rechnet fürs ausgewählte Jahr).
+      // Sonst Fallback auf gespeicherten startBalance des Vorjahres.
+      if (String(getSelectedYear()) === prev) {
+        const sum = getKonten(prev).reduce((s,k) => s + kontoSaldo(k.id, prev + '-12'), 0);
+        state.years[String(newYr)].startBalance = Math.round(sum * 100) / 100;
+      } else {
+        state.years[String(newYr)].startBalance = +(prevYr.startBalance) || 0;
+      }
     }
     if (takeFixkosten) {
       state.years[String(newYr)].fixkosten = (prevYr.fixkosten||[]).map(f => ({
@@ -885,6 +1323,29 @@ function confirmNewYear() {
         startMonth: String(newYr) + '-01',
         endMonth: '',
       }));
+    }
+    const takeKonten = document.getElementById('newYear_takeKonten')?.checked;
+    if (takeKonten) {
+      // Konten übernehmen: Namen + Cashflow-Einstellung.
+      // Startwert = Endstand Vorjahr, ABER kontoSaldo() rechnet nur fürs aktuell
+      // ausgewählte Jahr. Nur wenn das ausgewählte Jahr das direkte Vorjahr ist,
+      // können wir die Endstände sauber berechnen; sonst Vorjahres-Startwerte
+      // übernehmen (Nutzer prüft/aktualisiert sie dann manuell – siehe Dialog-Hinweis).
+      const vorjahrKonten = getKonten(prev);
+      const kannBerechnen = (String(getSelectedYear()) === prev);
+      const neueKonten = vorjahrKonten.map(k => ({
+        id: k.id,
+        name: k.name,
+        cashflow: k.cashflow,
+        start: kannBerechnen ? kontoSaldo(k.id, prev + '-12') : (+k.start||0),
+      }));
+      state.years[String(newYr)].konten = neueKonten;
+      const sum = neueKonten.reduce((s,k) => s + (+k.start||0), 0);
+      state.years[String(newYr)].startBalance = Math.round(sum * 100) / 100;
+      // Gehalt/Nebenjob-Konto-Zuordnung des Vorjahres übernehmen
+      if (state.config && state.config.incomeKonten && state.config.incomeKonten[prev]) {
+        state.config.incomeKonten[String(newYr)] = { ...state.config.incomeKonten[prev] };
+      }
     }
   }
   closeNewYearModal();
@@ -920,15 +1381,15 @@ function updateBadges() {
   const b = el('badge_buchungen');
   if (!b) return;
   b.textContent = (state.einkaeufe.filter(e => e.month === currentMonth).length +
-    state.ausgaben.filter(a => a.month === currentMonth).length +
-    state.einnahmen.filter(e => e.month === currentMonth).length);
+    state.ausgaben.filter(a => a.month === currentMonth && !a._korrektur).length +
+    state.einnahmen.filter(e => e.month === currentMonth && !e._korrektur).length);
 }
 
 // ── RENDER PAGE ───────────────────────────────────────────────────────────
 function renderPage() {
   Object.values(chartInstances).forEach(c => { try { c.destroy(); } catch {} });
   chartInstances = {};
-  const pages = { dashboard, jahresuebersicht, buchungen, einkaeufe, ausgaben, einnahmen, spesen, fixkosten, sparen, zaehler, finanzprodukte, tabellen, einstellungen, importPage };
+  const pages = { dashboard, jahresuebersicht, suche, buchungen, einkaeufe, ausgaben, einnahmen, spesen, fixkosten, sparen, umbuchungen, zaehler, finanzprodukte, tabellen, einstellungen, importPage };
   const fn = pages[currentPage === 'import' ? 'importPage' : currentPage];
   if (fn) el('pageContent').innerHTML = fn();
   else el('pageContent').innerHTML = '<div class="empty-state"><p>Seite nicht gefunden</p></div>';
@@ -937,14 +1398,30 @@ function renderPage() {
 
 function afterRender() {
   const cv = document.getElementById('creditsVersion');
+  const cv2 = document.getElementById('creditsVersion2');
   const av = document.getElementById('appVersion');
   if (cv && av) cv.textContent = av.textContent;
+  if (cv2 && av) cv2.textContent = av.textContent;
 
   if (currentPage === 'dashboard') renderCharts();
   if (currentPage === 'jahresuebersicht') renderJahresCharts();
 }
 
 // ── PAGE: DASHBOARD ───────────────────────────────────────────────────────
+// Kumulierte Summe aller Fixkosten mit Kategorie "Sparen", über ihre aktiven
+// Monate bis zum aktuellen Monat (nicht bis Dezember).
+// Gespart nur für einen bestimmten Monat (YYYY-MM)
+function sparenMonat(month) {
+  let summe = 0;
+  (state.fixkosten||[]).forEach(f => {
+    const kat = f.category || f.cat;
+    if (kat !== 'Sparen') return;
+    if (f.sparenLink && f.sparenLink.extern) return;  // extern verlässt das System
+    if (fixkostenAktivImMonat(f, month)) summe += (+f.amount||0);
+  });
+  return Math.round(summe * 100) / 100;
+}
+
 function dashboard() {
   const f = monthFinancials(currentMonth);
   const prevMonth = (() => { const d = new Date(currentMonth + '-01'); d.setMonth(d.getMonth()-1); return d.toISOString().slice(0,7); })();
@@ -962,11 +1439,11 @@ function dashboard() {
     </div>`;
   }).join('');
 
-  const topAusgaben = [...state.ausgaben.filter(a => a.month === currentMonth)]
+  const topAusgaben = [...state.ausgaben.filter(a => a.month === currentMonth && !a._korrektur)]
     .sort((a,b) => b.amount - a.amount).slice(0, 5);
 
   return `
-    <div class="kpi-grid kpi-grid-5">
+    <div class="kpi-grid" style="grid-template-columns:repeat(auto-fit,minmax(150px,1fr))">
       <div class="kpi">
         <div class="kpi-label">Einnahmen</div>
         <div class="kpi-value positive">${fmtEur(f.totalIncome)}</div>
@@ -987,21 +1464,55 @@ function dashboard() {
       <div class="kpi">
         <div class="kpi-label">Ausgaben</div>
         <div class="kpi-value ${f.ausgTotal > 800 ? 'negative' : 'neutral'}">${fmtEur(f.ausgTotal)}</div>
-        <div class="kpi-sub">${state.ausgaben.filter(a=>a.month===currentMonth).length} Buchungen</div>
+        <div class="kpi-sub">${state.ausgaben.filter(a=>a.month===currentMonth && !a._korrektur).length} Buchungen</div>
         ${trendIcon(f.ausgTotal, prev.ausgTotal)}
       </div>
+      ${getKonten().filter(k => k.cashflow).map(k => {
+        const cfM = kontoCashflowMonat(k.id, currentMonth);
+        const saldo = kontoSaldo(k.id);
+        return `<div class="kpi">
+        <div class="kpi-label">Cashflow · ${k.name}</div>
+        <div class="kpi-value ${cfM >= 0 ? 'positive' : 'negative'}">${cfM >= 0 ? '+' : ''}${fmtEur(cfM)}</div>
+        <div class="kpi-sub">Saldo ${fmtEur(saldo)}</div>
+      </div>`; }).join('')}
       <div class="kpi">
-        <div class="kpi-label">Cashflow (Monat)</div>
-        <div class="kpi-value ${f.cashflow >= 0 ? 'positive' : 'negative'}">${f.cashflow >= 0 ? '+' : ''}${fmtEur(f.cashflow)}</div>
-        <div class="kpi-sub">Einnahmen – Ausgaben</div>
-        ${trendIcon(f.cashflow, prev.cashflow)}
-      </div>
-      <div class="kpi">
-        <div class="kpi-label">Kontostand</div>
-        <div class="kpi-value ${f.endsaldo >= 0 ? 'positive' : 'negative'}">${fmtEur(f.endsaldo)}</div>
-        <div class="kpi-sub">Vormonat ${fmtEur(f.vormonatSaldo)}</div>
+        <div class="kpi-label">💰 Gespart (Monat)</div>
+        <div class="kpi-value positive">${fmtEur(sparenMonat(currentMonth))}</div>
+        <div class="kpi-sub">Sparen-Fixkosten ${monthLabel(currentMonth)}</div>
       </div>
     </div>
+
+    ${(() => {
+      const z = getSparziel();
+      if (!z.aktiv || z.summe <= 0) return '';
+      const ist = sparenKumuliertBisMonat(currentMonth);
+      const pct = Math.round((ist / z.summe) * 100);
+      const erreicht = ist >= z.summe;
+      const barPct = Math.min(100, pct);
+      const rest = z.summe - ist;
+      return `<div class="card" style="margin-bottom:16px">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px">
+          <div style="display:flex;align-items:center;gap:10px">
+            <span style="font-size:20px">🎯</span>
+            <div>
+              <div style="font-weight:700;font-size:15px">Sparziel ${getSelectedYear()}</div>
+              <div style="font-size:12px;color:var(--muted)">Gespart bis ${monthLabel(currentMonth)}</div>
+            </div>
+          </div>
+          <div style="text-align:right">
+            <div style="font-size:18px;font-weight:700"><span class="${erreicht?'positive':''}">${fmtEur(ist)}</span> <span style="color:var(--muted);font-weight:500">/ ${fmtEur(z.summe)}</span></div>
+            <div style="font-size:12px;color:${erreicht?'var(--green)':'var(--muted)'}">${erreicht ? '✓ Ziel erreicht! +' + fmtEur(ist - z.summe) : 'Noch ' + fmtEur(rest)}</div>
+          </div>
+        </div>
+        <div style="height:12px;border-radius:7px;background:var(--surface-2);overflow:hidden">
+          <div style="height:100%;width:${barPct}%;border-radius:7px;background:linear-gradient(90deg,var(--accent),var(--green));transition:width .4s ease"></div>
+        </div>
+        <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--muted);margin-top:6px">
+          <span>${pct}% erreicht</span>
+          <span>${erreicht ? 'übererfüllt um ' + (pct-100) + '%' : ''}</span>
+        </div>
+      </div>` ;
+    })()}
 
     <div style="display:grid;grid-template-columns:1.2fr 0.8fr;gap:14px">
       <div class="card">
@@ -1049,7 +1560,7 @@ function dashboard() {
 }
 
 function renderCharts() {
-  const ausgaben = state.ausgaben.filter(a => a.month === currentMonth);
+  const ausgaben = state.ausgaben.filter(a => a.month === currentMonth && !a._korrektur);
   const einkaeufe = state.einkaeufe.filter(e => e.month === currentMonth);
   const all = [...ausgaben.map(a => ({cat: a.category, v: a.amount})), ...einkaeufe.map(e => ({cat: 'Einkauf Lebensmittel', v: e.amount}))];
   const bycat = {};
@@ -1097,7 +1608,7 @@ function jahresuebersicht() {
 
   return `
     <div class="card">
-      <div class="card-header"><h3>Jahresübersicht ${getSelectedYear()}</h3><span class="badge badge-muted">Startgeld: ${fmtEur(getYearData().startBalance)}</span></div>
+      <div class="card-header"><h3>Jahresübersicht ${getSelectedYear()}</h3><span class="badge badge-muted">Startgeld: ${fmtEur(getYearData().startBalance)}</span> ${getKonten().filter(k=>!k.cashflow).map(k=>`<span class="badge badge-amber" title="Reserve-Konto: Startwert + Bewegungen">${k.name}: ${fmtEur(kontoSaldo(k.id))}</span>`).join(' ')}</div>
       <div class="table-wrap">
         <table class="year-table">
           <thead><tr>
@@ -1167,10 +1678,119 @@ function renderJahresCharts() {
 }
 
 // ── PAGE: BUCHUNGEN ───────────────────────────────────────────────────────
+// ── PAGE: GLOBALE SUCHE ───────────────────────────────────────────────────
+// Durchsucht alle Buchungsarten über das ganze ausgewählte Jahr mit
+// Text-, Typ-, Konto- und Betragsfilter.
+let sucheFilter = { text: '', typ: 'alle', konto: 'alle', min: '', max: '', vonM: '', bisM: '' };
+
+function alleBuchungen() {
+  const def = defaultKontoId();
+  const out = [];
+  (state.einkaeufe||[]).forEach(e => out.push({ art:'Einkauf', cls:'badge-blue', sign:-1,
+    date:e.date, month:e.month, text:e.store||'', kat:'Einkauf', konto:e.kontoId||def, amount:+e.amount||0, ref:e }));
+  (state.ausgaben||[]).forEach(a => { if (a._korrektur) return; out.push({ art:'Ausgabe', cls:'badge-amber', sign:-1,
+    date:a.date, month:a.month, text:a.desc||'', kat:a.category||'', konto:a.kontoId||def, amount:+a.amount||0, ref:a }); });
+  (state.einnahmen||[]).forEach(e => { if (e._korrektur) return; out.push({ art:'Einnahme', cls:'badge-green', sign:1,
+    date:e.date, month:e.month, text:e.source||'', kat:e.type||'', konto:e.kontoId||def, amount:+e.amount||0, ref:e }); });
+  (state.umbuchungen||[]).forEach(u => out.push({ art:'Umbuchung', cls:'badge-muted', sign:0,
+    date:u.date, month:u.month||(u.date||'').slice(0,7), text:(u.note||'')+' ('+kontoName(u.vonKonto)+'→'+kontoName(u.nachKonto)+')',
+    kat:'Transfer', konto:u.vonKonto, amount:+u.amount||0, ref:u }));
+  (state.sparen||[]).forEach(s => out.push({ art:'Sparen', cls:'badge-green', sign:0,
+    date:s.date, month:s.month||(s.date||'').slice(0,7), text:(s.kategorie||'Sparen')+(s.anbieter?(' · '+s.anbieter):''),
+    kat:'Sparen', konto:s.kontoId||def, amount:+s.amount||0, ref:s }));
+  return out;
+}
+
+function suche() {
+  const f = sucheFilter;
+  const konten = getKonten();
+  const txt = (f.text||'').trim().toLowerCase();
+  let rows = alleBuchungen().filter(b => {
+    if (f.typ !== 'alle' && b.art !== f.typ) return false;
+    if (f.konto !== 'alle' && b.konto !== f.konto) return false;
+    if (f.vonM && (b.month||'') < f.vonM) return false;
+    if (f.bisM && (b.month||'') > f.bisM) return false;
+    if (f.min !== '' && b.amount < +f.min) return false;
+    if (f.max !== '' && b.amount > +f.max) return false;
+    if (txt) {
+      const hay = (b.text + ' ' + b.kat + ' ' + b.art).toLowerCase();
+      if (!hay.includes(txt)) return false;
+    }
+    return true;
+  }).sort((a,b) => (b.date||'').localeCompare(a.date||''));
+
+  const summe = rows.reduce((s,b) => s + b.sign * b.amount, 0);
+  const anzahl = rows.length;
+  const opt = (val, label, cur) => '<option value="'+val+'"'+(cur===val?' selected':'')+'>'+label+'</option>';
+
+  return `${lockBanner()}
+    <div class="card">
+    <div class="card-header"><h3>🔍 Suche – ${getSelectedYear()}</h3>
+      <span class="badge badge-muted">${anzahl} Treffer · Netto ${fmtEur(summe)}</span>
+    </div>
+    <div class="form-grid" style="grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-bottom:14px">
+      <label class="field" style="grid-column:1/-1">Suchbegriff
+        <input type="text" id="su_text" value="${(f.text||'').replace(/"/g,'&quot;')}" placeholder="Beschreibung, Kategorie…" oninput="updateSuche('text',this.value)" />
+      </label>
+      <label class="field">Typ
+        <select onchange="updateSuche('typ',this.value)">
+          ${opt('alle','Alle Typen',f.typ)}${opt('Einkauf','Einkauf',f.typ)}${opt('Ausgabe','Ausgabe',f.typ)}${opt('Einnahme','Einnahme',f.typ)}${opt('Umbuchung','Umbuchung',f.typ)}${opt('Sparen','Sparen',f.typ)}
+        </select>
+      </label>
+      <label class="field">Konto
+        <select onchange="updateSuche('konto',this.value)">
+          ${opt('alle','Alle Konten',f.konto)}${konten.map(k => opt(k.id, k.name||'Konto', f.konto)).join('')}
+        </select>
+      </label>
+      <label class="field">Von Monat
+        <input type="month" value="${f.vonM||''}" onchange="updateSuche('vonM',this.value)" />
+      </label>
+      <label class="field">Bis Monat
+        <input type="month" value="${f.bisM||''}" onchange="updateSuche('bisM',this.value)" />
+      </label>
+      <label class="field">Betrag min
+        <input type="number" step="0.01" value="${f.min}" placeholder="0" onchange="updateSuche('min',this.value)" />
+      </label>
+      <label class="field">Betrag max
+        <input type="number" step="0.01" value="${f.max}" placeholder="∞" onchange="updateSuche('max',this.value)" />
+      </label>
+      <label class="field" style="align-self:end">
+        <button class="btn btn-ghost btn-sm" onclick="resetSuche()">↺ Filter zurücksetzen</button>
+      </label>
+    </div>
+    ${rows.length ? `<div class="table-wrap"><table>
+      <thead><tr><th>Datum</th><th>Beschreibung</th><th>Typ</th><th>Kategorie</th><th>Konto</th><th style="text-align:right">Betrag</th></tr></thead>
+      <tbody>${rows.map(b => `<tr>
+        <td class="muted">${b.date||'–'}</td>
+        <td>${(b.text||'–')}</td>
+        <td><span class="badge ${b.cls}">${b.art}</span></td>
+        <td class="muted">${b.kat||'–'}</td>
+        <td class="muted">${kontoName(b.konto)}</td>
+        <td class="amount ${b.sign>0?'positive':(b.sign<0?'negative':'')}">${b.sign>0?'+':(b.sign<0?'-':'')}${fmtEur(b.amount)}</td>
+      </tr>`).join('')}</tbody>
+    </table></div>` : '<div class="empty-state" style="padding:24px"><div class="empty-icon">🔍</div><p>Keine Treffer. Passe die Filter an.</p></div>'}
+  </div>`;
+}
+
+function updateSuche(field, val) {
+  sucheFilter[field] = val;
+  // Nur die Ergebnisliste neu rendern wäre ideal; hier reicht renderPage,
+  // aber Fokus im Textfeld erhalten:
+  const aktiv = document.activeElement;
+  const istText = aktiv && aktiv.id === 'su_text';
+  const pos = istText ? aktiv.selectionStart : null;
+  renderPage();
+  if (istText) { const t = document.getElementById('su_text'); if (t) { t.focus(); if (pos!=null) try{t.setSelectionRange(pos,pos);}catch{} } }
+}
+function resetSuche() {
+  sucheFilter = { text: '', typ: 'alle', konto: 'alle', min: '', max: '', vonM: '', bisM: '' };
+  renderPage();
+}
+
 function buchungen() {
   const eink = state.einkaeufe.filter(e => e.month === currentMonth);
-  const ausg = state.ausgaben.filter(a => a.month === currentMonth);
-  const einn = state.einnahmen.filter(e => e.month === currentMonth);
+  const ausg = state.ausgaben.filter(a => a.month === currentMonth && !a._korrektur);
+  const einn = state.einnahmen.filter(e => e.month === currentMonth && !e._korrektur);
   const all = [
     ...eink.map(e => ({ ...e, type: 'Einkauf', badgeCls: 'badge-blue' })),
     ...ausg.map(a => ({ ...a, type: 'Ausgabe', badgeCls: 'badge-amber' })),
@@ -1214,7 +1834,7 @@ function einkaeufe() {
       </div>
     </div>
     <div class="table-wrap"><table>
-      <thead><tr><th>Datum</th><th>Händler / Beschreibung</th><th>Betrag</th><th></th></tr></thead>
+      <thead><tr><th>Datum</th><th>Händler / Beschreibung</th><th>Betrag</th><th>Konto</th><th></th></tr></thead>
       <tbody id="einkaufTable">
         ${items.map(e => einkaufRow(e)).join('')}
 
@@ -1224,19 +1844,35 @@ function einkaeufe() {
 }
 
 function einkaufRow(e) {
+  const _k = kontoById(e.kontoId || defaultKontoId());
+  const _kn = _k ? _k.name : 'Konto';
+  const _cf = _k ? _k.cashflow : true;
   return `<tr id="eink_${e.id}">
-    <td><input type="date" value="${e.date||''}" onchange="updateEinkauf(${e.id},'date',this.value)" style="width:145px" /></td>
-    <td><input type="text" value="${e.store||''}" onchange="updateEinkauf(${e.id},'store',this.value)" placeholder="Händler / Beschreibung…" /></td>
-    <td><input type="number" value="${(+e.amount||0).toFixed(2)}" onchange="updateEinkauf(${e.id},'amount',+this.value)" step="0.01" style="width:90px;text-align:right"/> ${currencySymbol()}</td>
+    <td><input type="date" value="${e.date||''}" onchange="updateEinkauf('${e.id}','date',this.value)" style="width:145px" /></td>
+    <td><input type="text" value="${(e.store||'').replace(/"/g,'&quot;')}" onchange="updateEinkauf('${e.id}','store',this.value)" placeholder="Händler / Beschreibung…" /></td>
+    <td><input type="number" value="${(+e.amount||0).toFixed(2)}" onchange="updateEinkauf('${e.id}','amount',+this.value)" step="0.01" style="width:90px;text-align:right"/> ${currencySymbol()}</td>
+    <td><button class="btn-icon" title="Konto: ${_kn} – klicken zum Ändern" onclick="pickEinkaufKonto('${e.id}')" style="width:auto;min-width:0;padding:0 8px;font-size:12px;white-space:nowrap;gap:4px">${_cf?'🏦':'📈'} ${_kn}</button></td>
     <td><button class="btn-icon danger" onclick="deleteEinkauf('${e.id}')">×</button></td>
   </tr>`;
 }
 
 function addEinkauf() {
   if (!requireUnlocked()) return;
-  const e = { id: uid(), month: currentMonth, date: today(), store: '', amount: 0 };
+  const e = { id: uid(), month: currentMonth, date: today(), store: '', amount: 0, kontoId: defaultKontoId() };
   state.einkaeufe.push(e);
   saveData(); updateBadges(); renderPage();
+}
+
+async function pickEinkaufKonto(id) {
+  if (!requireUnlocked()) return;
+  const e = state.einkaeufe.find(x => String(x.id) === String(id)); if (!e) return;
+  const kid = await askKontoWahl({
+    title: 'Einkauf – welches Konto?', icon: '🛒',
+    message: (e.store||'Einkauf') + ' (' + fmtEur(+e.amount||0) + '):',
+    kontoId: e.kontoId || defaultKontoId(),
+  });
+  if (kid) { e.kontoId = kid; saveData(); if (typeof updateBadges==='function') updateBadges(); renderPage();
+    const k = kontoById(kid); if (k) showToast('Konto: ' + k.name, 'info'); }
 }
 
 function updateEinkauf(id, field, val) {
@@ -1254,7 +1890,9 @@ function createRowEl(html) { const t = document.createElement('template'); t.inn
 
 // ── PAGE: AUSGABEN ────────────────────────────────────────────────────────
 function ausgaben() {
-  const items = state.ausgaben.filter(a => a.month === currentMonth).sort((a,b) => (a.date||'').localeCompare(b.date||''));
+  const alle = state.ausgaben.filter(a => a.month === currentMonth).sort((a,b) => (a.date||'').localeCompare(b.date||''));
+  const items = alle.filter(a => !a._korrektur);
+  const korrekturen = alle.filter(a => a._korrektur);
   const total = items.reduce((s,a) => s+a.amount, 0);
   const catOpts = EXPENSE_CATS.map(c => `<option value="${c}">${c}</option>`).join('');
   return `${lockBanner()}
@@ -1267,34 +1905,58 @@ function ausgaben() {
       </div>
     </div>
     <div class="table-wrap"><table>
-      <thead><tr><th>Datum</th><th>Beschreibung</th><th>Kategorie</th><th>Betrag</th><th></th></tr></thead>
+      <thead><tr><th>Datum</th><th>Beschreibung</th><th>Kategorie</th><th>Betrag</th><th>Konto</th><th></th></tr></thead>
       <tbody id="ausgabeTable">
         ${items.map(a => ausgabeRow(a, catOpts)).join('')}
 
       </tbody>
     </table></div>
-  </div>`;
+  </div>
+  ${korrekturen.length ? `<div class="card" style="margin-top:14px">
+    <div class="card-header"><h3>🎯 Kontostand-Abgleiche – ${monthLabel(currentMonth)}</h3></div>
+    <p style="font-size:12px;color:var(--muted);margin:0 16px 12px">Korrektur-Buchungen zur Saldo-Angleichung. Zählen NICHT zum Cashflow oder zu den Ausgaben.</p>
+    <div class="table-wrap"><table>
+      <thead><tr><th>Datum</th><th>Beschreibung</th><th>Betrag</th><th>Konto</th><th></th></tr></thead>
+      <tbody>
+        ${korrekturen.map(a => { const _k=kontoById(a.kontoId||defaultKontoId()); const _n=_k?_k.name:'Konto';
+          return `<tr><td>${a.date||''}</td><td>${a.desc||'Kontostand-Abgleich'}</td><td style="text-align:right">−${fmtEur(a.amount)}</td><td>${_n}</td><td><button class="btn-icon danger" onclick="deleteAusgabe('${a.id}')" title="Korrektur löschen">×</button></td></tr>`;
+        }).join('')}
+      </tbody>
+    </table></div>
+  </div>` : ''}`;
 }
 
 function ausgabeRow(a, catOpts) {
   if (!catOpts) catOpts = EXPENSE_CATS.map(c => `<option value="${c}" ${c===a.category?'selected':''}>${c}</option>`).join('');
+  const _k = kontoById(a.kontoId || defaultKontoId());
+  const _kLabel = _k ? _k.name : 'Konto';
+  const _kCf = _k ? _k.cashflow : true;
   return `<tr id="ausg_${a.id}">
-    <td><input type="date" value="${a.date||''}" onchange="updateAusgabe(${a.id},'date',this.value)" style="width:145px" /></td>
-    <td><input type="text" value="${a.desc||''}" onchange="updateAusgabe(${a.id},'desc',this.value)" placeholder="Beschreibung…" /></td>
-    <td><select onchange="updateAusgabe(${a.id},'category',this.value)">${EXPENSE_CATS.map(c=>`<option value="${c}" ${c===a.category?'selected':''}>${c}</option>`).join('')}</select></td>
-    <td style="white-space:nowrap"><input type="number" value="${(+a.amount||0).toFixed(2)}" onchange="updateAusgabe(${a.id},'amount',+this.value)" step="0.01" style="width:90px;text-align:right" /> ${currencySymbol()}</td>
+    <td><input type="date" value="${a.date||''}" onchange="updateAusgabe('${a.id}','date',this.value)" style="width:145px" /></td>
+    <td><input type="text" value="${a.desc||''}" onchange="updateAusgabe('${a.id}','desc',this.value)" placeholder="Beschreibung…" /></td>
+    <td><select onchange="updateAusgabe('${a.id}','category',this.value)">${EXPENSE_CATS.map(c=>`<option value="${c}" ${c===a.category?'selected':''}>${c}</option>`).join('')}</select></td>
+    <td style="white-space:nowrap"><input type="number" value="${(+a.amount||0).toFixed(2)}" onchange="updateAusgabe('${a.id}','amount',+this.value)" step="0.01" style="width:90px;text-align:right" /> ${currencySymbol()}</td>
+    <td><button class="btn-icon" title="Konto: ${_kLabel}${_kCf?' (Cashflow)':' (Reserve)'} – klicken zum Ändern" onclick="pickAusgabeKonto('${a.id}')" style="width:auto;min-width:0;padding:0 8px;font-size:12px;white-space:nowrap;gap:4px">${_kCf?'🏦':'📈'} ${_kLabel}</button></td>
     <td><button class="btn-icon danger" onclick="deleteAusgabe('${a.id}')">×</button></td>
   </tr>`;
 }
 
 function addAusgabe() {
   if (!requireUnlocked()) return;
-  const a = { id: uid(), month: currentMonth, date: today(), desc: '', category: 'Sonstige Ausgaben', amount: 0 };
+  const a = { id: uid(), month: currentMonth, date: today(), desc: '', category: 'Sonstige Ausgaben', amount: 0, kontoId: defaultKontoId() };
   state.ausgaben.push(a);
   saveData(); updateBadges(); renderPage();
 }
 function updateAusgabe(id, f, v) {
-  if (!requireUnlocked()) return; const a = state.ausgaben.find(x=>String(x.id) === String(id)); if(a){a[f]=v;saveData();} }
+  if (!requireUnlocked()) return;
+  const a = state.ausgaben.find(x=>String(x.id) === String(id));
+  if (!a) return;
+  a[f] = v; saveData();
+  if (f === 'amount' && (+v) >= 100 && !a._kontoGefragt) {
+    a._kontoGefragt = true; saveData();
+    setTimeout(() => askAusgabeKonto(a), 50);
+  }
+}
 function deleteAusgabe(id) {
   if (!requireUnlocked()) return;
   if (moveToTrash('ausgaben', id, 'Ausgabe')) { renderPage(); showToast('In Papierkorb verschoben','info'); }
@@ -1306,20 +1968,26 @@ function regelEinnahmeRow(r) {
   const typeOpts = types.map(function(t) {
     return '<option value="' + t + '"' + (t===r.type?' selected':'') + '>' + t + '</option>';
   }).join('');
+  const _rk = kontoById(r.kontoId || defaultKontoId());
+  const _rkn = _rk ? _rk.name : 'Konto';
+  const _rkcf = _rk ? _rk.cashflow : true;
   return '<tr>' +
-    '<td><input type="text" value="' + (r.source||'').replace(/"/g,'&quot;') + '" onchange="updateRegelEinnahme(' + r.id + ',\'source\',this.value)" /></td>' +
-    '<td><select onchange="updateRegelEinnahme(' + r.id + ',\'type\',this.value)">' + typeOpts + '</select></td>' +
-    '<td><input type="month" value="' + (r.startMonth||'') + '" onchange="updateRegelEinnahme(' + r.id + ',\'startMonth\',this.value)" style="width:145px"/></td>' +
-    '<td><input type="month" value="' + (r.endMonth||'') + '" onchange="updateRegelEinnahme(' + r.id + ',\'endMonth\',this.value)" style="width:145px" placeholder="Kein Ende"/></td>' +
-    '<td><input type="text" value="' + (r.note||'').replace(/"/g,'&quot;') + '" onchange="updateRegelEinnahme(' + r.id + ',\'note\',this.value)" placeholder="Notiz…"/></td>' +
-    '<td style="white-space:nowrap"><input type="number" value="' + (+r.amount||0).toFixed(2) + '" step="0.01" onchange="updateRegelEinnahme(' + r.id + ',\'amount\',+this.value)" style="width:90px;text-align:right"/> ' + currencySymbol() + '</td>' +
-    '<td><button class="btn-icon danger" onclick="deleteRegelEinnahme(' + r.id + ')">×</button></td>' +
+    '<td><input type="text" value="' + (r.source||'').replace(/"/g,'&quot;') + '" onchange="updateRegelEinnahme(\'' + r.id + '\',\'source\',this.value)" /></td>' +
+    '<td><select onchange="updateRegelEinnahme(\'' + r.id + '\',\'type\',this.value)">' + typeOpts + '</select></td>' +
+    '<td><input type="month" value="' + (r.startMonth||'') + '" onchange="updateRegelEinnahme(\'' + r.id + '\',\'startMonth\',this.value)" style="width:145px"/></td>' +
+    '<td><input type="month" value="' + (r.endMonth||'') + '" onchange="updateRegelEinnahme(\'' + r.id + '\',\'endMonth\',this.value)" style="width:145px" placeholder="Kein Ende"/></td>' +
+    '<td><input type="text" value="' + (r.note||'').replace(/"/g,'&quot;') + '" onchange="updateRegelEinnahme(\'' + r.id + '\',\'note\',this.value)" placeholder="Notiz…"/></td>' +
+    '<td style="white-space:nowrap"><input type="number" value="' + (+r.amount||0).toFixed(2) + '" step="0.01" onchange="updateRegelEinnahme(\'' + r.id + '\',\'amount\',+this.value)" style="width:90px;text-align:right"/> ' + currencySymbol() + '</td>' +
+    '<td><button class="btn-icon" title="Konto: ' + _rkn + (_rkcf?' (Cashflow)':' (Reserve)') + ' – klicken zum Ändern" onclick="pickRegelEinnahmeKonto(\'' + r.id + '\')" style="width:auto;min-width:0;padding:0 8px;font-size:12px;white-space:nowrap;gap:4px">' + (_rkcf?'🏦':'📈') + ' ' + _rkn + '</button></td>' +
+    '<td><button class="btn-icon danger" onclick="deleteRegelEinnahme(\'' + r.id + '\')">×</button></td>' +
     '</tr>';
 }
 
 function einnahmen() {
   const inc = state.incomeByMonth[currentMonth] || { gehalt: 0, nebenjob: 0 };
-  const extra = state.einnahmen.filter(e => e.month === currentMonth);
+  const alleExtra = state.einnahmen.filter(e => e.month === currentMonth);
+  const extra = alleExtra.filter(e => !e._korrektur);       // echte Einnahmen
+  const korrekturen = alleExtra.filter(e => e._korrektur);  // Kontostand-Abgleiche
   const totalExtra = extra.reduce((s,e) => s+e.amount, 0);
   const allRegel = state.regelEinnahmen || [];
   const regel = allRegel.filter(r =>
@@ -1329,7 +1997,7 @@ function einnahmen() {
   const totalRegel = regel.reduce((s,r) => s+r.amount, 0); // only active in currentMonth
   // Show all entries in management table, but mark inactive ones
   const regelTableHtml = allRegel.length
-    ? '<div class="table-wrap"><table><thead><tr><th>Quelle</th><th>Typ</th><th>Von</th><th>Bis</th><th>Notiz</th><th style="text-align:right">Betrag/Monat</th><th>Status</th><th></th></tr></thead><tbody>' +
+    ? '<div class="table-wrap"><table><thead><tr><th>Quelle</th><th>Typ</th><th>Von</th><th>Bis</th><th>Notiz</th><th style="text-align:right">Betrag/Monat</th><th>Konto</th><th></th></tr></thead><tbody>' +
       allRegel.map(r => regelEinnahmeRow(r, currentMonth)).join('') + '</tbody></table></div>'
     : '<div class="empty-state" style="padding:20px"><div class="empty-icon">🔁</div><p>Noch keine wiederkehrenden Einnahmen.<br>Über „+ Wiederkehrend" oder Quick-Add hinzufügen.</p></div>';
 
@@ -1365,6 +2033,16 @@ function einnahmen() {
           <input type="number" value="${(+inc.nebenjob||0).toFixed(2)}" step="0.01"
             onchange="updateFixedIncome('${currentMonth}','nebenjob',+this.value)" /> ${currencySymbol()}
         </label>
+        <label class="field">Gehalt → Konto (ganzes Jahr ${getSelectedYear()})
+          <select onchange="updateIncomeKonto('gehalt',this.value)" ${lockAttr()}>
+            ${getKonten().map(k => '<option value="'+k.id+'"'+(getGehaltKonto()===k.id?' selected':'')+'>'+(k.name||'Konto')+(k.cashflow?' (Cashflow)':' (Reserve)')+'</option>').join('')}
+          </select>
+        </label>
+        <label class="field">Nebenjob → Konto (ganzes Jahr ${getSelectedYear()})
+          <select onchange="updateIncomeKonto('nebenjob',this.value)" ${lockAttr()}>
+            ${getKonten().map(k => '<option value="'+k.id+'"'+(getNebenjobKonto()===k.id?' selected':'')+'>'+(k.name||'Konto')+(k.cashflow?' (Cashflow)':' (Reserve)')+'</option>').join('')}
+          </select>
+        </label>
       </div>
     </div>
 
@@ -1383,22 +2061,50 @@ function einnahmen() {
         <button class="btn btn-primary btn-sm" onclick="openQuickAdd('einnahme')">+ Einnahme</button>
       </div>
       <div class="table-wrap"><table>
-        <thead><tr><th>Datum</th><th>Quelle / Beschreibung</th><th>Typ</th><th>Betrag</th><th></th></tr></thead>
+        <thead><tr><th>Datum</th><th>Quelle / Beschreibung</th><th>Typ</th><th>Betrag</th><th>Konto</th><th></th></tr></thead>
         <tbody id="einnahmeTable">
           ${extra.map(e => einnahmeRow(e)).join('')}
         </tbody>
       </table></div>
-    </div>`;
+    </div>
+    ${korrekturen.length ? `<div class="card mb-2">
+      <div class="card-header"><h3>🎯 Kontostand-Abgleiche – ${monthLabel(currentMonth)}</h3></div>
+      <p style="font-size:12px;color:var(--muted);margin-bottom:12px">Diese Korrektur-Buchungen gleichen die Konto-Salden an deine echten Stände an. Sie zählen NICHT zum Cashflow oder zu den Einnahmen, halten aber die Salden korrekt.</p>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Datum</th><th>Beschreibung</th><th>Betrag</th><th>Konto</th><th></th></tr></thead>
+        <tbody>
+          ${korrekturen.map(e => { const _k=kontoById(e.kontoId||defaultKontoId()); const _n=_k?_k.name:'Konto';
+            return `<tr><td>${e.date||''}</td><td>${e.source||'Kontostand-Abgleich'}</td><td style="text-align:right">${fmtEur(e.amount)}</td><td>${_n}</td><td><button class="btn-icon danger" onclick="deleteEinnahme('${e.id}')" title="Korrektur löschen">×</button></td></tr>`;
+          }).join('')}
+        </tbody>
+      </table></div>
+    </div>` : ''}`;
 }
 
 function einnahmeRow(e) {
+  const _k = kontoById(e.kontoId || defaultKontoId());
+  const _cf = _k ? _k.cashflow : true;
+  const _n = _k ? _k.name : 'Konto';
   return `<tr id="einn_${e.id}">
-    <td><input type="date" value="${e.date||''}" onchange="updateEinnahme(${e.id},'date',this.value)" style="width:145px" /></td>
-    <td><input type="text" value="${e.source||''}" onchange="updateEinnahme(${e.id},'source',this.value)" placeholder="Verkauf, Blutspende…" /></td>
-    <td><select onchange="updateEinnahme(${e.id},'type',this.value)">${INCOME_TYPES.map(t=>`<option value="${t}" ${t===e.type?'selected':''}>${t}</option>`).join('')}</select></td>
-    <td style="white-space:nowrap"><input type="number" value="${(+e.amount||0).toFixed(2)}" onchange="updateEinnahme(${e.id},'amount',+this.value)" step="0.01" style="width:90px;text-align:right" /> ${currencySymbol()}</td>
+    <td><input type="date" value="${e.date||''}" onchange="updateEinnahme('${e.id}','date',this.value)" style="width:145px" /></td>
+    <td><input type="text" value="${e.source||''}" onchange="updateEinnahme('${e.id}','source',this.value)" placeholder="Verkauf, Blutspende…" /></td>
+    <td><select onchange="updateEinnahme('${e.id}','type',this.value)">${INCOME_TYPES.map(t=>`<option value="${t}" ${t===e.type?'selected':''}>${t}</option>`).join('')}</select></td>
+    <td style="white-space:nowrap"><input type="number" value="${(+e.amount||0).toFixed(2)}" onchange="updateEinnahme('${e.id}','amount',+this.value)" step="0.01" style="width:90px;text-align:right" /> ${currencySymbol()}</td>
+    <td style="white-space:nowrap">
+      <button class="btn-icon" title="Konto: ${_n}${_cf?' (Cashflow)':' (Reserve)'} – klicken zum Ändern" onclick="pickEinnahmeKonto('${e.id}')" style="width:auto;min-width:0;padding:0 8px;font-size:12px;white-space:nowrap;gap:4px">${_cf?'🏦':'📈'} ${_n}</button>
+      ${_cf ? `<button class="btn-icon" title="${e.bar?'Bar (nicht im Cashflow)':'Aufs Konto (im Cashflow)'} – umschalten" onclick="toggleEinnahmeBar('${e.id}')" style="font-size:13px">${e.bar?'💵':'✓'}</button>` : ''}
+    </td>
     <td><button class="btn-icon danger" onclick="deleteEinnahme('${e.id}')">×</button></td>
   </tr>`;
+}
+
+function toggleEinnahmeBar(id) {
+  if (!requireUnlocked()) return;
+  const e = state.einnahmen.find(x => String(x.id) === String(id));
+  if (!e) return;
+  e.bar = !e.bar;
+  saveData(); if (typeof updateBadges === 'function') updateBadges(); renderPage();
+  showToast(e.bar ? 'Als Bargeld markiert (nicht im Cashflow)' : 'Aufs Konto verbucht', 'info');
 }
 
 function updateFixedIncome(month, field, val) {
@@ -1406,9 +2112,45 @@ function updateFixedIncome(month, field, val) {
   state.incomeByMonth[month][field] = val;
   saveData();
 }
+function updateIncomeKonto(field, kontoId) {
+  if (!requireUnlocked()) return;
+  setIncomeKonto(field, kontoId);
+  saveData(); if (typeof updateBadges==='function') updateBadges(); renderPage();
+  const k = kontoById(kontoId);
+  if (k) showToast((field==='gehalt'?'Gehalt':'Nebenjob') + ' → ' + k.name + ' (ganzes Jahr)', 'info');
+}
+let _pendingBarAsk = null;
+let _pendingAusgabeAsk = null;
+// ── Bar/Konto-Abfrage für Einnahmen ────────────────────────────────────────
+// Fragt bei einer neuen Einnahme, ob sie aufs Konto geht (zählt zum Monats-
+// Cashflow) oder bar zur Seite gelegt wird (aus Cashflow ausgeschlossen).
+// Setzt eintrag.bar = true/false und speichert.
+async function askEinnahmeBar(eintrag) {
+  if (!eintrag) return;
+  const betrag = (+eintrag.amount || 0);
+  const quelle = eintrag.source ? (' (' + eintrag.source + ')') : '';
+  const aufsKonto = await uiConfirm({
+    title: 'Einnahme verbuchen',
+    icon: '💰',
+    message: 'Wie soll diese Einnahme' + quelle + ' über ' +
+             fmtEur(betrag) + ' verbucht werden?',
+    details: [
+      'Aufs Konto: zählt zum Cashflow des Monats.',
+      'Bar zur Seite: wird aus dem Cashflow herausgehalten.',
+    ],
+    okLabel: 'Aufs Konto',
+    cancelLabel: 'Bar zur Seite',
+  });
+  eintrag.bar = !aufsKonto;
+  saveData();
+  if (typeof updateBadges === 'function') updateBadges();
+  renderPage();
+  showToast(eintrag.bar ? 'Als Bargeld markiert (nicht im Cashflow)' : 'Aufs Konto verbucht', 'info');
+}
+//MARKhelper
 function addEinnahme() {
   if (!requireUnlocked()) return;
-  const e = { id: uid(), month: currentMonth, date: today(), source: '', type: 'Verkauf', amount: 0 };
+  const e = { id: uid(), month: currentMonth, date: today(), source: '', type: 'Verkauf', amount: 0, bar: false, kontoId: defaultKontoId() };//MARKadd
   state.einnahmen.push(e);
   saveData(); updateBadges(); renderPage();
 }
@@ -1433,6 +2175,13 @@ function openRegelEinnahmeModal() {
   const re_note = document.getElementById('re_note');
   if (re_source) re_source.value = '';
   if (re_amount) re_amount.value = '';
+  const re_konto = document.getElementById('re_konto');
+  if (re_konto) {
+    re_konto.innerHTML = getKonten().map(k =>
+      '<option value="' + k.id + '">' + (k.name||'Konto') + (k.cashflow?' (Cashflow)':' (Reserve)') + '</option>'
+    ).join('');
+    re_konto.value = defaultKontoId();
+  }
   if (re_type) {
     // Populate with all income types (default + custom)
     re_type.innerHTML = INCOME_TYPES.map(t => '<option value="' + t + '">' + t + '</option>').join('');
@@ -1457,10 +2206,11 @@ function saveRegelEinnahmeModal() {
   const start  = document.getElementById('re_start')?.value || currentMonth;
   const end    = document.getElementById('re_end')?.value   || '';
   const note   = document.getElementById('re_note')?.value  || '';
-  if (!source) { alert('Bitte Quelle / Beschreibung eingeben.'); return; }
-  if (!amount) { alert('Bitte Betrag eingeben.'); return; }
+  if (!source) { uiAlert('Bitte Quelle / Beschreibung eingeben.'); return; }
+  if (!amount) { uiAlert('Bitte Betrag eingeben.'); return; }
   state.regelEinnahmen = state.regelEinnahmen || [];
-  state.regelEinnahmen.push({ id: uid(), source, type, amount, startMonth: start, endMonth: end, note });
+  const konto = document.getElementById('re_konto')?.value || defaultKontoId();
+  state.regelEinnahmen.push({ id: uid(), source, type, amount, startMonth: start, endMonth: end, note, kontoId: konto });
   saveData();
   closeRegelEinnahmeModal();
   renderPage();
@@ -1491,7 +2241,7 @@ function spesen() {
   items.forEach(s => calcSpesen(s));
 
   const totalSpesen   = items.reduce((s,t)=>s+(t.allowance||0),0);
-  const totalAusgaben = items.reduce((s,t)=>s+(t.expenses||0),0);
+  const totalAusgaben = items.reduce((s,t)=>s+(+t.ausgaben||0),0);
   const totalAuslagen = items.reduce((s,t)=>s+(t.auslagen||0),0);
   const totalSaldo    = totalSpesen - totalAusgaben;
   const totalNetto    = totalSpesen + totalAuslagen;
@@ -1572,8 +2322,8 @@ function calcSpesen(s) {
   // Mahlzeitenkürzung: immer % vom vollen Tagessatz (rG = 28€ o.ä.)
   // Frühstück: 20%, Mittag: 40%, Abend: 40%
   const anzFrueh  = Math.max(0, +(s.fruehstueck||0));
-  const anzMittag = Math.max(0, +(s.mittag||0));
-  const anzAbend  = Math.max(0, +(s.abend||0));
+  const anzMittag = Math.max(0, +(s.mittagessen||s.mittag||0));
+  const anzAbend  = Math.max(0, +(s.abendessen||s.abend||0));
   const kuerzung  = Math.round((anzFrueh * rG * 0.20 + anzMittag * rG * 0.40 + anzAbend * rG * 0.40) * 100) / 100;
 
   if (kuerzung > 0) {
@@ -1596,31 +2346,31 @@ function speseRow(s) {
   const totalDays = from && to ? Math.round((new Date(to)-new Date(from))/(1000*60*60*24))+1 : 0;
   const anAbreiseTage = totalDays <= 1 ? 1 : 2;
   const vorOrtTage = Math.max(0, totalDays - 2);
-  const saldo    = (s.allowance||0) - (s.expenses||0);
+  const saldo    = (s.allowance||0) - (+s.ausgaben||0);
   const zuUeberweisen = (s.allowance||0) + (s.auslagen||0);
   const countryOpts = SPESEN_LAENDER.map(l => `<option value="${l.land}" ${l.land===s.country?'selected':''}>${l.land} (${l.halb}€/${l.ganz}€)</option>`).join('');
   const deutschlandOpt = `<option value="Deutschland" ${'Deutschland'===s.country?'selected':''}>Deutschland (14€/28€)</option>`;
   return `<tr id="spese_${s.id}">
-    <td><input type="date" value="${from}" onchange="updateSpeseDate(${s.id},'dateFrom',this.value)" style="width:145px"/></td>
+    <td><input type="date" value="${from}" onchange="updateSpeseDate('${s.id}','dateFrom',this.value)" style="width:145px"/></td>
     <td>
-      <select onchange="updateSpeseCountry(${s.id},this.value)" style="width:160px">
+      <select onchange="updateSpeseCountry('${s.id}',this.value)" style="width:160px">
         <option value="">– Land –</option>
         ${deutschlandOpt}
         ${countryOpts}
       </select>
     </td>
-    <td><input type="text" value="${s.kunde||''}" onchange="updateSpese(${s.id},'kunde',this.value)" placeholder="Kunde…" style="width:140px"/></td>
-    <td style="text-align:center"><input type="number" value="${s.anreise||anAbreiseTage}" min="0" max="30" onchange="updateSpese(${s.id},'anreise',+this.value);recalcSpeseRow('${s.id}')" style="width:45px;text-align:center"/></td>
-    <td style="text-align:center"><input type="number" value="${s.vorOrt||vorOrtTage}" min="0" max="30" onchange="updateSpese(${s.id},'vorOrt',+this.value);recalcSpeseRow('${s.id}')" style="width:45px;text-align:center"/></td>
-    <td style="text-align:center"><input type="number" value="${s.fruehstueck||0}" min="0" onchange="updateSpese(${s.id},'fruehstueck',+this.value);recalcSpeseRow('${s.id}')" style="width:45px;text-align:center"/></td>
-    <td style="text-align:center"><input type="number" value="${s.mittagessen||0}" min="0" onchange="updateSpese(${s.id},'mittagessen',+this.value);recalcSpeseRow('${s.id}')" style="width:45px;text-align:center"/></td>
-    <td style="text-align:center"><input type="number" value="${s.abendessen||0}" min="0" onchange="updateSpese(${s.id},'abendessen',+this.value);recalcSpeseRow('${s.id}')" style="width:45px;text-align:center"/></td>
-    <td><input type="number" value="${(+s.ausgaben||0).toFixed(2)}" onchange="updateSpese(${s.id},'ausgaben',+this.value);recalcSpeseRow('${s.id}')" step="0.01" style="width:75px;text-align:right"/> ${currencySymbol()}</td>
+    <td><input type="text" value="${s.kunde||''}" onchange="updateSpese('${s.id}','kunde',this.value)" placeholder="Kunde…" style="width:140px"/></td>
+    <td style="text-align:center"><input type="number" value="${s.anreise||anAbreiseTage}" min="0" max="30" onchange="updateSpese('${s.id}','anreise',+this.value);recalcSpeseRow('${s.id}')" style="width:45px;text-align:center"/></td>
+    <td style="text-align:center"><input type="number" value="${s.vorOrt||vorOrtTage}" min="0" max="30" onchange="updateSpese('${s.id}','vorOrt',+this.value);recalcSpeseRow('${s.id}')" style="width:45px;text-align:center"/></td>
+    <td style="text-align:center"><input type="number" value="${s.fruehstueck||0}" min="0" onchange="updateSpese('${s.id}','fruehstueck',+this.value);recalcSpeseRow('${s.id}')" style="width:45px;text-align:center"/></td>
+    <td style="text-align:center"><input type="number" value="${s.mittagessen||0}" min="0" onchange="updateSpese('${s.id}','mittagessen',+this.value);recalcSpeseRow('${s.id}')" style="width:45px;text-align:center"/></td>
+    <td style="text-align:center"><input type="number" value="${s.abendessen||0}" min="0" onchange="updateSpese('${s.id}','abendessen',+this.value);recalcSpeseRow('${s.id}')" style="width:45px;text-align:center"/></td>
+    <td><input type="number" value="${(+s.ausgaben||0).toFixed(2)}" onchange="updateSpese('${s.id}','ausgaben',+this.value);recalcSpeseRow('${s.id}')" step="0.01" style="width:75px;text-align:right"/> ${currencySymbol()}</td>
     <td class="amount positive">${fmtEur(s.allowance||0)}</td>
     <td class="amount ${saldo>=0?'positive':'negative'}">${saldo>=0?'+':''}${fmtEur(saldo)}</td>
-    <td><input type="number" value="${(+s.auslagen||0).toFixed(2)}" onchange="updateSpese(${s.id},'auslagen',+this.value);recalcSpeseRow('${s.id}')" step="0.01" style="width:75px;text-align:right"/> ${currencySymbol()}</td>
+    <td><input type="number" value="${(+s.auslagen||0).toFixed(2)}" onchange="updateSpese('${s.id}','auslagen',+this.value);recalcSpeseRow('${s.id}')" step="0.01" style="width:75px;text-align:right"/> ${currencySymbol()}</td>
     <td class="amount ${zuUeberweisen>=0?'positive':'negative'}" style="font-weight:700">${fmtEur(zuUeberweisen)}</td>
-    <td><button class="btn-icon danger" onclick="deleteSpese('${s.id}')">×</button></td>
+    <td style="white-space:nowrap">${(() => { const _k=kontoById(s.kontoId||defaultKontoId()); const _kn=_k?_k.name:'Konto'; const _cf=_k?_k.cashflow:true; return `<button class="btn-icon" title="Konto (Spesen-Saldo): ${_kn} – klicken zum Ändern" onclick="pickSpeseKonto('${s.id}')" style="width:auto;min-width:0;padding:0 8px;font-size:12px;white-space:nowrap;gap:4px">${_cf?'🏦':'📈'} ${_kn}</button>`; })()}<button class="btn-icon danger" onclick="deleteSpese('${s.id}')">×</button></td>
   </tr>`;
 }
 
@@ -1653,13 +2403,15 @@ function updateSpeseDate(id, field, val) {
 function recalcSpeseRow(id) {
   const s = state.spesen.find(x=>String(x.id) === String(id));
   if (!s) return;
+  calcSpesen(s);          // Pauschale (allowance) neu berechnen
   saveData();
   const row = document.getElementById('spese_'+id);
   if (!row) return;
   const cells = row.querySelectorAll('td');
   const saldo = (+(s.allowance||0)) - (+(s.ausgaben||0));
   const zuUeberweisen = (s.allowance||0) + (s.auslagen||0);
-  // col 10 = saldo, col 12 = zuUeberweisen
+  // col 9 = Spesenbetrag (allowance), col 10 = saldo, col 12 = zuUeberweisen
+  if (cells[9])  { cells[9].textContent = fmtEur(s.allowance||0); }
   if (cells[10]) { cells[10].className='amount '+(saldo>=0?'positive':'negative'); cells[10].textContent=(saldo>=0?'+':'')+fmtEur(saldo); }
   if (cells[12]) { cells[12].className='amount '+(zuUeberweisen>=0?'positive':'negative'); cells[12].style.fontWeight='700'; cells[12].textContent=fmtEur(zuUeberweisen); }
 }
@@ -1694,6 +2446,7 @@ function saveSpeseModal() {
     vorOrt:  dateTo === dateFrom ? 0 : Math.max(0, Math.round((new Date(dateTo)-new Date(dateFrom))/(1000*60*60*24))-1),
     fruehstueck:0, mittagessen:0, abendessen:0,
     ausgaben:0, auslagen, note,
+    kontoId: defaultKontoId(),
     month: dateFrom.slice(0,7)
   };
   calcSpesen(s);
@@ -1703,7 +2456,18 @@ function saveSpeseModal() {
   showToast('Reise gespeichert');
 }
 function addSpese(){
-  if (!requireUnlocked()) return;const s={id:uid(),month:currentMonth,country:'Deutschland',dateFrom:today(),dateTo:today(),kunde:'',rateHalf:14,ratePerDay:28,allowance:0,expenses:0,auslagen:0};calcSpesen(s);state.spesen.push(s);saveData();const tbody=el('spesenTable');if(tbody){const last=tbody.lastElementChild;tbody.insertBefore(createRowEl(speseRow(s)),last);}}
+  if (!requireUnlocked()) return;const s={id:uid(),month:currentMonth,country:'Deutschland',dateFrom:today(),dateTo:today(),kunde:'',rateHalf:14,ratePerDay:28,allowance:0,expenses:0,auslagen:0,kontoId:defaultKontoId()};calcSpesen(s);state.spesen.push(s);saveData();const tbody=el('spesenTable');if(tbody){const last=tbody.lastElementChild;tbody.insertBefore(createRowEl(speseRow(s)),last);}}
+async function pickSpeseKonto(id) {
+  if (!requireUnlocked()) return;
+  const s = state.spesen.find(x => String(x.id) === String(id)); if (!s) return;
+  const kid = await askKontoWahl({
+    title: 'Spesen – welches Konto?', icon: '✈️',
+    message: 'Spesen-Saldo' + (s.kunde?(' ('+s.kunde+')'):'') + ' diesem Konto zuordnen:',
+    kontoId: s.kontoId || defaultKontoId(),
+  });
+  if (kid) { s.kontoId = kid; saveData(); if (typeof updateBadges==='function') updateBadges(); renderPage();
+    const k = kontoById(kid); if (k) showToast('Konto: ' + k.name, 'info'); }
+}
 function updateSpese(id,f,v){
   if (!requireUnlocked()) return;const s=state.spesen.find(x=>String(x.id) === String(id));if(s){s[f]=v;saveData();}}
 function deleteSpese(id) {
@@ -1712,6 +2476,13 @@ function deleteSpese(id) {
 }
 
 // ── PAGE: FIXKOSTEN ───────────────────────────────────────────────────────
+let fixkostenFilter = 'alle';
+
+function setFixkostenFilter(cat) {
+  fixkostenFilter = cat;
+  renderPage();
+}
+
 function fixkosten() {
   const items = fixkostenForMonth(currentMonth);
   const total = items.reduce((s,f) => s+f.amount, 0);
@@ -1721,6 +2492,12 @@ function fixkosten() {
     byCat[cat] = (byCat[cat]||0) + f.amount;
   });
   const catEntries = Object.entries(byCat).sort((a,b) => b[1]-a[1]);
+
+  // Alle vorkommenden Kategorien (über alle Fixkosten, nicht nur aktive) für den Filter
+  const alleKats = [...new Set((state.fixkosten||[]).map(f => f.category || f.cat || 'Sonstiges'))].sort();
+  if (fixkostenFilter !== 'alle' && !alleKats.includes(fixkostenFilter)) fixkostenFilter = 'alle';
+  const gefiltert = (state.fixkosten||[]).filter(f => fixkostenFilter === 'alle' || (f.category || f.cat || 'Sonstiges') === fixkostenFilter);
+  const filterChip = (val, label) => `<button onclick="setFixkostenFilter('${val}')" style="font-size:12px;padding:6px 12px;border-radius:999px;cursor:pointer;border:1px solid ${fixkostenFilter===val?'var(--accent)':'var(--border)'};background:${fixkostenFilter===val?'color-mix(in srgb,var(--accent) 16%,transparent)':'transparent'};color:${fixkostenFilter===val?'var(--accent)':'var(--muted)'}">${label}</button>`;
 
   return `${lockBanner()}
     
@@ -1735,19 +2512,41 @@ function fixkosten() {
           <button class="btn btn-primary btn-sm" onclick="addFixkosten()" ${lockAttr()}>+ Posten</button>
         </div>
       </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px;align-items:center">
+        <span style="font-size:12px;color:var(--muted);margin-right:4px">Filter:</span>
+        ${filterChip('alle','Alle')}
+        ${alleKats.map(c => filterChip(c, c)).join('')}
+      </div>
       <div class="table-wrap"><table>
-        <thead><tr><th>Bezeichnung</th><th>Kategorie</th><th>Gültig von</th><th>Gültig bis</th><th>Fällig am</th><th style="text-align:right">Betrag/Monat</th><th></th></tr></thead>
+        <thead><tr><th>Bezeichnung</th><th>Kategorie</th><th>Rhythmus</th><th>Gültig von</th><th>Gültig bis</th><th>Fällig am</th><th style="text-align:right">Betrag</th><th></th></tr></thead>
         <tbody>
-          ${state.fixkosten.map(f => {
-            const active = f.start <= currentMonth && f.end >= currentMonth;
+          ${gefiltert.map(f => {
+            const active = fixkostenAktivImMonat(f, currentMonth);
+            const _istSparen = f.sparenLink && (f.category === 'Sparen' || f.cat === 'Sparen');
+            const _istBargeld = _istSparen && (!f.sparenLink.sparTyp || f.sparenLink.sparTyp === 'bargeld');
+            let _zielBtn = '';
+            if (_istBargeld) {
+              if (f.sparenLink.extern) {
+                _zielBtn = `<button class="btn-icon" title="Sparen extern – Geld verlässt alle Konten. Klicken zum Ändern." onclick="pickFixkZielkonto('${f.id}')" style="width:auto;min-width:0;padding:0 8px;font-size:12px;white-space:nowrap;gap:4px">🌍 Extern</button>`;
+              } else {
+                const _zk = kontoById(f.sparenLink.zielkonto);
+                const _zkn = _zk ? _zk.name : '— Zielkonto —';
+                _zielBtn = `<button class="btn-icon" title="Zielkonto (wohin gespart wird): ${_zkn} – klicken zum Ändern" onclick="pickFixkZielkonto('${f.id}')" style="width:auto;min-width:0;padding:0 8px;font-size:12px;white-space:nowrap;gap:4px">💸 ${_zkn}</button>`;
+              }
+            }
+            // Von-Konto-Button (Quelle der Fixkost)
+            const _vk = kontoById(f.kontoId || defaultKontoId());
+            const _vkn = _vk ? _vk.name : 'Default';
+            const _vonBtn = `<button class="btn-icon" title="Von Konto (woher das Geld abgeht): ${_vkn} – klicken zum Ändern" onclick="pickFixkKonto('${f.id}')" style="width:auto;min-width:0;padding:0 8px;font-size:12px;white-space:nowrap;gap:4px">🏦 ${_vkn}</button>`;
             return `<tr style="${active?'':'opacity:.4'}">
               <td><input type="text" value="${f.name}" onchange="updateFixk('${f.id}','name',this.value)" /></td>
               <td><select onchange="updateFixk('${f.id}','category',this.value)">${['Wohnen','Versicherung','Abo','Kredit','Sparen','Freizeit','Sonstiges'].map(c=>`<option value="${c}" ${c===(f.category||f.cat)?'selected':''}>${c}</option>`).join('')}</select></td>
+              <td><select onchange="updateFixk('${f.id}','interval',+this.value)" title="Wie oft wird abgebucht? Voller Betrag im ersten Monat des Intervalls.">${[[1,'monatlich'],[2,'alle 2 Monate'],[3,'alle 3 Monate'],[6,'alle 6 Monate'],[12,'jährlich']].map(([v,l])=>`<option value="${v}" ${(+f.interval||1)===v?'selected':''}>${l}</option>`).join('')}</select></td>
               <td><input type="month" value="${f.start}" onchange="updateFixk('${f.id}','start',this.value)" style="width:145px"/></td>
               <td><input type="month" value="${f.end}" onchange="updateFixk('${f.id}','end',this.value)" style="width:145px"/></td>
               <td><input type="number" value="${f.day||1}" onchange="updateFixk('${f.id}','day',+this.value)" style="width:60px;text-align:center" min="1" max="31"/></td>
               <td><input type="number" value="${(+f.amount||0).toFixed(2)}" onchange="updateFixk('${f.id}','amount',+this.value)" step="0.01" style="width:90px;text-align:right"/> ${currencySymbol()}</td>
-              <td><button class="btn-icon danger" onclick="deleteFixk('${f.id}')">×</button></td>
+              <td style="white-space:nowrap">${_vonBtn}${_zielBtn}<button class="btn-icon danger" onclick="deleteFixk('${f.id}')">×</button></td>
             </tr>`;
           }).join('')}
         </tbody>
@@ -1764,12 +2563,29 @@ function openFixkostenModal() {
   document.getElementById('fk_name').value = '';
   document.getElementById('fk_amount').value = '';
   document.getElementById('fk_day').value = '1';
+  if (document.getElementById('fk_interval')) document.getElementById('fk_interval').value = '1';
   document.getElementById('fk_cat').value = 'Sonstiges';
   // Auto-set start to current month
   document.getElementById('fk_start').value = currentMonth;
   // Auto-set end to December of current year
   const yr = getSelectedYear();
   document.getElementById('fk_end').value = yr + '-12';
+  // Zielkonto-Dropdown füllen (alle Konten + Extern; Default = erstes Reserve-Konto)
+  const fkz = document.getElementById('fk_spar_zielkonto');
+  if (fkz) {
+    const ks = getKonten();
+    fkz.innerHTML = ks.map(k => '<option value="' + k.id + '">' + (k.name||'Konto') + (k.cashflow?' (Cashflow)':' (Reserve)') + '</option>').join('')
+      + '<option value="__extern__">🌍 Extern (verlässt alle Konten)</option>';
+    const reserve = ks.find(k => !k.cashflow);
+    fkz.value = (reserve || ks[0] || {id:''}).id;
+  }
+  // Von-Konto-Dropdown füllen (Quelle der Fixkost; Default = erstes Cashflow-Konto)
+  const fkk = document.getElementById('fk_konto');
+  if (fkk) {
+    const ks = getKonten();
+    fkk.innerHTML = ks.map(k => '<option value="' + k.id + '">' + (k.name||'Konto') + (k.cashflow?' (Cashflow)':' (Reserve)') + '</option>').join('');
+    fkk.value = defaultKontoId();
+  }
   modal.classList.remove('hidden');
   setTimeout(() => { const n = document.getElementById('fk_name'); if(n) n.focus(); }, 100);
 }
@@ -1784,19 +2600,24 @@ async function saveFixkostenModal() {
   const amount = +(document.getElementById('fk_amount').value) || 0;
   const cat    = document.getElementById('fk_cat').value;
   const day    = +(document.getElementById('fk_day').value) || 1;
+  const interval = +(document.getElementById('fk_interval')?.value) || 1;
   const start  = document.getElementById('fk_start').value || currentMonth;
   const end    = document.getElementById('fk_end').value || (getSelectedYear()+'-12');
   if (!name || !amount) {
     await uiAlert({ title: 'Eingabe fehlt', icon: '⚠', message: 'Bitte Bezeichnung und Betrag eingeben.' });
     return;
   }
-  const f = { id: uid(), name, category: cat, cat, amount, day, start, end };
+  const f = { id: uid(), name, category: cat, cat, amount, day, interval, start, end };
+  // Von-Konto (Quelle der Fixkost)
+  f.kontoId = document.getElementById('fk_konto')?.value || defaultKontoId();
 
   // Sparen-Link: wenn Kategorie = Sparen
   if (cat === 'Sparen') {
     const sparTyp = document.getElementById('fk_spar_typ')?.value || 'bargeld';
     const source  = document.getElementById('fk_spar_source')?.value || 'cashflow';
-    f.sparenLink = { sparTyp, source };
+    const zielRaw = document.getElementById('fk_spar_zielkonto')?.value || '';
+    const extern  = zielRaw === '__extern__';
+    f.sparenLink = { sparTyp, source, zielkonto: extern ? '' : zielRaw, extern };
     if (sparTyp !== 'bargeld') {
       const sym = document.getElementById('fk_wp_symbol')?.value?.trim() || '';
       const wpName = document.getElementById('fk_wp_name')?.value?.trim() || '';
@@ -1825,14 +2646,18 @@ async function runSparenAutoEintragung() {
   const months = monthsBetween(yr + '-01', yr + '-12');
   const today_ym = new Date().toISOString().slice(0,7);
   let createdCount = 0;
-  const linkedFixkosten = (state.fixkosten||[]).filter(f => f.sparenLink && (f.category === 'Sparen' || f.cat === 'Sparen'));
+  // Alle Fixkosten der Kategorie „Sparen" – auch ohne sparenLink (= einfaches Bargeld-Sparen).
+  const linkedFixkosten = (state.fixkosten||[]).filter(f => (f.category === 'Sparen' || f.cat === 'Sparen'));
 
   for (const f of linkedFixkosten) {
+    // Externe Sparpläne (verlassen alle Konten) erzeugen keinen Sparen-Eintrag.
+    if (f.sparenLink && f.sparenLink.extern) continue;
     for (const m of months) {
-      // Nur Monate in Gültigkeitszeitraum + nicht in Zukunft
+      // Nur Monate in Gültigkeitszeitraum + nicht in Zukunft + im Rhythmus fällig
       if (f.start && m < f.start) continue;
       if (f.end && m > f.end) continue;
       if (m > today_ym) continue;  // future months not yet auto-created
+      if (!fixkostenAktivImMonat(f, m)) continue;  // Rhythmus berücksichtigen
       // Check ob bereits eingetragen (entweder Auto oder manuell mit gleichem Wertpapier+Monat)
       const sym = f.sparenLink?.symbol || '';
       const alreadyExists = (state.sparen||[]).some(s => {
@@ -1848,24 +2673,26 @@ async function runSparenAutoEintragung() {
       if (alreadyExists) continue;
       // Erstelle Eintrag - Datum = Monatsanfang
       const date = m + '-01';
+      const sparTyp = f.sparenLink?.sparTyp || 'bargeld';
       const entry = {
         id: uid(),
         date,
         month: m,
         amount: +f.amount,
-        kategorie: f.sparenLink.sparTyp === 'bargeld' ? 'Sparen' :
-                   f.sparenLink.sparTyp === 'etf' ? 'ETF' :
-                   f.sparenLink.sparTyp === 'aktie' ? 'Aktien' : 'Krypto',
+        kategorie: sparTyp === 'bargeld' ? 'Sparen' :
+                   sparTyp === 'etf' ? 'ETF' :
+                   sparTyp === 'fonds' ? 'Fonds' :
+                   sparTyp === 'aktie' ? 'Aktien' : 'Krypto',
         depot: 'Auto (' + f.name + ')',
         note: 'Automatisch aus Fixkosten „' + f.name + '"',
         autoFromFixkostenId: f.id,
       };
-      if (f.sparenLink.sparTyp !== 'bargeld' && f.sparenLink.symbol) {
+      if (f.sparenLink && sparTyp !== 'bargeld' && f.sparenLink.symbol) {
         entry.wertpapier = {
           symbol: f.sparenLink.symbol,
           name:   f.sparenLink.name,
           isin:   f.sparenLink.isin || '',
-          typ:    f.sparenLink.sparTyp,
+          typ:    sparTyp,
         };
         // Try to fetch historical price for this month
         const price = await fetchWertpapierKursAtDate(f.sparenLink.symbol, date);
@@ -1923,6 +2750,13 @@ async function deleteFixk(id) {
 function sparen() {
   const items = [...state.sparen].sort((a,b)=>a.date.localeCompare(b.date));
   const total = items.reduce((s,x)=>s+x.amount,0);
+  const byMonth = {};
+  items.forEach(s => { const m = s.month || (s.date ? s.date.slice(0,7) : ''); if (!m) return; byMonth[m] = (byMonth[m]||0) + (+s.amount||0); });
+  const monthRows = Object.keys(byMonth).sort().map(m =>
+    '<div style="display:flex;justify-content:space-between;align-items:center;background:var(--surface);border-left:3px solid var(--accent);border-radius:6px;padding:8px 12px">' +
+      '<span style="font-size:12px;font-weight:600;color:var(--muted)">' + monthLabel(m) + '</span>' +
+      '<span style="font-weight:700;color:var(--green)">' + fmtEur(byMonth[m]) + '</span>' +
+    '</div>').join('');
   return `${lockBanner()}
     <div class="card">
     <div class="card-header">
@@ -1932,6 +2766,7 @@ function sparen() {
         <button class="btn btn-primary btn-sm" onclick="addSparen()" ${lockAttr()}>+ Einzahlung</button>
       </div>
     </div>
+    ${monthRows ? `<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:8px;margin-bottom:16px">${monthRows}</div>` : ''}
     <div class="table-wrap"><table>
       <thead><tr><th>Datum</th><th>Kategorie / Anbieter</th><th>Notiz</th><th style="text-align:right">Betrag</th><th></th></tr></thead>
       <tbody id="sparenTable">
@@ -1939,7 +2774,7 @@ function sparen() {
           const wp = s.wertpapier || s.etf || null;
           const wpName = wp ? (wp.name || wp.ticker || wp.symbol || '') : '';
           const wpInfo = wp ? '<div style="font-size:11px;color:var(--muted);margin-top:2px">' +
-              (wp.typ === 'aktie' ? '📊 ' : wp.typ === 'etf' ? '📈 ' : wp.typ === 'krypto' ? '🪙 ' : '💼 ') + wpName +
+              (wp.typ === 'aktie' ? '📊 ' : wp.typ === 'etf' ? '📈 ' : wp.typ === 'fonds' ? '🏛 ' : wp.typ === 'krypto' ? '🪙 ' : '💼 ') + wpName +
               (s.units ? ' · ' + (s.units > 0 ? s.units.toFixed(4) + ' Stk' : Math.abs(s.units).toFixed(4) + ' Stk Verkauf') : '') +
               (s.price ? ' @ ' + fmtEur(s.price) : '') +
             '</div>' : '';
@@ -1960,6 +2795,80 @@ function sparen() {
   </div>`;
 }
 
+// ── PAGE: UMBUCHUNGEN ───────────────────────────────────────────────────────
+function kontoName(id) { const k = kontoById(id); return k ? k.name : '—'; }
+
+function umbuchungen() {
+  const items = [...(state.umbuchungen||[])].sort((a,b)=>(b.date||'').localeCompare(a.date||''));
+  const ks = getKonten();
+  const kontoOpts = (sel) => ks.map(k => '<option value="'+k.id+'"'+(k.id===sel?' selected':'')+'>'+(k.name||'Konto')+(k.cashflow?' (Cashflow)':' (Reserve)')+'</option>').join('');
+  const total = items.reduce((s,u)=>s+(+u.amount||0),0);
+  const rows = items.map(u => {
+    return '<tr id="umb_'+u.id+'">' +
+      '<td><input type="date" value="'+(u.date||'')+'" onchange="updateUmbuchung(\''+u.id+'\',\'date\',this.value)" style="width:145px"/></td>' +
+      '<td><select onchange="updateUmbuchung(\''+u.id+'\',\'vonKonto\',this.value)" '+lockAttr()+'>'+kontoOpts(u.vonKonto)+'</select></td>' +
+      '<td style="text-align:center;color:var(--muted)">→</td>' +
+      '<td><select onchange="updateUmbuchung(\''+u.id+'\',\'nachKonto\',this.value)" '+lockAttr()+'>'+kontoOpts(u.nachKonto)+'</select></td>' +
+      '<td><input type="text" value="'+(u.note||'').replace(/"/g,'&quot;')+'" onchange="updateUmbuchung(\''+u.id+'\',\'note\',this.value)" placeholder="Notiz…"/></td>' +
+      '<td style="white-space:nowrap"><input type="number" value="'+(+u.amount||0).toFixed(2)+'" step="0.01" onchange="updateUmbuchung(\''+u.id+'\',\'amount\',+this.value)" style="width:100px;text-align:right"/> '+currencySymbol()+'</td>' +
+      '<td><button class="btn-icon danger" onclick="deleteUmbuchung(\''+u.id+'\')" '+lockAttr()+'>×</button></td>' +
+      '</tr>';
+  }).join('');
+  // Sparen-Fixkosten (Bargeld + Zielkonto) als automatische Umbuchungen (read-only)
+  const def = defaultKontoId();
+  const autoTransfers = (state.fixkosten||[])
+    .filter(f => f.sparenLink && (f.category==='Sparen'||f.cat==='Sparen')
+      && (!f.sparenLink.sparTyp || f.sparenLink.sparTyp==='bargeld')
+      && f.sparenLink.zielkonto)
+    .map(f => '<tr style="opacity:.85">' +
+      '<td style="color:var(--muted)">monatl. (Tag '+(f.day||1)+')</td>' +
+      '<td>'+kontoName(def)+'</td>' +
+      '<td style="text-align:center;color:var(--muted)">→</td>' +
+      '<td>'+kontoName(f.sparenLink.zielkonto)+'</td>' +
+      '<td><span class="badge badge-green" style="font-size:9px">SPARPLAN</span> '+(f.name||'')+'</td>' +
+      '<td style="text-align:right">'+fmtEur(+f.amount||0)+' '+currencySymbol()+'</td>' +
+      '<td><span style="color:var(--muted);font-size:11px" title="In Fixkosten verwalten">🔒</span></td>' +
+      '</tr>').join('');
+  return `${lockBanner()}
+    <div class="card">
+    <div class="card-header">
+      <h3>🔄 Umbuchungen ${getSelectedYear()}</h3>
+      <div class="actions">
+        <span class="badge badge-muted">Gesamt umgebucht: ${fmtEur(total)}</span>
+        <button class="btn btn-primary btn-sm" onclick="addUmbuchung()" ${lockAttr()}>+ Umbuchung</button>
+      </div>
+    </div>
+    <p style="font-size:12px;color:var(--muted);margin:0 0 12px">Umbuchungen verschieben Geld zwischen deinen Konten. Sie mindern den Cashflow des Quellkontos und erhöhen den des Zielkontos – in der Gesamtsumme sind sie neutral.</p>
+    ${(items.length || autoTransfers) ? `<div class="table-wrap"><table>
+      <thead><tr><th>Datum</th><th>Von Konto</th><th></th><th>Nach Konto</th><th>Notiz</th><th style="text-align:right">Betrag</th><th></th></tr></thead>
+      <tbody>${rows}${autoTransfers}</tbody>
+    </table></div>` : '<div class="empty-state" style="padding:24px"><div class="empty-icon">🔄</div><p>Noch keine Umbuchungen.<br>Über „+ Umbuchung" einen Transfer zwischen zwei Konten anlegen.</p></div>'}
+  </div>`;
+}
+
+function addUmbuchung() {
+  if (!requireUnlocked()) return;
+  const ks = getKonten();
+  if (ks.length < 2) { showToast('Mindestens zwei Konten nötig für eine Umbuchung','info'); return; }
+  const von = (ks.find(k=>k.cashflow) || ks[0]).id;
+  const nach = (ks.find(k=>k.id!==von) || ks[1] || ks[0]).id;
+  const u = { id: uid(), date: today(), month: currentMonth, vonKonto: von, nachKonto: nach, amount: 0, note: '' };
+  state.umbuchungen.push(u);
+  saveData(); renderPage();
+}
+function updateUmbuchung(id, field, val) {
+  if (!requireUnlocked()) return;
+  const u = (state.umbuchungen||[]).find(x => String(x.id) === String(id));
+  if (!u) return;
+  u[field] = val;
+  if (field === 'date') u.month = (val||'').slice(0,7);
+  saveData(); renderPage();
+}
+function deleteUmbuchung(id) {
+  if (!requireUnlocked()) return;
+  if (moveToTrash('umbuchungen', id, 'Umbuchung')) { renderPage(); showToast('In Papierkorb verschoben','info'); }
+}
+
 function buildEtfLiveSection() {
   const cfg = state.config || {};
   const kurse = state.etfKurse || {};
@@ -1974,7 +2883,7 @@ function buildEtfLiveSection() {
         symbol: sym,
         name: wp.name || sym,
         isin: wp.isin || '',
-        typ:  wp.typ || (s.kategorie === 'ETF' ? 'etf' : 'aktie'),
+        typ:  wp.typ || (s.kategorie === 'ETF' ? 'etf' : s.kategorie === 'Fonds' ? 'fonds' : 'aktie'),
         invested: 0,
         units: 0,
         trades: [],
@@ -1996,7 +2905,7 @@ function buildEtfLiveSection() {
     const gv = (aktuellerWert !== null) ? (aktuellerWert - p.invested) : null;
     const gvPct = (gv !== null && p.invested > 0) ? (gv / p.invested * 100) : null;
     const tradesCount = p.trades.length;
-    const typeBadge = '<span class="badge ' + (p.typ === 'etf' ? 'badge-green' : p.typ === 'aktie' ? 'badge-blue' : 'badge-muted') + '" style="font-size:9px">' + (p.typ === 'etf' ? 'ETF' : p.typ === 'aktie' ? 'AKTIE' : (p.typ||'').toUpperCase()) + '</span>';
+    const typeBadge = '<span class="badge ' + (p.typ === 'etf' ? 'badge-green' : p.typ === 'aktie' ? 'badge-blue' : p.typ === 'fonds' ? 'badge-amber' : 'badge-muted') + '" style="font-size:9px">' + (p.typ === 'etf' ? 'ETF' : p.typ === 'aktie' ? 'AKTIE' : p.typ === 'fonds' ? 'FONDS' : (p.typ||'').toUpperCase()) + '</span>';
     const priceBtn = '<button class="btn-icon" onclick="setManualPrice(\'' + p.symbol + '\',' + (k?.kurs||'null') + ')" title="Kurs manuell eintragen" style="font-size:11px;padding:3px 7px;background:transparent;border:1px solid var(--border);border-radius:4px;cursor:pointer">✎ Kurs</button>';
     return '<div style="background:var(--card);border:1px solid var(--border);border-radius:10px;padding:14px 16px;min-width:0">' +
       '<div style="display:flex;align-items:start;justify-content:space-between;gap:8px;margin-bottom:4px">' +
@@ -2047,12 +2956,13 @@ function onSparKatChange() {
   const etf = document.getElementById('sp_etf_section');
   if (cl) cl.classList.toggle('hidden', kat !== 'Sonstiges');
   // Show Wertpapier section for all securities types
-  const isWp = ['ETF','Aktien','Krypto'].includes(kat);
+  const isWp = ['ETF','Fonds','Aktien','Krypto'].includes(kat);
   if (etf) etf.classList.toggle('hidden', !isWp);
   // Auto-select correct Typ
   const wpTyp = document.getElementById('sp_wp_typ');
   if (wpTyp && isWp) {
     if (kat === 'ETF') wpTyp.value = 'etf';
+    else if (kat === 'Fonds') wpTyp.value = 'fonds';
     else if (kat === 'Aktien') wpTyp.value = 'aktie';
     else if (kat === 'Krypto') wpTyp.value = 'krypto';
   }
@@ -2258,16 +3168,11 @@ function onSpTxTypeChange() {
 }
 window.onSpTxTypeChange = onSpTxTypeChange;
 
-function editEtfTicker(id) {
+async function editEtfTicker(id) {
   if (!requireUnlocked()) return;
   const s = (state.sparen||[]).find(x=>String(x.id) === String(id));
   if (!s) return;
-  const ticker = prompt(
-    'Ticker für "' + (s.etf?.name||'ETF') + '" eingeben:\n' +
-    'Beispiele: EUNL.DE, VWCE.DE, SXR8.DE\n' +
-    '(XETRA-Ticker von justetf.com oder finanzen.net)',
-    s.etf?.ticker || ''
-  );
+  const ticker = await uiPrompt({ title: 'ETF-Ticker', message: 'Ticker eingeben: ' + (s.etf?.name||'ETF') + ' — Beispiele: EUNL.DE, VWCE.DE, SXR8.DE', value: s.etf?.ticker || '', placeholder: 'z.B. VWCE.DE' });
   if (ticker === null) return; // cancelled
   if (!s.etf) s.etf = {};
   s.etf.ticker = ticker.trim().toUpperCase();
@@ -2302,7 +3207,7 @@ function openSparplanModal(wertpapier, amount) {
   // Show readonly Wertpapier info
   const info = document.getElementById('spp_wp_info');
   if (info) {
-    const typLabel = wertpapier.typ === 'aktie' ? 'Aktie' : wertpapier.typ === 'etf' ? 'ETF' : wertpapier.typ === 'krypto' ? 'Krypto' : 'Wertpapier';
+    const typLabel = wertpapier.typ === 'aktie' ? 'Aktie' : wertpapier.typ === 'etf' ? 'ETF' : wertpapier.typ === 'fonds' ? 'Fonds' : wertpapier.typ === 'krypto' ? 'Krypto' : 'Wertpapier';
     info.innerHTML = '<strong>' + (wertpapier.name || '') + '</strong><br>' +
       '<span style="font-family:monospace;font-size:11px;color:var(--muted)">' + (wertpapier.symbol || '') +
       (wertpapier.isin ? ' · ' + wertpapier.isin : '') + ' · ' + typLabel + '</span>';
@@ -2370,7 +3275,7 @@ async function saveSparenModal() {
   const note    = document.getElementById('sp_note').value;
 
   // Wertpapier-Felder (ETF/Aktien/Fonds/Krypto)
-  const isWertpapier = ['ETF','Aktien','Krypto'].includes(kat);
+  const isWertpapier = ['ETF','Fonds','Aktien','Krypto'].includes(kat);
   let wertpapier = null, txType = 'kauf', units = 0, price = 0, fees = 0;
   if (isWertpapier) {
     const symbol = document.getElementById('sp_ticker')?.value?.trim() || '';
@@ -2506,9 +3411,9 @@ function tabellen() {
         <table>
           <thead><tr>
             ${(t.columns||[]).map(c => `<th style="position:relative">
-              <input type="text" value="${c.name||'Spalte'}" onchange="updateColName(${t.id},${c.id},this.value)"
+              <input type="text" value="${c.name||'Spalte'}" onchange="updateColName('${t.id}','${c.id}',this.value)"
                 style="font-size:11px;font-weight:700;color:var(--muted);background:transparent;border:none;text-transform:uppercase;letter-spacing:.04em;width:100%;padding:0"/>
-              <select onchange="updateColType(${t.id},${c.id},this.value)"
+              <select onchange="updateColType('${t.id}','${c.id}',this.value)"
                 style="font-size:10px;border:none;background:transparent;color:var(--muted);cursor:pointer">
                 <option value="text" ${c.type==='text'?'selected':''}>Text</option>
                 <option value="number" ${c.type==='number'?'selected':''}>Zahl</option>
@@ -2559,9 +3464,9 @@ function addTab() {
   state.tabellen.push(t);
   saveData(); renderPage();
 }
-function deleteTab(id) {
+async function deleteTab(id) {
   if (!requireUnlocked()) return;
-  if (!confirm('Tabelle wirklich löschen?')) return;
+  if (!await uiConfirm({ message: 'Tabelle wirklich löschen?', title: 'Tabelle löschen', icon: '🗑' })) return;
   state.tabellen = state.tabellen.filter(t=>String(t.id) !== String(id));
   saveData(); renderPage();
 }
@@ -2611,6 +3516,185 @@ function updateTabCell(tid, rid, cid, val) {
   const r = t.rows.find(r=>String(r.id) === String(rid)); if(r){r.cells[cid]=val;saveData();}
 }
 
+// Aktuellen Ist-Stand eines Kontos setzen: fragt den echten Stand ab und legt
+// eine Korrektur-Buchung (Einnahme oder Ausgabe) an, sodass der App-Saldo dem
+// echten Stand entspricht. Historie bleibt erhalten, ab Stichtag stimmt das Konto.
+// Schlüsselt auf, woraus sich der Saldo eines Kontos zusammensetzt.
+function saldoBreakdown(kontoId) {
+  const yr = getSelectedYear();
+  const def = defaultKontoId();
+  const heute = thisMonth();
+  const jahrEnde = yr + '-12';
+  const grenze = (heute <= jahrEnde && heute >= (yr + '-01')) ? heute : jahrEnde;
+  const months = monthsBetween(yr + '-01', grenze);
+  const k = kontoById(kontoId) || {};
+  const b = { start: +k.start||0, gehalt:0, nebenjob:0, fixkosten:0, einkaeufe:0, spesen:0,
+    einnahmen:0, regelEinnahmen:0, ausgaben:0, sparTransfer:0, umbuchungen:0, korrekturen:0 };
+
+  // Einnahmen / Ausgaben (ohne Korrektur)
+  (state.einnahmen||[]).forEach(e => {
+    if ((e.kontoId||def)!==kontoId || e._korrektur || e.bar) return;
+    if (['Gehalt','Nebenjob'].includes(e.type)) return;
+    if ((e.month||'') > grenze) return;
+    b.einnahmen += (+e.amount||0);
+  });
+  (state.ausgaben||[]).forEach(a => {
+    if ((a.kontoId||def)!==kontoId) return;
+    if ((a.month||'') > grenze) return;
+    if (a._korrektur) b.korrekturen -= (+a.amount||0);
+    else b.ausgaben -= (+a.amount||0);
+  });
+  (state.einnahmen||[]).forEach(e => {
+    if ((e.kontoId||def)!==kontoId || !e._korrektur) return;
+    b.korrekturen += (+e.amount||0);
+  });
+  // Wiederkehrende Einnahmen
+  (state.regelEinnahmen||[]).forEach(r => {
+    if ((r.kontoId||def)!==kontoId) return;
+    months.forEach(m => { if ((!r.startMonth||r.startMonth<=m)&&(!r.endMonth||r.endMonth>=m)) b.regelEinnahmen += (+r.amount||0); });
+  });
+  // Sparpläne (intern) → Gutschrift Zielkonto
+  (state.fixkosten||[]).forEach(f => {
+    if (!f.sparenLink || f.sparenLink.extern || f.sparenLink.zielkonto!==kontoId) return;
+    if (f.sparenLink.sparTyp && f.sparenLink.sparTyp!=='bargeld') return;
+    months.forEach(m => { if (m<=grenze && fixkostenAktivImMonat(f, m)) b.sparTransfer += (+f.amount||0); });
+  });
+  // Umbuchungen
+  (state.umbuchungen||[]).forEach(u => {
+    const um = u.month || (u.date||'').slice(0,7);
+    if (um > grenze) return;
+    if (u.nachKonto===kontoId) b.umbuchungen += (+u.amount||0);
+    if (u.vonKonto===kontoId)  b.umbuchungen -= (+u.amount||0);
+  });
+  // Gehalt/Nebenjob/Fixkosten/Einkäufe/Spesen
+  months.forEach(m => {
+    const inc = state.incomeByMonth[m] || { gehalt:0, nebenjob:0 };
+    if (getGehaltKonto(yr)===kontoId)   b.gehalt   += (+inc.gehalt||0);
+    if (getNebenjobKonto(yr)===kontoId) b.nebenjob += (+inc.nebenjob||0);
+    (state.fixkosten||[]).forEach(f => {
+      if ((f.kontoId||def)!==kontoId) return;
+      if (fixkostenAktivImMonat(f, m)) b.fixkosten -= (+f.amount||0);
+    });
+    (state.einkaeufe||[]).forEach(e => { if (e.month===m && (e.kontoId||def)===kontoId) b.einkaeufe -= (+e.amount||0); });
+    (state.spesen||[]).forEach(t => { if (t.month===m && (t.kontoId||def)===kontoId) b.spesen += (+(t.allowance||0) - +(t.ausgaben||0)); });
+  });
+  b.total = Math.round((b.start+b.gehalt+b.nebenjob+b.fixkosten+b.einkaeufe+b.spesen+b.einnahmen+b.regelEinnahmen+b.ausgaben+b.sparTransfer+b.umbuchungen+b.korrekturen)*100)/100;
+  return b;
+}
+
+function zeigeSaldoDiagnose(kontoId) {
+  const k = kontoById(kontoId); if (!k) return;
+  const b = saldoBreakdown(kontoId);
+  const row = (label, val, hint) => (Math.abs(val) < 0.005 ? '' :
+    '<div style="display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid var(--border)">' +
+      '<span>' + label + (hint?(' <span style=\"color:var(--muted);font-size:11px\">'+hint+'</span>'):'') + '</span>' +
+      '<span style="font-weight:600;color:' + (val>=0?'var(--green)':'var(--red)') + '">' + (val>=0?'+':'') + fmtEur(val) + '</span>' +
+    '</div>');
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:99999;display:flex;align-items:center;justify-content:center;padding:20px;backdrop-filter:blur(4px)';
+  overlay.innerHTML =
+    '<div style="background:var(--surface);color:var(--text);border:1px solid var(--border);border-radius:12px;max-width:460px;width:100%;box-shadow:0 20px 60px rgba(0,0,0,.5)">' +
+      '<div style="padding:18px 22px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:12px">' +
+        '<div style="font-size:26px">🔍</div><h3 style="margin:0;font-size:16px">Saldo-Diagnose: ' + (k.name||'Konto') + '</h3>' +
+      '</div>' +
+      '<div style="padding:18px 22px;font-size:14px">' +
+        '<div style="display:flex;justify-content:space-between;padding:5px 0;border-bottom:2px solid var(--border)"><span><strong>Startwert</strong></span><span style="font-weight:700">' + fmtEur(b.start) + '</span></div>' +
+        row('Gehalt', b.gehalt) + row('Nebenjob', b.nebenjob) +
+        row('Einnahmen', b.einnahmen, 'einmalig') + row('Wiederkehrende Einnahmen', b.regelEinnahmen) +
+        row('Fixkosten', b.fixkosten) + row('Einkäufe', b.einkaeufe) + row('Spesen-Saldo', b.spesen) +
+        row('Ausgaben', b.ausgaben) + row('Sparplan-Zuflüsse', b.sparTransfer, 'intern') +
+        row('Umbuchungen', b.umbuchungen) + row('Kontostand-Korrekturen', b.korrekturen) +
+        '<div style="display:flex;justify-content:space-between;padding:10px 0 2px;margin-top:6px;border-top:2px solid var(--border)"><span><strong>Saldo gesamt</strong></span><span style="font-weight:700;font-size:16px;color:' + (b.total>=0?'var(--green)':'var(--red)') + '">' + fmtEur(b.total) + '</span></div>' +
+        (Math.abs(b.korrekturen) > 0.005 ? '<p style="margin:12px 0 0;font-size:12px;color:var(--muted)">💡 Es liegen alte Kontostand-Korrekturen vor (' + fmtEur(b.korrekturen) + '). Falls der Saldo nicht stimmt: „🧹 Korrekturen“ klicken und danach „🎯 Stand setzen“ neu.</p>' : '') +
+      '</div>' +
+      '<div style="padding:14px 22px;border-top:1px solid var(--border);display:flex;justify-content:flex-end;background:var(--surface-2);border-radius:0 0 12px 12px">' +
+        '<button class="btn btn-primary" id="_diagClose">Schließen</button>' +
+      '</div>' +
+    '</div>';
+  document.body.appendChild(overlay);
+  overlay.querySelector('#_diagClose').addEventListener('click', () => overlay.remove());
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
+}
+
+async function resetKontoKorrekturen(kontoId) {
+  if (!requireUnlocked()) return;
+  const k = kontoById(kontoId); if (!k) return;
+  const def = defaultKontoId();
+  const treffer = [
+    ...(state.einnahmen||[]).filter(e => e._korrektur && (e.kontoId||def)===kontoId),
+    ...(state.ausgaben||[]).filter(a => a._korrektur && (a.kontoId||def)===kontoId),
+  ];
+  if (!treffer.length) { showToast('Keine Kontostand-Korrekturen bei ' + k.name, 'info'); return; }
+  const summe = treffer.reduce((s,x)=> s + (x.desc!==undefined ? -(+x.amount||0) : (+x.amount||0)), 0);
+  const ok = await uiConfirm({
+    title: 'Korrekturen entfernen', icon: '🧹',
+    message: treffer.length + ' Kontostand-Korrektur(en) bei „' + k.name + '“ entfernen (Wirkung: ' + (summe>=0?'+':'') + fmtEur(summe) + ')?',
+    details: ['Deine echten Buchungen bleiben unberührt.', 'Danach „🎯 Stand setzen“ neu ausführen.'],
+    okLabel: 'Entfernen', cancelLabel: 'Abbrechen',
+  });
+  if (!ok) return;
+  state.einnahmen = (state.einnahmen||[]).filter(e => !(e._korrektur && (e.kontoId||def)===kontoId));
+  state.ausgaben  = (state.ausgaben||[]).filter(a => !(a._korrektur && (a.kontoId||def)===kontoId));
+  saveData(); if (typeof updateBadges==='function') updateBadges(); renderPage();
+  showToast(k.name + ': ' + treffer.length + ' Korrektur(en) entfernt – jetzt neu „Stand setzen“', 'info');
+}
+
+function setKontoIstStand(kontoId) {
+  if (!requireUnlocked()) return;
+  const k = kontoById(kontoId);
+  if (!k) return;
+  const aktuell = kontoSaldo(kontoId);
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:99999;display:flex;align-items:center;justify-content:center;padding:20px;backdrop-filter:blur(4px)';
+  overlay.innerHTML =
+    '<div style="background:var(--surface);color:var(--text);border:1px solid var(--border);border-radius:12px;max-width:440px;width:100%;box-shadow:0 20px 60px rgba(0,0,0,.5)">' +
+      '<div style="padding:18px 22px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:12px">' +
+        '<div style="font-size:28px">🎯</div>' +
+        '<h3 style="margin:0;font-size:16px;font-weight:600">Kontostand setzen: ' + (k.name||'Konto') + '</h3>' +
+      '</div>' +
+      '<div style="padding:18px 22px;font-size:14px;line-height:1.5">' +
+        '<p style="margin:0 0 12px">App-Saldo aktuell: <strong>' + fmtEur(aktuell) + '</strong></p>' +
+        '<label style="display:block;font-size:13px;margin-bottom:6px">Echter Kontostand heute (' + currencySymbol() + '):</label>' +
+        '<input type="number" id="_istStandInput" step="0.01" value="' + aktuell.toFixed(2) + '" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:6px;background:var(--surface-2);color:var(--text);font-size:15px;text-align:right" />' +
+        '<p style="margin:10px 0 0;font-size:12px;color:var(--muted)">Die Differenz wird als datierte Korrektur-Buchung angelegt. Deine bisherigen Buchungen bleiben erhalten.</p>' +
+      '</div>' +
+      '<div style="padding:14px 22px;border-top:1px solid var(--border);display:flex;justify-content:flex-end;gap:8px;background:var(--surface-2);border-radius:0 0 12px 12px">' +
+        '<button class="btn btn-ghost" id="_istCancel">Abbrechen</button>' +
+        '<button class="btn btn-primary" id="_istOk">Stand setzen</button>' +
+      '</div>' +
+    '</div>';
+  document.body.appendChild(overlay);
+  const inp = overlay.querySelector('#_istStandInput');
+  setTimeout(() => { inp?.focus(); inp?.select(); }, 50);
+  function close() { overlay.remove(); }
+  overlay.querySelector('#_istCancel').addEventListener('click', close);
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+  overlay.querySelector('#_istOk').addEventListener('click', () => {
+    const ziel = parseFloat(inp.value);
+    if (isNaN(ziel)) { showToast('Bitte einen gültigen Betrag eingeben', 'error'); return; }
+    const diff = Math.round((ziel - aktuell) * 100) / 100;
+    close();
+    if (Math.abs(diff) < 0.01) { showToast('Saldo stimmt bereits', 'info'); return; }
+    const datum = today();
+    const monat = datum.slice(0, 7);
+    if (diff > 0) {
+      // zu wenig im App-Saldo → Einnahme als Korrektur
+      state.einnahmen.push({ id: uid(), month: monat, date: datum,
+        source: 'Kontostand-Abgleich', type: 'Sonstiges', amount: diff,
+        bar: false, kontoId: kontoId, _korrektur: true });
+    } else {
+      // zu viel im App-Saldo → Ausgabe als Korrektur
+      state.ausgaben.push({ id: uid(), month: monat, date: datum,
+        desc: 'Kontostand-Abgleich', category: 'Sonstige Ausgaben', amount: Math.abs(diff),
+        kontoId: kontoId, _korrektur: true });
+    }
+    saveData(); if (typeof updateBadges==='function') updateBadges(); renderPage();
+    showToast(k.name + ': Stand auf ' + fmtEur(ziel) + ' gesetzt (Korrektur ' + (diff>0?'+':'') + fmtEur(diff) + ')', 'info');
+  });
+}
+
 function einstellungen() {
   const meta = state.meta || {};
   const cfg  = state.config || {};
@@ -2629,13 +3713,38 @@ function einstellungen() {
           <label class="field">Startjahr
             <input type="number" value="${meta.year || new Date().getFullYear()}" min="2020" max="2040" onchange="updateSetting('year',+this.value)"/>
           </label>
-          <label class="field">Startguthaben (${currencySymbol()})
+          <label class="field">Startguthaben gesamt (${currencySymbol()})
             <input type="number" value="${(+(meta.startgeld)||0).toFixed(2)}" step="0.01" onchange="updateSetting('startgeld',+this.value)"/>
+            <span style="font-size:11px;color:var(--muted)">Summe aller Konten-Startwerte. Aufteilung unten bei „Konten".</span>
           </label>
           <label class="field">Währung
             <select onchange="updateSetting('waehrung',this.value)">
               ${['EUR','USD','CHF','GBP','JPY'].map(c=>'<option value="'+c+'"'+(( meta.waehrung||'EUR')===c?' selected':'')+'>'+c+'</option>').join('')}
-            </select>
+            </select>          </label>
+          <div class="field" style="grid-column:1/-1">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+              <strong>Konten</strong>
+              <button class="btn btn-sm btn-primary" onclick="addKonto()">+ Konto</button>
+            </div>
+            <div style="font-size:12px;color:var(--muted);margin-bottom:10px">
+              Lege deine Konten an (z.B. Girokonto, Trade). Häkchen „Cashflow" = Buchungen
+              dieses Kontos zählen zum Monats-Cashflow. Konten ohne Häkchen (z.B. Reserve/Trade)
+              laufen separat und beeinflussen den Cashflow nicht.
+            </div>
+            ${getKonten().map(k => `
+              <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px;flex-wrap:wrap">
+                <input type="text" value="${(k.name||'').replace(/"/g,'&quot;')}" onchange="updateKonto('${k.id}','name',this.value)" placeholder="Kontoname" style="flex:1;min-width:120px" />
+                <input type="number" value="${(+k.start||0).toFixed(2)}" step="0.01" onchange="updateKonto('${k.id}','start',+this.value)" style="width:110px;text-align:right" title="Startwert" /> ${currencySymbol()}
+                <label style="display:flex;align-items:center;gap:5px;font-size:13px;white-space:nowrap;cursor:pointer">
+                  <input type="checkbox" ${k.cashflow?'checked':''} onchange="updateKonto('${k.id}','cashflow',this.checked)" /> Cashflow
+                </label>
+                <span style="font-size:12px;color:var(--muted);white-space:nowrap">Saldo: ${fmtEur(kontoSaldo(k.id))}</span>
+                <button class="btn-icon" onclick="setKontoIstStand('${k.id}')" title="Aktuellen Kontostand setzen – legt eine Korrektur-Buchung an, damit der Saldo deinem echten Stand entspricht" style="width:auto;min-width:0;padding:0 8px;font-size:12px;white-space:nowrap;gap:4px">🎯 Stand setzen</button>
+                <button class="btn-icon" onclick="zeigeSaldoDiagnose('${k.id}')" title="Zeigt, woraus sich der Saldo zusammensetzt" style="width:auto;min-width:0;padding:0 8px;font-size:12px;white-space:nowrap;gap:4px">🔍 Diagnose</button>
+                <button class="btn-icon" onclick="resetKontoKorrekturen('${k.id}')" title="Entfernt alle alten Kontostand-Korrekturen dieses Kontos (danach neu „Stand setzen“)" style="width:auto;min-width:0;padding:0 8px;font-size:12px;white-space:nowrap;gap:4px">🧹 Korrekturen</button>
+                ${getKonten().length>1 ? `<button class="btn-icon danger" onclick="deleteKonto('${k.id}')" title="Konto löschen">×</button>` : ''}
+              </div>`).join('')}
+          </div>
           </label>
           <label class="field">Startseite
             <select onchange="updateConfig('startPage',this.value)">
@@ -2681,6 +3790,27 @@ function einstellungen() {
           </div>
           <span style="font-size:13px">Kompaktmodus (weniger Abstände)</span>
         </div>
+      </div>
+    </div>
+
+    <!-- ── SPARZIEL ────────────────────────────────────────────────────── -->
+    <div class="settings-section">
+      <div class="settings-section-header">🎯 Sparziel</div>
+      <div class="card mb-2">
+        <div style="display:flex;align-items:center;gap:12px">
+          <div class="div-switch ${cfg.sparzielAktiv?'div-switch-on':''}" onclick="toggleConfig('sparzielAktiv')" style="cursor:pointer">
+            <div class="div-switch-thumb"></div>
+          </div>
+          <span style="font-size:13px">Sparziel aktivieren (zeigt einen Fortschrittsbalken im Dashboard)</span>
+        </div>
+        ${cfg.sparzielAktiv ? `<div class="form-grid form-grid-2" style="margin-top:14px">
+          <label class="field">Zielsumme (€ pro Jahr)
+            <input type="number" step="100" min="0" value="${+cfg.sparzielSumme||0}" onchange="updateSparzielSumme(+this.value)" placeholder="z.B. 5000" />
+          </label>
+          <div class="field" style="justify-content:flex-end">
+            <div style="font-size:12px;color:var(--muted);line-height:1.5">Der Fortschritt zählt das im laufenden Jahr Gesparte bis zum aktuellen Monat — z.B. im Mai 5× deine monatliche Sparrate.</div>
+          </div>
+        </div>` : ''}
       </div>
     </div>
 
@@ -2804,7 +3934,7 @@ function einstellungen() {
               </div>
               <button class="btn btn-ghost btn-sm" onclick="navigator.clipboard.writeText('Marco.Conrad00@gmail.com').then(()=>showToast('E-Mail kopiert!'))">📋 Kopieren</button>
             </div>
-            <p style="font-size:11px;color:var(--muted-text)">Entwickelt von <strong>Marco Conrad</strong> · Jede Unterstützung wird wertgeschätzt 🙏</p>
+            <p style="font-size:11px;color:var(--muted-text)">Jede Unterstützung wird wertgeschätzt 🙏</p>
           </div>
         </div>
       </div>
@@ -2820,13 +3950,30 @@ function einstellungen() {
             <button class="btn btn-ghost btn-sm" onclick="archiveYear()">📦 Jahr archivieren & PDF</button>
           </div>
           <div style="font-size:11px;color:var(--muted)">
-            <span id="creditsVersion">v2.0</span> · Entwickelt von <strong>Marco Conrad</strong> · 
-            <a href="mailto:marco.conrad00@gmail.com" style="color:var(--accent)">marco.conrad00@gmail.com</a>
+            <span id="creditsVersion">v1.01</span> · Finanzverwaltung Pro · <a href="mailto:marco.conrad00@gmail.com" style="color:var(--accent)">marco.conrad00@gmail.com</a>
           </div>
           <div style="background:var(--amber-bg);border-radius:6px;padding:8px 12px">
             <p style="font-size:11px;color:var(--amber);font-weight:600">⚠️ Diese App kann Bugs enthalten. Keine Haftung für fehlerhafte Berechnungen.</p>
           </div>
         </div>
+      </div>
+    </div>
+
+    <!-- ── UPDATES ───────────────────────────────────────────────────── -->
+    <div class="settings-section">
+      <div class="settings-section-header">🔄 Updates</div>
+      <div class="card mb-2">
+        <div style="display:flex;align-items:center;gap:12px;margin-bottom:14px">
+          <div class="div-switch ${cfg.autoBackupBeforeUpdate?'div-switch-on':''}" onclick="toggleConfig('autoBackupBeforeUpdate')" style="cursor:pointer">
+            <div class="div-switch-thumb"></div>
+          </div>
+          <span style="font-size:13px">Automatisches Backup vor jedem Update erstellen</span>
+        </div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+          <button class="btn btn-primary btn-sm" onclick="openUpdateManager()">🔄 Nach Updates suchen</button>
+          <span style="font-size:12px;color:var(--muted)">Aktuelle Version: <span id="creditsVersion2">v1.01</span></span>
+        </div>
+        <p style="font-size:11px;color:var(--muted);margin-top:10px;line-height:1.5">Prüft, ob eine neuere Version verfügbar ist. Ist das Auto-Backup aktiviert, wird vor dem Einspielen automatisch eine Sicherung deiner Daten angelegt.</p>
       </div>
     </div>
 
@@ -3076,8 +4223,8 @@ async function clearSingle(key) {
   showToast(label + ' wurden gelöscht');
 }
 
-function restartSetup() {
-  if (!confirm('Willkommensassistenten erneut starten? Deine Daten bleiben erhalten.')) return;
+async function restartSetup() {
+  if (!await uiConfirm({ message: 'Willkommensassistenten erneut starten? Deine Daten bleiben erhalten.', title: 'Setup erneut starten', icon: '🔄' })) return;
   state.meta.setupDone = false;
   saveData();
   showSetupScreen();
@@ -3087,7 +4234,7 @@ function openDataFolder() {
   if (window.EA && window.EA.openDataFolder) {
     window.EA.openDataFolder();
   } else {
-    alert('Speicherort:\n%APPDATA%\\finanzverwaltung-pro\\data.json');
+    uiAlert('Speicherort:\n%APPDATA%\\finanzverwaltung-pro\\data.json');
   }
 }
 
@@ -3121,7 +4268,7 @@ function exportJSON() {
   exportBackup();
 }
 
-function importBackup() {
+async function importBackup() {
   const inp = document.createElement('input');
   inp.type = 'file'; inp.accept = '.json';
   inp.onchange = async (e) => {
@@ -3129,11 +4276,11 @@ function importBackup() {
     const text = await file.text();
     try {
       const data = JSON.parse(text);
-      if (!confirm('Backup importieren?\nAlle aktuellen Daten werden überschrieben!')) return;
+      if (!await uiConfirm({ message: 'Backup importieren? Alle aktuellen Daten werden überschrieben!', title: 'Backup importieren', icon: '⚠' })) return;
       Object.assign(state, data);
       saveData();
       location.reload();
-    } catch { alert('Fehler: Ungültige Backup-Datei.'); }
+    } catch { uiAlert('Fehler: Ungültige Backup-Datei.'); }
   };
   inp.click();
 }
@@ -3141,6 +4288,18 @@ function importBackup() {
 function updateSetting(key, val) {
   if (!state.meta) state.meta = {};
   state.meta[key] = val;
+  if (key === 'startgeld') {
+    const yd = getYearData(); if (yd) {
+      yd.startBalance = +val || 0;
+      const ks = getKonten();
+      const sum = ks.reduce((s,k)=>s+(+k.start||0),0);
+      const diff = (+val||0) - sum;
+      if (Math.abs(diff) > 0.001 && ks.length) {
+        const target = ks.find(k=>k.cashflow) || ks[0];
+        target.start = Math.round(((+target.start||0) + diff) * 100) / 100;
+      }
+    }
+  }
   if (key === 'userName') {
     const un = document.getElementById('userName');
     if (un) un.textContent = val;
@@ -3347,7 +4506,7 @@ function saveFinanzproduktModal() {
   const typ  = document.getElementById('fp_typ')?.value || '';
   const typCustom = document.getElementById('fp_typ_custom')?.value || '';
   const jahr = +(document.getElementById('fp_jahr')?.value) || new Date().getFullYear();
-  if (!name) { alert('Bitte Produktname eingeben.'); return; }
+  if (!name) { uiAlert('Bitte Produktname eingeben.'); return; }
   const fp = {
     id: uid(), jahr, datum: document.getElementById('fp_datum')?.value||today(),
     name, typ: typ==='Sonstiges'?typCustom||'Sonstiges':typ,
@@ -3362,9 +4521,9 @@ function saveFinanzproduktModal() {
   saveData(); closeFinanzproduktModal(); renderPage();
   showToast('Finanzprodukt gespeichert');
 }
-function deleteFinanzprodukt(id) {
+async function deleteFinanzprodukt(id) {
   if (!requireUnlocked()) return;
-  if (!confirm('Eintrag löschen?')) return;
+  if (!await uiConfirm({ message: 'Eintrag löschen?', title: 'Löschen', icon: '🗑' })) return;
   state.finanzprodukte = (state.finanzprodukte||[]).filter(fp=>String(fp.id) !== String(id));
   saveData(); renderPage();
 }
@@ -3511,7 +4670,7 @@ function saveZaehlerModal() {
   const value   = +(document.getElementById('zm_value').value) || 0;
   const date    = document.getElementById('zm_date').value;
   const note    = document.getElementById('zm_note').value;
-  if (!value) { alert('Bitte Zählerstand eingeben.'); return; }
+  if (!value) { uiAlert('Bitte Zählerstand eingeben.'); return; }
   state.zaehler.push({
     id: uid(), date, value, note,
     type:    type    === 'Sonstiges' ? typeCustom    || 'Sonstiges' : type,
@@ -3533,178 +4692,9 @@ function deleteZaehler(id){
 
 // ── PAGE: PDF IMPORT ──────────────────────────────────────────────────────
 
-// ── CSS THEME & CONFIG ──────────────────────────────────────────────────────
-function toggleConfig(key) {
-  if (!state.config) state.config = {};
-  state.config[key] = !state.config[key];
-  try {
-    saveData();
-    if (currentPage === 'einstellungen') {
-      const pc = document.getElementById('pageContent');
-      const scrollTop = pc ? pc.scrollTop : 0;
-      renderPage();
-      if (pc) pc.scrollTop = scrollTop;
-      showToast('Einstellungen gespeichert');
-    }
-  } catch (e) {
-    console.error('toggleConfig:', e);
-    showToast('Fehler beim Speichern', 'error');
-  }
-}
-
-function updateConfig(key, val) {
-  if (!state.config) state.config = {};
-  state.config[key] = val;
-  try {
-    saveData();
-    if (key === 'theme') {
-      try { localStorage.setItem('fv_theme', JSON.stringify({ theme: val })); } catch(e) {}
-    }
-    // Show toast on settings page only (avoid noise elsewhere)
-    if (currentPage === 'einstellungen') showToast('Einstellungen gespeichert');
-  } catch (e) {
-    console.error('updateConfig:', e);
-    showToast('Fehler beim Speichern', 'error');
-  }
-}
-
-function applyTheme(theme) {
-  updateConfig('theme', theme);
-  const body = document.body;
-  body.classList.remove('theme-dark');
-  if (theme === 'dark') {
-    body.classList.add('theme-dark');
-  } else if (theme === 'system') {
-    if (window.matchMedia('(prefers-color-scheme: dark)').matches) body.classList.add('theme-dark');
-    // Listen for system changes
-    window._themeQuery = window.matchMedia('(prefers-color-scheme: dark)');
-    window._themeQuery.onchange = (e) => {
-      if ((state.config||{}).theme === 'system') {
-        document.body.classList.toggle('theme-dark', e.matches);
-      }
-    };
-  }
-}
-
-function applyAccent(color) {
-  updateConfig('accent', color);
-  const root = document.documentElement;
-  root.style.setProperty('--accent', color);
-  root.style.setProperty('--accent-dark', ACCENT_DARKS[color] || color);
-  root.style.setProperty('--accent-hover', ACCENT_DARKS[color] || color);
-  root.style.setProperty('--accent-light', color + '20');
-  renderPage();
-}
-
-function applySettings() {
-  const cfg = state.config || {};
-  if (cfg.theme) applyTheme(cfg.theme);
-  document.body.classList.toggle('compact', !!cfg.compactMode);
-  try { localStorage.setItem('fv_theme', JSON.stringify({ theme: cfg.theme||'light' })); } catch(e) {}
-}
-
-function addCustomCat() {
-  // Legacy fallback - default to 'ausgabe' group
-  addCustomCatByGroup('ausgabe');
-}
-
-function addCustomCatByGroup(group) {
-  const inp = document.getElementById('new_cat_' + group);
-  const val = (inp?.value||'').trim();
-  if (!val) return;
-  const existing = getCustomCats(group);
-  if (existing.some(c => c.toLowerCase() === val.toLowerCase())) {
-    showToast('Eintrag existiert bereits', 'info');
-    if (inp) inp.value = '';
-    return;
-  }
-  setCustomCats(group, [...existing, val]);
-  saveData();
-  showToast('Hinzugefügt: ' + val);
-  renderPage();
-}
-
-function removeCustomCatByGroup(group, idx) {
-  const list = getCustomCats(group);
-  if (idx < 0 || idx >= list.length) return;
-  const removed = list[idx];
-  setCustomCats(group, list.filter((_,i) => i !== idx));
-  saveData();
-  showToast('Entfernt: ' + removed);
-  renderPage();
-}
-
-function removeCustomCat(cat) {
-  state.customCats = (state.customCats||[]).filter(c=>c!==cat);
-  saveData(); renderPage();
-}
-
-
-function restartSetup() {
-  if (!confirm('Willkommensassistenten erneut starten? Deine Daten bleiben erhalten.')) return;
-  state.meta.setupDone = false;
-  saveData();
-  showSetupScreen();
-}
-
-function openDataFolder() {
-  if (window.EA && window.EA.openDataFolder) {
-    window.EA.openDataFolder();
-  } else {
-    alert('Speicherort:\n%APPDATA%\\finanzverwaltung-pro\\data.json');
-  }
-}
-
-function exportBackup() {
-  const blob = new Blob([JSON.stringify(state, null, 2)], {type:'application/json'});
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a'); 
-  a.href = url; 
-  a.download = 'Finanzverwaltung_Backup_' + today() + '.json'; 
-  a.click();
-  URL.revokeObjectURL(url);
-  updateConfig('lastBackup', new Date().toLocaleDateString('de-DE'));
-  renderPage();
-}
-
-function exportCSV() {
-  const month = currentMonth;
-  const rows = [['Datum','Beschreibung','Betrag','Kategorie','Typ']];
-  state.einkaeufe.filter(e=>e.month===month).forEach(e=>rows.push([e.date,e.store,e.amount,'Einkauf','Ausgabe']));
-  state.ausgaben.filter(a=>a.month===month).forEach(a=>rows.push([a.date,a.desc,a.amount,a.category,'Ausgabe']));
-  state.einnahmen.filter(e=>e.month===month).forEach(e=>rows.push([e.date,e.source,e.amount,e.type,'Einnahme']));
-  const csv = rows.map(r=>r.map(v=>'"'+String(v||'').replace(/"/g,'""')+'"').join(',')).join('\n');
-  const blob = new Blob([csv], {type:'text/csv;charset=utf-8;'});
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url; a.download = 'Finanzverwaltung_'+month+'.csv'; a.click();
-  URL.revokeObjectURL(url);
-}
-
-function exportJSON() {
-  exportBackup();
-}
-
-function importBackup() {
-  const inp = document.createElement('input');
-  inp.type = 'file'; inp.accept = '.json';
-  inp.onchange = async (e) => {
-    const file = e.target.files[0]; if (!file) return;
-    const text = await file.text();
-    try {
-      const data = JSON.parse(text);
-      if (!confirm('Backup importieren?\nAlle aktuellen Daten werden überschrieben!')) return;
-      Object.assign(state, data);
-      saveData();
-      location.reload();
-    } catch { alert('Fehler: Ungültige Backup-Datei.'); }
-  };
-  inp.click();
-}
-
 let _toastTimer = null;
 // ── CUSTOM CONFIRM MODAL ──────────────────────────────────────────────
-// Replaces native confirm()/alert() with theme-styled modals
+// Replaces native confirm()/uiAlert() with theme-styled modals
 let _modalResolvers = [];
 
 function uiConfirm(opts) {
@@ -3724,17 +4714,11 @@ function uiConfirm(opts) {
         details.map(d => '<li style="margin-bottom:4px">' + d + '</li>').join('') + '</ul>';
     }
 
-    const isDark = document.documentElement.classList.contains('dark') || document.body.classList.contains('dark');
-    const cardBg = isDark ? '#1a1f2e' : '#ffffff';
-    const surfaceBg = isDark ? '#0f1419' : '#f5f5f5';
-    const borderCol = isDark ? '#2a3142' : '#e5e7eb';
-    const textCol = isDark ? '#e5e7eb' : '#1f2937';
-    const mutedCol = isDark ? '#9ca3af' : '#6b7280';
     const overlay = document.createElement('div');
     overlay.className = 'modal-overlay';
     overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:99999;display:flex;align-items:center;justify-content:center;padding:20px;backdrop-filter:blur(4px)';
     overlay.innerHTML =
-      '<div style="background:' + cardBg + ';color:' + textCol + ';border:1px solid ' + borderCol + ';border-radius:12px;padding:0;max-width:480px;width:100%;box-shadow:0 20px 60px rgba(0,0,0,.5);animation:fadeIn .15s ease-out">' +
+      '<div style="background:var(--surface);color:var(--text);border:1px solid var(--border);border-radius:12px;padding:0;max-width:480px;width:100%;box-shadow:0 20px 60px rgba(0,0,0,.5);animation:fadeIn .15s ease-out">' +
         '<div style="padding:18px 22px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:12px">' +
           '<div style="font-size:28px;line-height:1">' + icon + '</div>' +
           '<h3 style="margin:0;font-size:16px;font-weight:600;color:var(--text)">' + title + '</h3>' +
@@ -3742,7 +4726,7 @@ function uiConfirm(opts) {
         '<div style="padding:18px 22px;font-size:14px;line-height:1.5;color:var(--text)">' +
           message + detailsHtml +
         '</div>' +
-        '<div style="padding:14px 22px;border-top:1px solid ' + borderCol + ';display:flex;justify-content:flex-end;gap:8px;background:' + surfaceBg + ';border-radius:0 0 12px 12px">' +
+        '<div style="padding:14px 22px;border-top:1px solid var(--border);display:flex;justify-content:flex-end;gap:8px;background:var(--surface-2);border-radius:0 0 12px 12px">' +
           '<button class="btn btn-ghost" data-ui-action="cancel">' + cancelLabel + '</button>' +
           '<button class="' + (danger ? 'btn-danger-solid' : 'btn btn-primary') + '" data-ui-action="ok">' + okLabel + '</button>' +
         '</div>' +
@@ -3799,6 +4783,160 @@ function uiAlert(opts) {
   });
 }
 
+// ── UPDATE-MANAGER ──────────────────────────────────────────────────────────
+let _updateProgressBound = false;
+async function openUpdateManager() {
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.id = '_updateModal';
+  overlay.innerHTML =
+    '<div class="modal" style="max-width:460px;padding:0;animation:fadeIn .15s ease-out" onclick="event.stopPropagation()">' +
+      '<div style="padding:18px 22px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:12px">' +
+        '<div style="font-size:26px;line-height:1">🔄</div>' +
+        '<h3 style="margin:0;font-size:16px;font-weight:600;color:var(--text)">Update-Manager</h3>' +
+      '</div>' +
+      '<div style="padding:20px 22px" id="_updateBody">' +
+        '<div id="_updateStatus" style="font-size:14px;color:var(--text);margin-bottom:14px">Bereit, nach Updates zu suchen.</div>' +
+        '<div id="_updateBarWrap" style="height:12px;border-radius:7px;background:var(--surface-2);overflow:hidden;display:none;margin-bottom:8px">' +
+          '<div id="_updateBar" style="height:100%;width:0%;border-radius:7px;background:linear-gradient(90deg,var(--accent),var(--green));transition:width .3s ease"></div>' +
+        '</div>' +
+        '<div id="_updatePct" style="font-size:12px;color:var(--muted);text-align:right;display:none">0%</div>' +
+      '</div>' +
+      '<div style="padding:14px 22px;border-top:1px solid var(--border);display:flex;justify-content:flex-end;gap:8px;background:var(--surface);border-radius:0 0 14px 14px">' +
+        '<button class="btn btn-ghost" id="_updateClose">Schließen</button>' +
+        '<button class="btn btn-primary" id="_updateCheck">Nach Updates suchen</button>' +
+      '</div>' +
+    '</div>';
+  document.body.appendChild(overlay);
+
+  const statusEl = overlay.querySelector('#_updateStatus');
+  const barWrap  = overlay.querySelector('#_updateBarWrap');
+  const bar      = overlay.querySelector('#_updateBar');
+  const pctEl    = overlay.querySelector('#_updatePct');
+  const checkBtn = overlay.querySelector('#_updateCheck');
+
+  function close() { overlay.remove(); }
+  overlay.querySelector('#_updateClose').addEventListener('click', close);
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+
+  // Fortschritts-Events aus dem Main-Prozess (nur einmal binden)
+  if (window.EA && window.EA.onUpdateProgress && !_updateProgressBound) {
+    _updateProgressBound = true;
+    window.EA.onUpdateProgress((d) => {
+      const wrap = document.getElementById('_updateBarWrap');
+      const b = document.getElementById('_updateBar');
+      const p = document.getElementById('_updatePct');
+      const s = document.getElementById('_updateStatus');
+      if (wrap) wrap.style.display = 'block';
+      if (p) p.style.display = 'block';
+      if (b) b.style.width = (d.percent||0) + '%';
+      if (p) p.textContent = (d.percent||0) + '%';
+      if (s) s.textContent = 'Update wird heruntergeladen…';
+    });
+  }
+  if (window.EA && window.EA.onUpdateAvailable) {
+    window.EA.onUpdateAvailable((d) => {
+      const s = document.getElementById('_updateStatus');
+      if (s) s.textContent = 'Neue Version ' + (d.version||'') + ' gefunden – wird geladen…';
+    });
+  }
+
+  checkBtn.addEventListener('click', async () => {
+    checkBtn.disabled = true;
+
+    // Optional: Backup vor dem Update
+    if (state.config && state.config.autoBackupBeforeUpdate) {
+      statusEl.textContent = 'Erstelle Sicherung vor dem Update…';
+      try {
+        if (window.EA && window.EA.writeBackup && state.config.backupPath) {
+          await window.EA.writeBackup(state.config.backupPath, JSON.stringify(state, null, 2));
+          statusEl.textContent = '✓ Backup erstellt. Suche nach Updates…';
+        } else {
+          // Kein Backup-Ordner → als Datei-Download sichern
+          exportBackup();
+          statusEl.textContent = '✓ Backup heruntergeladen. Suche nach Updates…';
+        }
+      } catch (e) {
+        statusEl.textContent = '⚠ Backup fehlgeschlagen, suche trotzdem…';
+      }
+    } else {
+      statusEl.textContent = 'Suche nach Updates…';
+    }
+
+    // Update-Check über Main-Prozess
+    if (!window.EA || !window.EA.checkForUpdates) {
+      statusEl.textContent = 'Update-Funktion nur in der installierten App verfügbar (nicht im Entwicklungsmodus).';
+      checkBtn.disabled = false;
+      return;
+    }
+    try {
+      const r = await window.EA.checkForUpdates();
+      if (r && r.ok && r.version) {
+        statusEl.textContent = 'Version ' + r.version + ' verfügbar – wird im Hintergrund geladen. Du wirst gefragt, sobald sie bereit ist.';
+        barWrap.style.display = 'block';
+        pctEl.style.display = 'block';
+      } else if (r && r.reason === 'dev') {
+        statusEl.textContent = 'Kein Update-Check im Entwicklungsmodus (npm start). In der installierten App aktiv.';
+        checkBtn.disabled = false;
+      } else {
+        statusEl.textContent = '✓ Du hast bereits die neueste Version.';
+        checkBtn.disabled = false;
+      }
+    } catch (e) {
+      statusEl.textContent = 'Fehler bei der Update-Suche: ' + (e.message || e);
+      checkBtn.disabled = false;
+    }
+  });
+
+  setTimeout(() => checkBtn?.focus(), 50);
+}
+
+// Theme-styled prompt: gibt eingegebenen Text zurück, oder null bei Abbruch.
+function uiPrompt(opts) {  const o = typeof opts === 'string' ? { message: opts } : (opts || {});
+  return new Promise((resolve) => {
+    const title    = o.title    || 'Eingabe';
+    const message  = o.message  || '';
+    const icon     = o.icon     || '✏️';
+    const okLabel  = o.okLabel  || 'OK';
+    const cancelLabel = o.cancelLabel || 'Abbrechen';
+    const initial  = o.value != null ? String(o.value) : '';
+    const placeholder = o.placeholder || '';
+    const inputType = o.type || 'text';
+
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-overlay';
+    overlay.innerHTML =
+      '<div class="modal" style="max-width:440px;padding:0;animation:fadeIn .15s ease-out" onclick="event.stopPropagation()">' +
+        '<div style="padding:18px 22px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:12px">' +
+          '<div style="font-size:28px;line-height:1">' + icon + '</div>' +
+          '<h3 style="margin:0;font-size:16px;font-weight:600;color:var(--text)">' + title + '</h3>' +
+        '</div>' +
+        '<div style="padding:18px 22px;font-size:14px;line-height:1.5;color:var(--text)">' +
+          (message ? '<p style="margin:0 0 12px">' + message + '</p>' : '') +
+          '<input type="' + inputType + '" id="_uiPromptInput" value="' + initial.replace(/"/g,'&quot;') + '" placeholder="' + placeholder.replace(/"/g,'&quot;') + '" style="width:100%;padding:9px 11px;border:1px solid var(--border);border-radius:8px;background:var(--surface-2);color:var(--text);font-size:14px" />' +
+        '</div>' +
+        '<div style="padding:14px 22px;border-top:1px solid var(--border);display:flex;justify-content:flex-end;gap:8px;background:var(--surface);border-radius:0 0 14px 14px">' +
+          '<button class="btn btn-ghost" data-ui-action="cancel">' + cancelLabel + '</button>' +
+          '<button class="btn btn-primary" data-ui-action="ok">' + okLabel + '</button>' +
+        '</div>' +
+      '</div>';
+    document.body.appendChild(overlay);
+    const input = overlay.querySelector('#_uiPromptInput');
+    function cleanup(val) { document.removeEventListener('keydown', kh); overlay.remove(); resolve(val); }
+    function ok() { cleanup(input.value); }
+    function cancel() { cleanup(null); }
+    function kh(e) {
+      if (e.key === 'Escape') { e.preventDefault(); cancel(); }
+      else if (e.key === 'Enter') { e.preventDefault(); ok(); }
+    }
+    overlay.querySelector('[data-ui-action="ok"]').addEventListener('click', ok);
+    overlay.querySelector('[data-ui-action="cancel"]').addEventListener('click', cancel);
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) cancel(); });
+    document.addEventListener('keydown', kh);
+    setTimeout(() => { input?.focus(); input?.select(); }, 50);
+  });
+}
+
 function showToast(msg, type) {
   const toast = document.getElementById('appToast');
   if (!toast) return;
@@ -3813,21 +4951,6 @@ function showToast(msg, type) {
     toast.style.opacity = '0';
     toast.style.transform = 'translateY(10px)';
   }, 2000);
-}
-
-function updateSetting(key, val) {
-  if (!state.meta) state.meta = {};
-  state.meta[key] = val;
-  if (key === 'userName') {
-    const un = document.getElementById('userName');
-    if (un) un.textContent = val;
-  }
-  if (key === 'year') {
-    // Update allMonths2026 array
-    allMonths2026.splice(0, allMonths2026.length, ...monthsBetween(val+'-01', val+'-12'));
-    buildMonthSelector();
-  }
-  saveData();
 }
 
 function importPage() {
@@ -3855,7 +4978,7 @@ function importPage() {
               <div style="font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${imp.filename}</div>
               <div style="font-size:11px;color:var(--muted)">Importiert am ${imp.date} · ${imp.count} Buchungen</div>
             </div>
-            <button class="btn-icon danger" onclick="deleteImport(${imp.id})" title="Import löschen">×</button>
+            <button class="btn-icon danger" onclick="deleteImport('${imp.id}')" title="Import löschen">×</button>
           </div>`).join('')}
       </div>
     </div>`).join('');
@@ -3864,6 +4987,10 @@ function importPage() {
     <div>
     <div class="card mb-2">
       <div class="card-header"><h3>Kontoauszug importieren</h3></div>
+      <label class="field" style="max-width:340px;margin-bottom:12px">Zielkonto für diesen Import
+        <select id="import_zielkonto">${getKonten().map(k => '<option value="'+k.id+'"'+(k.id===defaultKontoId()?' selected':'')+'>'+(k.name||'Konto')+(k.cashflow?' (Cashflow)':' (Reserve)')+'</option>').join('')}</select>
+        <span style="font-size:11px;color:var(--muted)">Alle Buchungen aus dem importierten Auszug werden diesem Konto zugeordnet. Für ING und Trade also getrennt importieren.</span>
+      </label>
       <div class="dropzone" id="importDrop" onclick="triggerImport()">
         <div class="drop-icon">📄</div>
         <h3>PDF, CSV oder TXT hier ablegen</h3>
@@ -3883,8 +5010,8 @@ function importPage() {
   </div>`;
 }
 
-function deleteImport(id) {
-  if (!confirm('Diesen Import-Eintrag löschen?\n(Die importierten Buchungen bleiben erhalten)')) return;
+async function deleteImport(id) {
+  if (!await uiConfirm({ message: 'Diesen Import-Eintrag löschen? (Die importierten Buchungen bleiben erhalten)', title: 'Import-Eintrag löschen', icon: '🗑' })) return;
   state.imports = (state.imports||[]).filter(i => String(i.id) !== String(id));
   saveData();
   renderPage();
@@ -3892,6 +5019,7 @@ function deleteImport(id) {
 
 async function triggerImport() {
   if (!window.EA) return;
+  const zielkonto = document.getElementById('import_zielkonto')?.value || defaultKontoId();
   const files = await window.EA.openFiles();
   if (!files || !files.length) return;
   if(el('importLog')) el('importLog').textContent = 'Lese Dateien…';
@@ -3910,13 +5038,14 @@ async function triggerImport() {
           text += ct.items.map(x => x.str).join(' ') + '\n';
         }
       } else { text = res.data; }
-      const count = parseAndImport(text);
+      const count = parseAndImport(text, zielkonto);
       totalImported += count;
       if(el('importLog')) el('importLog').textContent = `${f.name}: ${count} Buchungen importiert`;
     } catch(e) { if(el('importLog')) el('importLog').textContent = `Fehler bei ${f.name}: ${e.message}`; }
   }
   // Track this import
   if (!state.imports) state.imports = [];
+  const _zk = kontoById(zielkonto);
   for (const f of files) {
     const detectedMonth = currentMonth;
     state.imports.push({
@@ -3925,14 +5054,16 @@ async function triggerImport() {
       month: detectedMonth,
       date: today(),
       count: totalImported,
-      size: f.size
+      size: f.size,
+      kontoName: _zk ? _zk.name : ''
     });
   }
   if(el('importLog')) el('importLog').textContent = `✓ Fertig – ${totalImported} Buchungen importiert.`;
   saveData(); updateBadges(); renderPage();
 }
 
-function parseAndImport(text) {
+function parseAndImport(text, zielkonto) {
+  const kontoId = zielkonto || defaultKontoId();
   const lines = text.split('\n');
   let count = 0;
   const dateRe = /(\d{2})\.(\d{2})\.(\d{4})/;
@@ -3955,10 +5086,10 @@ function parseAndImport(text) {
     if (amount < 0 && ['Einkauf Lebensmittel','Einkauf Haushalt'].includes(cl.cat)) {
       state.einkaeufe.push({ id: uid(), month, date, store: desc, amount: Math.abs(amount) });
     } else if (amount < 0) {
-      state.ausgaben.push({ id: uid(), month, date, desc, category: cl.cat, amount: Math.abs(amount) });
+      state.ausgaben.push({ id: uid(), month, date, desc, category: cl.cat, amount: Math.abs(amount), kontoId });
     } else if (cl.income) {
       const type = cl.cat === 'Gehalt' ? 'Gehalt' : cl.cat === 'Verkauf' ? 'Verkauf' : 'Sonstiges';
-      state.einnahmen.push({ id: uid(), month, date, source: desc, type, amount });
+      state.einnahmen.push({ id: uid(), month, date, source: desc, type, amount, bar: false, kontoId });//MARKpdf
     }
     count++;
   });
@@ -4078,7 +5209,7 @@ function checkDuplicate(collection, entry) {
   }) || null;
 }
 
-function saveQuickAdd(andClose) {
+async function saveQuickAdd(andClose) {
   // Default to closing - safer behavior
   if (andClose === undefined) andClose = true;
 
@@ -4095,7 +5226,7 @@ function saveQuickAdd(andClose) {
 
     if (!dateEl || !amountEl || !descEl) {
       console.error('saveQuickAdd: required fields missing');
-      alert('Fehler: Formularfelder nicht gefunden.');
+      uiAlert('Fehler: Formularfelder nicht gefunden.');
       return;
     }
 
@@ -4114,7 +5245,7 @@ function saveQuickAdd(andClose) {
     if (!amount) { amountEl.style.borderColor = 'var(--red)'; valid = false; }
     if (!date) { dateEl.style.borderColor = 'var(--red)'; valid = false; }
     if (!valid) {
-      alert('Bitte alle Pflichtfelder ausfüllen (Datum, Beschreibung, Betrag).');
+      uiAlert('Bitte alle Pflichtfelder ausfüllen (Datum, Beschreibung, Betrag).');
       return;
     }
 
@@ -4129,9 +5260,10 @@ function saveQuickAdd(andClose) {
       const probe = { date, amount }; probe[descField] = desc;
       const dup = checkDuplicate(dupColl, probe);
       if (dup) {
-        if (!confirm('⚠ Möglicherweise ist dieser Eintrag bereits vorhanden:\n\n' +
+        if (!await uiConfirm({ title: 'Möglicher Doppel-Eintrag', icon: '⚠',
+          message: 'Möglicherweise ist dieser Eintrag bereits vorhanden:<br><br>' +
           (dup[descField]||'') + ' – ' + fmtEur(dup.amount) + ' am ' + (dup.date||'') +
-          '\n\nTrotzdem speichern?')) return;
+          '<br><br>Trotzdem speichern?', okLabel: 'Trotzdem speichern', cancelLabel: 'Abbrechen' })) return;
       }
     }
 
@@ -4146,30 +5278,31 @@ function saveQuickAdd(andClose) {
     if (quickAddType === 'einkauf') {
       saved = { id: uid(), month, date, store: desc, amount };
       state.einkaeufe.push(saved);
-      console.log('Einkauf gespeichert:', saved);
     } else if (quickAddType === 'ausgabe') {
-      saved = { id: uid(), month, date, desc, category: cat || 'Sonstiges', amount };
+      saved = { id: uid(), month, date, desc, category: cat || 'Sonstiges', amount, kontoId: defaultKontoId() };
+      if (amount >= 100) { saved._kontoGefragt = true; _pendingAusgabeAsk = saved; }
       state.ausgaben.push(saved);
-      console.log('Ausgabe gespeichert:', saved);
     } else if (quickAddType === 'einnahme' || quickAddType === 'verkauf') {
       if (isWiederkehrend) {
         const startM = (document.getElementById('qa_w_start') || {}).value || month;
         const endM   = (document.getElementById('qa_w_end')   || {}).value || '';
         saved = { id: uid(), source: desc, amount, type: cat||'Sonstiges', startMonth: startM, endMonth: endM, note: '' };
         state.regelEinnahmen.push(saved);
-        console.log('Wiederkehrende Einnahme gespeichert:', saved);
       } else {
-        saved = { id: uid(), month, date, source: desc, type: quickAddType === 'verkauf' ? 'Verkauf' : (cat||'Sonstiges'), amount };
+        saved = { id: uid(), month, date, source: desc, type: quickAddType === 'verkauf' ? 'Verkauf' : (cat||'Sonstiges'), amount, bar: false, kontoId: defaultKontoId() };
         state.einnahmen.push(saved);
-        console.log('Einnahme gespeichert:', saved);
+        _pendingBarAsk = saved;//MARKqa
       }
     } else {
       console.error('saveQuickAdd: unknown quickAddType', quickAddType);
-      alert('Fehler: Unbekannter Buchungstyp.');
+      uiAlert('Fehler: Unbekannter Buchungstyp.');
       return;
     }
 
     if (month !== currentMonth) { currentMonth = month; buildMonthSelector(); }
+    // Bar/Konto-Abfrage für gerade erstellte Einnahme (nach Render)
+    if (_pendingBarAsk) { const _p = _pendingBarAsk; _pendingBarAsk = null; setTimeout(() => askEinnahmeKonto(_p), 50); }
+    if (_pendingAusgabeAsk) { const _pa = _pendingAusgabeAsk; _pendingAusgabeAsk = null; setTimeout(() => askAusgabeKonto(_pa), 60); }
     saveData();
     updateBadges();
     renderPage();
@@ -4187,7 +5320,7 @@ function saveQuickAdd(andClose) {
     }
   } catch(err) {
     console.error('saveQuickAdd error:', err);
-    alert('Eintrag konnte nicht gespeichert werden: ' + err.message);
+    uiAlert('Eintrag konnte nicht gespeichert werden: ' + err.message);
   } finally {
     if (saveBtn) saveBtn.disabled = false;
   }
@@ -4265,7 +5398,7 @@ function buildJahresberichtHTML(year, userName, totals, rows) {
 
 async function archiveYear() {
   const year = getSelectedYear();
-  if (!confirm(`Jahr ${year} archivieren und als PDF speichern?`)) return;
+  if (!await uiConfirm({ message: `Jahr ${year} archivieren und als PDF speichern?`, title: 'Jahr archivieren', icon: '📦' })) return;
 
   // ── PDF Jahresbericht erstellen ────────────────────────────────────────
   const rows = allMonths2026.map(m => {
@@ -4281,7 +5414,7 @@ async function archiveYear() {
   }, {gehalt:0,nj:0,fix:0,eink:0,ausg:0,cf:0});
 
   // ── A4 PDF via Electron printToPDF ──────────────────────────────────
-  const userName = state.meta.userName || 'Marco Conrad';
+  const userName = state.meta.userName || 'Nutzer';
   const pdfHtml = buildJahresberichtHTML(year, userName, totals, rows);
 
     if (window.EA && window.EA.printToPdf) {
@@ -4299,7 +5432,7 @@ async function archiveYear() {
   const newYear = year + 1;
   const lastCF = monthFinancials(`${year}-12`).cashflow;
   const newStart = Math.round(((state.meta.startgeld||0) + lastCF) * 100) / 100;
-  if (confirm(`✓ Jahresbericht wird gedruckt + Backup gespeichert!\n\nJetzt ${newYear} starten?\nStartgeld: ${fmtEur(newStart)}`)) {
+  if (await uiConfirm({ title: 'Jahr abschließen', icon: '📦', message: `Jahresbericht wird gedruckt + Backup gespeichert!<br><br>Jetzt ${newYear} starten?<br>Startgeld: ${fmtEur(newStart)}`, okLabel: `${newYear} starten`, cancelLabel: 'Abbrechen' })) {
     const fresh = JSON.parse(JSON.stringify(DEFAULT_DATA));
     fresh.meta = { ...state.meta, year: newYear, startgeld: newStart };
     const newIncome = {};
@@ -4318,7 +5451,7 @@ async function archiveYear() {
     allMonths2026.splice(0, allMonths2026.length, ...monthsBetween(`${newYear}-01`, `${newYear}-12`));
     currentMonth = `${newYear}-01`;
     saveData(); buildMonthSelector(); navigate('dashboard');
-    alert(`✓ Jahr ${newYear} gestartet! Viel Erfolg!`);
+    uiAlert(`✓ Jahr ${newYear} gestartet! Viel Erfolg!`);
   }
 }
 
@@ -4417,9 +5550,9 @@ function completeSetup() {
   if (state.config?.showStartupModal !== false) openQuickAdd();
 }
 
-function editUserName() {
-  const current = state.meta.userName || 'Marco Conrad';
-  const name = prompt('Name ändern:', current);
+async function editUserName() {
+  const current = state.meta.userName || 'Nutzer';
+  const name = await uiPrompt({ title: 'Name ändern', message: 'Wie möchtest du angezeigt werden?', value: current, placeholder: 'Dein Name' });
   if (name && name.trim()) {
     state.meta.userName = name.trim();
     const el2 = document.getElementById('userName');
@@ -4429,10 +5562,10 @@ function editUserName() {
 }
 
 async function createDesktopShortcut() {
-  if (!window.EA || !window.EA.createShortcut) { alert('Nur in der Desktop-App verfügbar'); return; }
+  if (!window.EA || !window.EA.createShortcut) { uiAlert('Nur in der Desktop-App verfügbar'); return; }
   const r = await window.EA.createShortcut();
-  if (r.ok) alert('✓ Verknüpfung wurde auf dem Desktop erstellt!\nDatei: ' + r.path);
-  else alert('Fehler: ' + r.error);
+  if (r.ok) uiAlert('✓ Verknüpfung wurde auf dem Desktop erstellt!\nDatei: ' + r.path);
+  else uiAlert('Fehler: ' + r.error);
 }
 
 
@@ -4495,6 +5628,8 @@ function getEtfKursInfo(s) {
 
 // ── GLOBAL EXPORTS für onclick Handler in dynamisch gerenderten Tabellen ──
 window.navigate          = navigate;
+window.updateSuche       = updateSuche;
+window.resetSuche        = resetSuche;
 window.openQuickAdd      = openQuickAdd;
 window.closeQuickAdd     = closeQuickAdd;
 window.saveQuickAdd      = saveQuickAdd;
@@ -4505,12 +5640,21 @@ window.showSetupScreen       = showSetupScreen;
 window.completeSetup         = completeSetup;
 window.editUserName          = editUserName;
 window.updateSetting         = updateSetting;
+window.addKonto          = addKonto;
+window.setKontoIstStand  = setKontoIstStand;
+window.zeigeSaldoDiagnose = zeigeSaldoDiagnose;
+window.resetKontoKorrekturen = resetKontoKorrekturen;
+window.updateKonto       = updateKonto;
+window.deleteKonto       = deleteKonto;
 window.clearAllData          = clearAllData;
 window.resetApp              = resetApp;
 window.updateConfig          = updateConfig;
 window.toggleConfig          = toggleConfig;
+window.updateSparzielSumme   = updateSparzielSumme;
+window.openUpdateManager     = openUpdateManager;
 window.uiConfirm = uiConfirm;
 window.uiAlert = uiAlert;
+window.uiPrompt = uiPrompt;
 window.showToast             = showToast;
 window.applyTheme            = applyTheme;
 window.applyAccent           = applyAccent;
@@ -4541,28 +5685,41 @@ window.addEinkauf           = addEinkauf;
 window.updateEinkaufStore   = updateEinkaufStore;
 window.updateEinkauf     = updateEinkauf;
 window.deleteEinkauf     = deleteEinkauf;
+window.pickEinkaufKonto  = pickEinkaufKonto;
 
 // Ausgaben
 window.addAusgabe        = addAusgabe;
 window.updateAusgabe     = updateAusgabe;
 window.deleteAusgabe     = deleteAusgabe;
+window.pickEinnahmeKonto = pickEinnahmeKonto;
+window.pickFixkZielkonto = pickFixkZielkonto;
+window.pickFixkKonto = pickFixkKonto;
+window.pickRegelEinnahmeKonto = pickRegelEinnahmeKonto;
+window.pickAusgabeKonto  = pickAusgabeKonto;
 
 // Einnahmen
 window.addEinnahme       = addEinnahme;
 window.updateEinnahme    = updateEinnahme;
 window.deleteEinnahme    = deleteEinnahme;
+window.toggleEinnahmeBar     = toggleEinnahmeBar;
 window.updateFixedIncome = updateFixedIncome;
+window.updateIncomeKonto = updateIncomeKonto;
 
 // Spesen
 window.addSpese          = addSpese;
+window.openSpeseModal    = openSpeseModal;
+window.closeSpeseModal   = closeSpeseModal;
+window.saveSpeseModal    = saveSpeseModal;
 window.updateSpese       = updateSpese;
 window.updateSpeseDate   = updateSpeseDate;
 window.updateSpeseCountry= updateSpeseCountry;
 window.deleteSpese       = deleteSpese;
+window.pickSpeseKonto    = pickSpeseKonto;
 window.recalcSpeseRow    = recalcSpeseRow;
 
 // Fixkosten
 window.addFixkosten         = addFixkosten;
+window.setFixkostenFilter   = setFixkostenFilter;
 window.openFixkostenModal   = openFixkostenModal;
 window.closeFixkostenModal  = closeFixkostenModal;
 window.saveFixkostenModal   = saveFixkostenModal;
@@ -4581,6 +5738,10 @@ window.onEtfChange              = onEtfChange;
 window.refreshEtfKurse          = refreshEtfKurse;
 window.updateSparen             = updateSparen;
 window.deleteSpar               = deleteSpar;
+window.umbuchungen              = umbuchungen;
+window.addUmbuchung             = addUmbuchung;
+window.updateUmbuchung          = updateUmbuchung;
+window.deleteUmbuchung          = deleteUmbuchung;
 
 // Zähler
 window.addZaehler                = addZaehler;
@@ -4825,7 +5986,7 @@ async function searchWertpapier(query, callback) {
     symbol: wp.symbol,
     shortname: wp.name,
     longname: wp.name,
-    quoteType: wp.typ === 'aktie' ? 'EQUITY' : wp.typ === 'etf' ? 'ETF' : wp.typ === 'krypto' ? 'CRYPTOCURRENCY' : 'EQUITY',
+    quoteType: wp.typ === 'aktie' ? 'EQUITY' : wp.typ === 'etf' ? 'ETF' : wp.typ === 'fonds' ? 'MUTUALFUND' : wp.typ === 'krypto' ? 'CRYPTOCURRENCY' : 'EQUITY',
     isin: wp.isin,
     wkn:  wp.wkn,
     exchange: wp.symbol.includes('.') ? wp.symbol.split('.')[1] : 'NMS',
