@@ -1,0 +1,45 @@
+name: Build Windows EXE
+
+# Baut automatisch einen Windows-Installer (.exe), wenn ein Version-Tag
+# (z.B. v2.0.0) gepusht wird. Manueller Start ("Run workflow") ist ebenfalls
+# moeglich – dann liegt die .exe unter "Artifacts" des Workflow-Laufs.
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write   # noetig, um die .exe an ein Release anzuhaengen
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Build (.exe via electron-builder)
+        run: npm run build
+
+      # Immer als herunterladbares Artefakt anhaengen (auch ohne Tag).
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: FinanzverwaltungPro-Setup
+          path: dist/*.exe
+
+      # Bei Tag-Push zusaetzlich ein GitHub Release mit der .exe erstellen.
+      - name: Publish Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*.exe
