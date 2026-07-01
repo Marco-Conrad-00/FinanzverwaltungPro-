@@ -1,0 +1,612 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+  <title>Finanzverwaltung Pro</title>
+  <link rel="stylesheet" href="styles.css" />
+  <script>
+    // Apply theme before render - no flicker
+    (function() {
+      try {
+        var raw = localStorage.getItem('fv_theme');
+        if (raw) {
+          var d = JSON.parse(raw);
+          if (d.theme === 'dark') document.documentElement.classList.add('theme-dark');
+          else if (d.theme === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches)
+            document.documentElement.classList.add('theme-dark');
+        }
+      } catch(e) {}
+    })();
+  </script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+  <script>
+    // Stub functions - werden von app.js überschrieben
+    function navigate(p){window._pendingNav=p;}
+    function openQuickAdd(){}
+    function closeQuickAdd(){document.getElementById('quickAddModal').classList.add('hidden');}
+    function saveQuickAdd(){}
+    function saveQuickAddClose(){}
+    function switchQuickTab(t){}
+    function onMonthChange(){}
+    function onYearChange(){}
+    function createNewYear(){}
+    function closeNewYearModal(){}
+    function confirmNewYear(){}
+    function updateYearField(){}
+    function closeYear(){}
+    function reopenYear(){}
+    function deleteYear(){}
+    function archiveYear(){}
+    function createDesktopShortcut(){}
+    function addFixkosten(){}
+    function openZaehlerModal(){}
+    function openRegelEinnahmeModal(){}
+    function openSpeseModal(){}
+    function closeSpeseModal(){}
+    function saveSpeseModal(){}
+    function closeRegelEinnahmeModal(){}
+    function saveRegelEinnahmeModal(){}
+    function openFinanzproduktModal(){}
+    function closeFinanzproduktModal(){}
+    function saveFinanzproduktModal(){}
+    function onFpTypChange(){}
+    function closeZaehlerModal(){}
+    function saveZaehlerModal(){}
+    function updateZaehlerModalEinheit(){}
+    function updateZaehlerEinheit(){}
+    function openSparenModal(){}
+    function editEtfTicker(){}
+    function refreshEtfKurse(){}
+    function closeSparenModal(){}
+    function saveSparenModal(){}
+    function onSparKatChange(){}
+    function onSparAnbieterChange(){}
+    function runSparenAutoEintragung(){}
+    function refreshAllWertpapierKurse(){}
+    function maybeAutoRefreshKurse(){}
+    function refreshAllWertpapierKurseSilent(){}
+    function setManualPrice(){}
+    function onFkCatChange(){}
+    function selectWertpapier(){}
+    function openSparplanModal(){}
+    function closeSparplanModal(){}
+    function saveSparplanModal(){}
+    function editSparenEntry(){}
+    function onWpSearchInput(){}
+    function onTxModeChange(){}
+    function onSpTxTypeChange(){}
+    function onEtfChange(){}
+    function onZmEinheitChange(){}
+    function updateEinkaufStore(){}
+    function updateFixk(){}
+    function deleteFixk(){}
+    function addSparen(){}
+    function updateSparen(){}
+    function deleteSpar(){}
+    function addZaehler(){}
+    function updateZaehler(){}
+    function deleteZaehler(){}
+    function addTab(){}
+    function deleteTab(){}
+    function addTabColumn(){}
+    function deleteTabColumn(){}
+    function updateColName(){}
+    function updateColType(){}
+    function addTabRow(){}
+    function deleteTabRow(){}
+    function updateTabCell(){}
+    function updateTabName(){}
+    function addSpese(){}
+    function deleteSpese(){}
+    function updateSpese(){}
+    function updateSpeseDate(){}
+    function updateSpeseCountry(){}
+    function recalcSpeseRow(){}
+    function clearAllData(){}
+    function resetApp(){}
+    function updateSetting(){}
+    function updateConfig(){}
+    function toggleConfig(){}
+    function applyTheme(){}
+    function applyAccent(){}
+    function addCustomCat(){}
+    function removeCustomCat(){}
+    function removeCustomCatByIndex(){}
+    function clearSingle(){}
+    function addCustomCatByGroup(){}
+    function removeCustomCatByGroup(){}
+    function restoreFromTrash(){}
+    function deleteFromTrashForever(){}
+    function emptyTrash(){}
+    function onToggleAutoBackup(){}
+    function selectBackupPath(){}
+    function openBackupFolder(){}
+    function doGlobalSearch(){}
+    function restartSetup(){}
+    function openDataFolder(){}
+    function exportBackup(){}
+    function exportCSV(){}
+    function exportJSON(){}
+    function importBackup(){}
+    function completeSetup(){}
+    function updateFixedIncome(){}
+    function deleteImport(){}
+    function openRegelEinnahmeModal(){}
+    function openSpeseModal(){}
+    function closeSpeseModal(){}
+    function saveSpeseModal(){}
+    function toggleWiederkehrendOptions(){}
+    function updateRegelEinnahme(){}
+    function deleteRegelEinnahme(){}
+    function openFixkostenModal(){}
+    function closeFixkostenModal(){}
+    function saveFixkostenModal(){}
+    function onFkSparTypChange(){}
+    function onFkWpSearch(){}
+    function selectFkWertpapier(){}
+  </script>
+</head>
+<body>
+
+<div class="modal-overlay hidden" id="quickAddModal">
+  <div class="modal" onclick="event.stopPropagation()">
+    <div class="modal-title">Was ist neu?</div>
+    <div class="modal-subtitle">Schnell eine Buchung erfassen</div>
+    <div class="tab-bar">
+      <button class="tab-btn active" onclick="switchQuickTab('ausgabe')">💸 Ausgabe</button>
+      <button class="tab-btn" onclick="switchQuickTab('einkauf')">🛒 Einkauf</button>
+      <button class="tab-btn" onclick="switchQuickTab('einnahme')">💰 Einnahme</button>
+      <button class="tab-btn" onclick="switchQuickTab('verkauf')">📦 Verkauf</button>
+    </div>
+    <div class="form-grid form-grid-2">
+      <label class="field">Datum <input type="date" id="qa_date" /></label>
+      <label class="field">Betrag (€) <input type="number" id="qa_amount" step="0.01" placeholder="0,00" /></label>
+    </div>
+    <div class="form-grid mt-2">
+      <label class="field">Beschreibung <input type="text" id="qa_desc" placeholder="z.B. Kaufland…" /></label>
+    </div>
+    <div class="form-grid form-grid-2 mt-2">
+      <label class="field"><span id="qa_cat_label_text">Kategorie</span> <select id="qa_category"></select></label>
+      <label class="field">Monat <input type="month" id="qa_month" /></label>
+    </div>
+    <div class="form-grid mt-2" id="qa_extra_fields"></div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeQuickAdd()">Abbrechen</button>
+      <button class="btn btn-secondary" onclick="saveQuickAdd(false)">Speichern & weiter</button>
+      <button class="btn btn-primary" id="qa_save_btn" onclick="saveQuickAdd(true)">Speichern</button>
+    </div>
+  </div>
+</div>
+
+<!-- SPESE MODAL -->
+<div class="modal-overlay hidden" id="speseModal">
+  <div class="modal" onclick="event.stopPropagation()">
+    <div class="modal-title">Neue Reise / Dienstreise</div>
+    <div class="form-grid form-grid-2">
+      <label class="field">Von (Datum)
+        <input type="date" id="sm_dateFrom" />
+      </label>
+      <label class="field">Bis (Datum)
+        <input type="date" id="sm_dateTo" />
+      </label>
+      <label class="field" style="grid-column:1/-1">Land
+        <select id="sm_country">
+          <option value="Deutschland">Deutschland (14€ / 28€)</option>
+          <option value="Österreich">Österreich (26€ / 52€)</option>
+          <option value="Schweiz">Schweiz (42€ / 84€)</option>
+          <option value="Frankreich">Frankreich (33€ / 65€)</option>
+          <option value="Niederlande">Niederlande (33€ / 65€)</option>
+          <option value="USA">USA (40€ / 80€)</option>
+          <option value="Sonstiges">Sonstiges</option>
+        </select>
+      </label>
+      <label class="field" style="grid-column:1/-1">Kunde / Projekt
+        <input type="text" id="sm_kunde" placeholder="z.B. Robert Bosch GmbH" />
+      </label>
+      <label class="field">Auslagen (€)
+        <input type="number" id="sm_auslagen" step="0.01" value="0" />
+      </label>
+      <label class="field">Notiz
+        <input type="text" id="sm_note" placeholder="Optional…" />
+      </label>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeSpeseModal()">Abbrechen</button>
+      <button class="btn btn-primary" onclick="saveSpeseModal()">Speichern</button>
+    </div>
+  </div>
+</div>
+
+<!-- REGELEINNAHME MODAL -->
+<div class="modal-overlay hidden" id="regelEinnahmeModal">
+  <div class="modal" onclick="event.stopPropagation()">
+    <div class="modal-title">Wiederkehrende Einnahme</div>
+    <div class="form-grid form-grid-2">
+      <label class="field" style="grid-column:1/-1">Quelle / Beschreibung
+        <input type="text" id="re_source" placeholder="z.B. Bergmensch, Nebenjob…"/>
+      </label>
+      <label class="field">Typ
+        <select id="re_type">
+          <option>Gehalt</option><option>Nebenjob</option>
+          <option>Miete</option><option>Sonstiges</option>
+        </select>
+      </label>
+      <label class="field">Betrag / Monat (€)
+        <input type="number" id="re_amount" step="0.01" placeholder="0,00"/>
+      </label>
+      <label class="field">Gültig ab
+        <input type="month" id="re_start" style="width:100%"/>
+      </label>
+      <label class="field">Gültig bis (leer = unbegrenzt)
+        <input type="month" id="re_end" style="width:100%" placeholder="Kein Ende"/>
+      </label>
+      <label class="field" style="grid-column:1/-1">Notiz
+        <input type="text" id="re_note" placeholder="Optional…"/>
+      </label>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeRegelEinnahmeModal()">Abbrechen</button>
+      <button class="btn btn-primary" onclick="saveRegelEinnahmeModal()">Speichern</button>
+    </div>
+  </div>
+</div>
+
+<!-- ZAEHLER MODAL -->
+<div class="modal-overlay hidden" id="zaehlerModal">
+  <div class="modal" onclick="event.stopPropagation()">
+    <div class="modal-title">Neuer Zählerstand</div>
+    <div class="form-grid form-grid-2">
+      <label class="field">Datum <input type="date" id="zm_date" /></label>
+      <label class="field">Zählertyp
+        <select id="zm_type" onchange="updateZaehlerModalEinheit()">
+          <option>Strom</option><option>Warmwasser</option><option>Kaltwasser</option>
+          <option>Wasser allgemein</option><option>Gas</option><option>Heizung / Wärme</option>
+          <option>Sonstiges</option>
+        </select>
+      </label>
+      <label class="field hidden" id="zm_type_custom_label" style="grid-column:1/-1">Eigener Zählertyp
+        <input type="text" id="zm_type_custom" placeholder="Zählertyp eingeben…" />
+      </label>
+      <label class="field">Zählerstand <input type="number" id="zm_value" step="0.001" placeholder="z.B. 1234.567" /></label>
+      <label class="field">Einheit
+        <select id="zm_einheit" onchange="onZmEinheitChange()">
+          <option>kWh</option><option>Wh</option><option>MWh</option>
+          <option>Liter / L</option><option>m³</option><option>ml</option>
+          <option>kg</option><option>g</option><option>Stück</option><option>Sonstiges</option>
+        </select>
+      </label>
+      <label class="field hidden" id="zm_einheit_custom_label">Eigene Einheit
+        <input type="text" id="zm_einheit_custom" placeholder="Einheit eingeben…" />
+      </label>
+      <label class="field" style="grid-column:1/-1">Notiz <input type="text" id="zm_note" placeholder="Optional…" /></label>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeZaehlerModal()">Abbrechen</button>
+      <button class="btn btn-primary" onclick="saveZaehlerModal()">Speichern</button>
+    </div>
+  </div>
+</div>
+
+<!-- SPAREN MODAL -->
+<div class="modal-overlay hidden" id="sparenModal">
+  <div class="modal" onclick="event.stopPropagation()" style="max-width:560px">
+    <div class="modal-title">Neue Einzahlung</div>
+    <div class="form-grid form-grid-2">
+      <label class="field">Datum <input type="date" id="sp_date" /></label>
+      <label class="field">Betrag (€) <input type="number" id="sp_amount" step="0.01" placeholder="0,00" /></label>
+      <label class="field">Kategorie / Anlageart
+        <select id="sp_kat" onchange="onSparKatChange()">
+          <option>Tagesgeld</option><option>Festgeld</option><option>ETF</option>
+          <option>Aktien</option><option>Krypto</option><option>Depot allgemein</option>
+          <option>Girokonto</option><option>Bargeld</option><option>Sparziel</option><option>Sonstiges</option>
+        </select>
+      </label>
+      <label class="field">Konto / Anbieter
+        <select id="sp_anbieter" onchange="onSparAnbieterChange()">
+          <option>Trade Republic</option><option>Bankkonto</option><option>Sparkasse</option>
+          <option>ING</option><option>DKB</option><option>Comdirect</option><option>Sonstiges</option>
+        </select>
+      </label>
+      <label class="field hidden" id="sp_kat_custom_label" style="grid-column:1/-1">Eigene Kategorie
+        <input type="text" id="sp_kat_custom" placeholder="Kategorie eingeben…" />
+      </label>
+      <label class="field hidden" id="sp_anbieter_custom_label">Eigener Anbieter
+        <input type="text" id="sp_anbieter_custom" placeholder="Anbieter eingeben…" />
+      </label>
+    </div>
+        <!-- Wertpapier Bereich (ETF/Aktien) -->
+    <div id="sp_etf_section" class="hidden" style="border:1px solid var(--line);border-radius:10px;padding:14px;margin:10px 0;background:var(--surface)">
+      <p style="font-size:11px;font-weight:700;color:var(--accent);text-transform:uppercase;letter-spacing:.06em;margin-bottom:10px">Wertpapier-Details</p>
+      <div style="position:relative;margin-bottom:12px">
+        <label class="field" style="display:block">🔍 Suchen (Name, Symbol oder ISIN)
+          <input type="text" id="sp_wp_search" placeholder="z.B. Apple, AAPL, IE00B4L5Y983…" autocomplete="off" oninput="onWpSearchInput(this.value)" />
+        </label>
+        <div id="sp_wp_results" style="position:absolute;left:0;right:0;top:100%;background:var(--card);border:1px solid var(--border);border-radius:8px;margin-top:4px;max-height:280px;overflow-y:auto;z-index:50;display:none;box-shadow:0 8px 20px rgba(0,0,0,.15)"></div>
+      </div>
+      <div class="form-grid form-grid-2">
+        <label class="field" style="grid-column:1/-1">Name <input type="text" id="sp_etf_custom" placeholder="z.B. Apple Inc, iShares Core MSCI World…"/></label>
+        <label class="field">Symbol/Ticker <input type="text" id="sp_ticker" placeholder="z.B. AAPL, EUNL.DE" style="font-family:monospace"/></label>
+        <label class="field">ISIN <input type="text" id="sp_isin" placeholder="z.B. IE00B4L5Y983" style="font-family:monospace"/></label>
+        <label class="field">WKN <input type="text" id="sp_wkn" placeholder="z.B. A0RPWH" style="font-family:monospace"/></label>
+        <label class="field">Typ
+          <select id="sp_wp_typ">
+            <option value="etf">ETF</option>
+            <option value="aktie">Einzelaktie</option>
+            <option value="fonds">Fonds</option>
+            <option value="krypto">Krypto</option>
+          </select>
+        </label>
+      </div>
+      <div style="margin-top:12px;border-top:1px solid var(--border);padding-top:12px">
+        <p style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:10px">Transaktion</p>
+        <div class="form-grid form-grid-2">
+          <label class="field">Art
+            <select id="sp_tx_type" onchange="onSpTxTypeChange()">
+              <option value="kauf">Kauf (neu)</option>
+              <option value="bestand">Bestand übernehmen (bereits vorhanden)</option>
+              <option value="verkauf">Verkauf</option>
+            </select>
+          </label>
+          <label class="field">Eingabemodus
+            <select id="sp_tx_mode" onchange="onTxModeChange()">
+              <option value="amount">Eingezahlter Betrag</option>
+              <option value="units">Stückzahl + Kurs</option>
+            </select>
+          </label>
+          <label class="field hidden" id="sp_tx_units_label">Stückzahl <input type="number" id="sp_tx_units" step="0.0001" placeholder="0"/></label>
+          <label class="field hidden" id="sp_tx_price_label">Kaufkurs <input type="number" id="sp_tx_price" step="0.01" placeholder="0,00"/></label>
+          <label class="field">Gebühren (optional) <input type="number" id="sp_tx_fees" step="0.01" placeholder="0,00"/></label>
+        </div>
+      </div>
+    </div>
+
+    <div class="form-grid">
+      <label class="field">Notiz <input type="text" id="sp_note" placeholder="Optional…" /></label>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeSparenModal()">Abbrechen</button>
+      <button class="btn btn-primary" onclick="saveSparenModal()">Speichern</button>
+    </div>
+  </div>
+</div>
+
+<!-- FINANZPRODUKTE MODAL -->
+<div class="modal-overlay hidden" id="finanzproduktModal">
+  <div class="modal" onclick="event.stopPropagation()" style="max-width:560px">
+    <div class="modal-title">Finanzprodukt erfassen</div>
+    <div class="form-grid form-grid-2">
+      <label class="field">Jahr <input type="number" id="fp_jahr" min="2000" max="2100" /></label>
+      <label class="field">Datum <input type="date" id="fp_datum" /></label>
+      <label class="field">Produktname <input type="text" id="fp_name" placeholder="z.B. AVWL, DWS Fonds…" /></label>
+      <label class="field">Produkttyp
+        <select id="fp_typ" onchange="onFpTypChange()">
+          <option>AVWL</option>
+          <option>Fondsbasierte Rentenversicherung</option>
+          <option>Private Rentenversicherung</option>
+          <option>Lebensversicherung</option>
+          <option>Bausparvertrag</option>
+          <option>Fondsanlage</option>
+          <option>ETF-Depot</option>
+          <option>Sonstiges</option>
+        </select>
+      </label>
+      <label class="field hidden" id="fp_typ_custom_label" style="grid-column:1/-1">Eigener Typ <input type="text" id="fp_typ_custom" placeholder="Produkttyp eingeben…"/></label>
+      <label class="field">Anbieter <input type="text" id="fp_anbieter" placeholder="z.B. Allianz, DWS…"/></label>
+      <label class="field">Vertragsnummer <input type="text" id="fp_vertrag" placeholder="Optional"/></label>
+      <label class="field">Eingezahlter Betrag (€) <input type="number" id="fp_eingezahlt" step="0.01" placeholder="0,00"/></label>
+      <label class="field">Aktueller Wert (€) <input type="number" id="fp_wert" step="0.01" placeholder="0,00"/></label>
+      <label class="field" style="grid-column:1/-1">Notiz <input type="text" id="fp_notiz" placeholder="Optional"/></label>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeFinanzproduktModal()">Abbrechen</button>
+      <button class="btn btn-primary" onclick="saveFinanzproduktModal()">Speichern</button>
+    </div>
+  </div>
+</div>
+
+<!-- FIXKOSTEN MODAL -->
+<div class="modal-overlay hidden" id="fixkostenModal">
+  <div class="modal" onclick="event.stopPropagation()">
+    <div class="modal-title">Neuer Fixkosten-Posten</div>
+    <div class="modal-subtitle">Trage alle Details für den neuen Fixkosten-Eintrag ein</div>
+    <div class="form-grid form-grid-2">
+      <label class="field">Bezeichnung
+        <input type="text" id="fk_name" placeholder="z.B. Miete, Spotify…" />
+      </label>
+      <label class="field">Kategorie
+        <select id="fk_cat">
+          <option value="Wohnen">Wohnen</option>
+          <option value="Versicherung">Versicherung</option>
+          <option value="Abo">Abo</option>
+          <option value="Kredit">Kredit</option>
+          <option value="Sparen">Sparen</option>
+          <option value="Freizeit">Freizeit</option>
+          <option value="Sonstiges">Sonstiges</option>
+        </select>
+      </label>
+      <label class="field">Betrag (€)
+        <input type="number" id="fk_amount" step="0.01" placeholder="0,00" />
+      </label>
+      <label class="field">Fällig am (Tag)
+        <input type="number" id="fk_day" min="1" max="31" value="1" />
+      </label>
+      <label class="field">Gültig von
+        <input type="month" id="fk_start" />
+      </label>
+      <label class="field">Gültig bis
+        <input type="month" id="fk_end" />
+      </label>
+    </div>
+    <!-- Sparen-Details (sichtbar bei Kategorie = Sparen) -->
+    <div id="fk_sparen_section" class="hidden" style="border:1px solid var(--line);border-radius:10px;padding:14px;margin:10px 0;background:var(--surface)">
+      <p style="font-size:11px;font-weight:700;color:var(--accent);text-transform:uppercase;letter-spacing:.06em;margin-bottom:10px">Spar-Details</p>
+      <div class="form-grid form-grid-2">
+        <label class="field" style="grid-column:1/-1">Wie wird gespart?
+          <select id="fk_spar_typ" onchange="onFkSparTypChange()">
+            <option value="bargeld">Bargeld / Tagesgeld / Festgeld</option>
+            <option value="etf">ETF</option>
+            <option value="aktie">Einzelaktie</option>
+            <option value="krypto">Krypto</option>
+          </select>
+        </label>
+        <label class="field" style="grid-column:1/-1">Zahlungsquelle
+          <select id="fk_spar_source">
+            <option value="cashflow">Laufender Cashflow (monatlich abgezogen)</option>
+            <option value="startgeld">Vom Startguthaben (Einmalbetrag)</option>
+          </select>
+        </label>
+        <!-- Wertpapier-Suche (nur bei ETF/Aktien/Krypto) -->
+        <div id="fk_wp_wrap" class="hidden" style="grid-column:1/-1;position:relative">
+          <label class="field" style="display:block">🔍 Wertpapier suchen
+            <input type="text" id="fk_wp_search" placeholder="z.B. Apple, EUNL.DE, IE00B4L5Y983…" autocomplete="off" oninput="onFkWpSearch(this.value)" />
+          </label>
+          <div id="fk_wp_results" style="position:absolute;left:0;right:0;top:100%;background:var(--card);border:1px solid var(--border);border-radius:8px;margin-top:4px;max-height:260px;overflow-y:auto;z-index:50;display:none;box-shadow:0 8px 20px rgba(0,0,0,.15)"></div>
+        </div>
+        <label class="field hidden" id="fk_wp_name_wrap" style="grid-column:1/-1">Wertpapier <input type="text" id="fk_wp_name" placeholder="Name" readonly style="background:var(--surface);font-weight:600"/></label>
+        <label class="field hidden" id="fk_wp_symbol_wrap">Symbol <input type="text" id="fk_wp_symbol" readonly style="background:var(--surface);font-family:monospace"/></label>
+        <label class="field hidden" id="fk_wp_isin_wrap">ISIN <input type="text" id="fk_wp_isin" readonly style="background:var(--surface);font-family:monospace"/></label>
+      </div>
+      <p style="font-size:11px;color:var(--muted);margin-top:10px">💡 Bei jedem Monatswechsel wird automatisch ein Eintrag in „Sparen &amp; Depot" angelegt – mit aktuellem Monats-Kurs.</p>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeFixkostenModal()">Abbrechen</button>
+      <button class="btn btn-primary" onclick="saveFixkostenModal()">Speichern</button>
+    </div>
+  </div>
+</div>
+
+
+<!-- SPARPLAN MODAL -->
+<div class="modal-overlay hidden" id="sparplanModal">
+  <div class="modal" onclick="event.stopPropagation()" style="max-width:520px">
+    <div class="modal-title">📅 Sparplan anlegen</div>
+    <div class="modal-subtitle">Lege fest, in welchem Zeitraum monatlich gespart werden soll. Jeden Monat wird automatisch eine neue Position in „Sparen &amp; Depot" angelegt.</div>
+    <!-- Wertpapier Info (readonly) -->
+    <div id="spp_wp_info" style="background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:12px 14px;margin-bottom:14px;font-size:13px"></div>
+    <div class="form-grid form-grid-2">
+      <label class="field" style="grid-column:1/-1">Bezeichnung
+        <input type="text" id="spp_name" placeholder="z.B. Sparplan MSCI World" />
+      </label>
+      <label class="field">Monatlicher Betrag
+        <input type="number" id="spp_amount" step="0.01" placeholder="0,00" />
+      </label>
+      <label class="field">Fällig am (Tag)
+        <input type="number" id="spp_day" min="1" max="31" value="1" />
+      </label>
+      <label class="field">Gültig von
+        <input type="month" id="spp_start" />
+      </label>
+      <label class="field">Gültig bis
+        <input type="month" id="spp_end" />
+      </label>
+      <label class="field" style="grid-column:1/-1">Zahlungsquelle
+        <select id="spp_source">
+          <option value="cashflow">Laufender Cashflow (monatlich abgezogen)</option>
+          <option value="startgeld">Vom Startguthaben (Einmalbetrag)</option>
+        </select>
+      </label>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeSparplanModal()">Abbrechen</button>
+      <button class="btn btn-primary" onclick="saveSparplanModal()">Sparplan anlegen</button>
+    </div>
+  </div>
+</div>
+
+
+<div class="app-shell">
+  <aside class="sidebar">
+    <div class="sidebar-logo">
+      <p class="eyebrow">Finanzverwaltung</p>
+      <h1 id="userName" onclick="editUserName()" title="Klicken zum Bearbeiten" style="cursor:pointer" >Marco Conrad</h1>
+      <div class="version" id="appVersion">v2.0</div>
+    </div>
+    <div class="sidebar-section">Übersicht</div>
+    <button class="nav-item active" onclick="navigate('dashboard')">📊 Dashboard</button>
+    <button class="nav-item" onclick="navigate('einstellungen')">⚙️ Einstellungen</button>
+    <button class="nav-item" onclick="navigate('jahresuebersicht')">📅 Jahresübersicht</button>
+    <div class="sidebar-section">Monatsauswertung</div>
+    <button class="nav-item" onclick="navigate('buchungen')">📋 Buchungen</button>
+    <button class="nav-item" onclick="navigate('einkaeufe')">🛒 Einkäufe</button>
+    <button class="nav-item" onclick="navigate('ausgaben')">💸 Ausgaben</button>
+    <button class="nav-item" onclick="navigate('einnahmen')">💰 Einnahmen</button>
+    <button class="nav-item" onclick="navigate('spesen')">✈️ Spesen & Reisen</button>
+    <div class="sidebar-section">Planung</div>
+    <button class="nav-item" onclick="navigate('fixkosten')">🔁 Fixkosten</button>
+    <button class="nav-item" onclick="navigate('sparen')">🏦 Sparen & Depot</button>
+    <button class="nav-item" onclick="navigate('zaehler')">⚡ Zählerstände</button>
+    <button class="nav-item" onclick="navigate('finanzprodukte')">📋 Finanzprodukte</button>
+    <button class="nav-item" onclick="navigate('tabellen')">📝 Eigene Tabellen</button>
+    <div class="sidebar-section">Verwaltung</div>
+    <button class="nav-item" onclick="archiveYear()">📦 Jahr archivieren</button>
+    <div class="sidebar-section">Import</div>
+    <button class="nav-item" onclick="navigate('importPage')">📥 PDF Import</button>
+    <div class="sidebar-footer">
+      <button class="quick-add-btn" onclick="openQuickAdd()">+ Neue Buchung</button>
+    </div>
+  </aside>
+
+  <div class="main">
+    <div class="topbar">
+      <div class="topbar-left">
+        <p class="eyebrow" id="topbar_eyebrow">Übersicht</p>
+        <h2 id="topbar_title">Dashboard</h2>
+      </div>
+      <div class="topbar-actions">
+      <input type="search" id="globalSearch" placeholder="🔍 Suchen…" style="width:180px;min-height:34px" oninput="doGlobalSearch(this.value)" />
+        <select id="yearSelector" onchange="onYearChange(this.value)" style="min-width:90px"></select>
+        <select id="monthSelector" onchange="onMonthChange()"></select>
+        <button class="btn btn-ghost btn-sm" onclick="openQuickAdd()">+ Buchung</button>
+        <button class="btn btn-primary btn-sm" onclick="window.print()">🖨 PDF</button>
+      </div>
+    </div>
+    <div class="page-content" id="pageContent"></div>
+  </div>
+</div>
+
+<!-- Supermärkte Datalist -->
+<datalist id="supermaerkte_list"></datalist>
+
+<div id="searchResults" class="hidden" style="position:fixed;top:70px;right:24px;width:420px;max-height:60vh;overflow-y:auto;background:var(--paper);border:1px solid var(--border);border-radius:12px;box-shadow:0 16px 48px rgba(0,0,0,.3);z-index:900;padding:8px"></div>
+
+<div id="appToast" style="position:fixed;bottom:24px;right:24px;z-index:9998;padding:10px 18px;border-radius:10px;font-size:13px;font-weight:600;display:flex;align-items:center;gap:8px;box-shadow:0 8px 24px rgba(0,0,0,.25);transition:opacity .3s,transform .3s;opacity:0;transform:translateY(10px);pointer-events:none;min-width:180px"></div>
+
+<script src="app.js"></script>
+<!-- New Year Modal -->
+<div id="newYearModal" class="modal-overlay hidden">
+  <div class="modal-content" style="max-width:480px">
+    <div class="modal-header">
+      <h3>📅 Neues Jahr anlegen</h3>
+      <button class="modal-close" onclick="closeNewYearModal()">×</button>
+    </div>
+    <div class="modal-body">
+      <label class="field">Jahr
+        <input type="number" id="newYear_input" min="2000" max="2100" placeholder="z.B. 2027" />
+      </label>
+      <div style="margin-top:14px;padding:12px;background:var(--surface);border-radius:8px;border:1px solid var(--border)">
+        <div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;margin-bottom:8px">Aus Vorjahr übernehmen</div>
+        <label style="display:flex;align-items:center;gap:8px;padding:4px 0;font-size:13px;cursor:pointer">
+          <input type="checkbox" id="newYear_takeBalance" checked />
+          <span>Startguthaben aus Endsaldo</span>
+        </label>
+        <label style="display:flex;align-items:center;gap:8px;padding:4px 0;font-size:13px;cursor:pointer">
+          <input type="checkbox" id="newYear_takeFixkosten" checked />
+          <span>Fixkosten</span>
+        </label>
+        <label style="display:flex;align-items:center;gap:8px;padding:4px 0;font-size:13px;cursor:pointer">
+          <input type="checkbox" id="newYear_takeRegel" checked />
+          <span>Wiederkehrende Einnahmen</span>
+        </label>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeNewYearModal()">Abbrechen</button>
+      <button class="btn btn-primary" onclick="confirmNewYear()">Jahr anlegen</button>
+    </div>
+  </div>
+</div>
+
+</body>
+</html>
