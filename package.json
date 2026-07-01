@@ -28,7 +28,8 @@
             "x64"
           ]
         }
-      ]
+      ],
+      "icon": "build/icon.ico"
     },
     "nsis": {
       "oneClick": false,
@@ -39,10 +40,13 @@
       "installerLanguages": [
         "de_DE"
       ],
-      "language": "1031"
+      "language": "1031",
+      "installerIcon": "build/icon.ico",
+      "uninstallerIcon": "build/icon.ico"
     },
     "files": [
-      "src/**/*"
+      "src/**/*",
+      "build/**/*"
     ]
   },
   "devDependencies": {
