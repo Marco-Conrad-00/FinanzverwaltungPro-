@@ -1,8 +1,8 @@
 name: Build Windows EXE
 
-# Baut automatisch einen Windows-Installer (.exe), wenn ein Version-Tag
-# (z.B. v2.0.0) gepusht wird. Manueller Start ("Run workflow") ist ebenfalls
-# moeglich – dann liegt die .exe unter "Artifacts" des Workflow-Laufs.
+# Baut den Windows-Installer (.exe) bei jedem Version-Tag (z.B. v1.0.4) und
+# laesst electron-builder das GitHub-Release SELBST veroeffentlichen –
+# inkl. korrekter latest.yml fuer electron-updater (Auto-Update).
 on:
   push:
     tags:
@@ -10,7 +10,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write   # noetig, um die .exe an ein Release anzuhaengen
+  contents: write
 
 jobs:
   build-windows:
@@ -27,25 +27,23 @@ jobs:
       - name: Install dependencies
         run: npm install
 
-      - name: Build (.exe via electron-builder)
+      # Bei Tag-Push: bauen UND als Release veroeffentlichen (latest.yml inklusive).
+      - name: Build & Publish (Tag)
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: npm run build -- --publish always
+
+      # Manueller Lauf ohne Tag: nur bauen, kein Release.
+      - name: Build only (manuell)
+        if: ${{ !startsWith(github.ref, 'refs/tags/') }}
         run: npm run build -- --publish never
 
-      # Immer als herunterladbares Artefakt anhaengen (auch ohne Tag).
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: FinanzverwaltungPro-Setup
           path: |
-            dist/*.exe
-            dist/latest.yml
-            dist/*.blockmap
-
-      # Bei Tag-Push zusaetzlich ein GitHub Release mit der .exe erstellen.
-      - name: Publish Release
-        if: startsWith(github.ref, 'refs/tags/')
-        uses: softprops/action-gh-release@v2
-        with:
-          files: |
             dist/*.exe
             dist/latest.yml
             dist/*.blockmap

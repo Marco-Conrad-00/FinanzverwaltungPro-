@@ -1,6 +1,6 @@
 {
   "name": "finanzverwaltung-pro",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "main": "src/main.js",
   "scripts": {
     "start": "electron .",
@@ -17,7 +17,8 @@
       {
         "provider": "github",
         "owner": "Marco-Conrad-00",
-        "repo": "FinanzverwaltungPro-"
+        "repo": "FinanzverwaltungPro-",
+        "releaseType": "release"
       }
     ],
     "win": {
