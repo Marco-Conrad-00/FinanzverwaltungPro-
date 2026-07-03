@@ -1,7 +1,9 @@
-const { app, BrowserWindow, ipcMain, dialog, shell } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, shell, Tray, Menu, Notification, nativeImage } = require('electron');
 const path = require('path');
 const fs = require('fs');
 let win;
+let tray = null;
+let isQuiting = false;
 
 // Fix userData path to always use 'finanzverwaltung-pro' regardless of productName
 app.setPath('userData', path.join(app.getPath('appData'), 'finanzverwaltung-pro'));
@@ -10,15 +12,81 @@ function createWindow() {
   win = new BrowserWindow({
     width: 1440, height: 900, minWidth: 1100, minHeight: 700,
     title: 'Finanzverwaltung Pro', backgroundColor: '#f6f8f6', show: false,
+    icon: path.join(__dirname, 'logo.png'),
     webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: false, nodeIntegration: false }
   });
   win.loadFile(path.join(__dirname, 'index.html'));
   win.setMenuBarVisibility(false);
   win.once('ready-to-show', () => win.show());
+
+  // Beim Schließen: in den Tray minimieren statt beenden (nur wenn Tray aktiv/gewünscht).
+  win.on('close', (e) => {
+    if (!isQuiting && trayEnabled && tray) {
+      e.preventDefault();
+      win.hide();
+    }
+  });
 }
+
+// Ob der Hintergrund-/Tray-Betrieb gewünscht ist (vom Renderer gesetzt).
+let trayEnabled = false;
 
 app.whenReady().then(createWindow);
 app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });
+
+// ── ERINNERUNGEN: System-Tray + Benachrichtigungen ──────────────────────────
+// Additiv & abgesichert: schlägt etwas fehl, läuft die App normal weiter.
+function setupTray() {
+  try {
+    if (tray) return;
+    let img;
+    try {
+      const iconPath = path.join(__dirname, 'logo.png');
+      img = nativeImage.createFromPath(iconPath);
+      if (img.isEmpty()) img = undefined;
+    } catch { img = undefined; }
+    tray = new Tray(img || nativeImage.createEmpty());
+    tray.setToolTip('Finanzverwaltung Pro');
+    const menu = Menu.buildFromTemplate([
+      { label: 'Öffnen', click: () => { if (win) { win.show(); win.focus(); } } },
+      { type: 'separator' },
+      { label: 'Beenden', click: () => { isQuiting = true; app.quit(); } },
+    ]);
+    tray.setContextMenu(menu);
+    tray.on('click', () => { if (win) { win.isVisible() ? win.focus() : win.show(); } });
+  } catch (e) {
+    console.warn('Tray konnte nicht erstellt werden:', e.message);
+    tray = null;
+  }
+}
+
+app.on('before-quit', () => { isQuiting = true; });
+
+// Renderer schaltet Hintergrundbetrieb an/aus (aus den Einstellungen).
+ipcMain.handle('set-tray-enabled', (_e, enabled) => {
+  trayEnabled = !!enabled;
+  if (trayEnabled) setupTray();
+  else if (tray) { try { tray.destroy(); } catch {} tray = null; }
+  return { ok: true, trayEnabled };
+});
+
+// Renderer löst eine System-Benachrichtigung aus.
+ipcMain.handle('notify', (_e, payload) => {
+  try {
+    const title = (payload && payload.title) || 'Erinnerung';
+    const body  = (payload && payload.body)  || '';
+    if (!Notification.isSupported()) return { ok: false, reason: 'not-supported' };
+    let icon;
+    try { icon = nativeImage.createFromPath(path.join(__dirname, 'logo.png')); if (icon.isEmpty()) icon = undefined; } catch {}
+    const n = new Notification({ title, body, icon, silent: false });
+    n.on('click', () => { if (win) { win.show(); win.focus(); } });
+    n.show();
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, reason: e.message };
+  }
+});
+
 
 // ── AUTO-UPDATE (electron-updater über GitHub Releases) ──────────────────────
 // Prüft beim Start auf neue Versionen, lädt sie im Hintergrund und fragt dann,

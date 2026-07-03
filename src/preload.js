@@ -20,4 +20,6 @@ window.EA = {
   checkForUpdates: () => ipcRenderer.invoke('check-for-updates'),
   onUpdateAvailable: (cb) => ipcRenderer.on('update-available', (_, d) => cb(d)),
   onUpdateProgress:  (cb) => ipcRenderer.on('update-progress', (_, d) => cb(d)),
+  setTrayEnabled: (enabled) => ipcRenderer.invoke('set-tray-enabled', enabled),
+  notify: (payload) => ipcRenderer.invoke('notify', payload),
 };

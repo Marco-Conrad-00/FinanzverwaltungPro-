@@ -73,11 +73,125 @@ function setSparziel(field, val) {
   if (field === 'aktiv')  state.config.sparzielAktiv = !!val;
   if (field === 'summe')  state.config.sparzielSumme = +val || 0;
 }
-function updateSparzielSumme(val) {
-  setSparziel('summe', val);
+function updateSparzielSumme(val) {  setSparziel('summe', val);
   saveData(); renderPage();
 }
 // Tatsächlich Gespartes im laufenden Jahr, kumuliert bis einschl. aktuellem Monat.
+// ── ERINNERUNGEN ────────────────────────────────────────────────────────────
+// Struktur je Erinnerung:
+// { id, title, when:'monthEnd'|'monthStart'|'day', day:1-31,
+//   repeatMonths:1, active:true, notify:false, lastDone:'YYYY-MM' }
+function getReminders() { return state.reminders || (state.reminders = []); }
+
+function reminderDueDay(r, year, month1) {
+  // liefert den konkreten Tag (1..31) im gegebenen Monat, an dem r fällig ist
+  const daysInMonth = new Date(year, month1, 0).getDate();
+  if (r.when === 'monthStart') return 1;
+  if (r.when === 'monthEnd')   return daysInMonth;
+  const d = Math.max(1, Math.min(31, +r.day || 1));
+  return Math.min(d, daysInMonth); // 31 in einem 30-Tage-Monat -> letzter Tag
+}
+
+// Ist die Erinnerung heute (oder überfällig) im aktuellen Zyklus fällig und noch nicht erledigt?
+function reminderIsDue(r, now) {
+  if (!r.active) return false;
+  now = now || new Date();
+  const year = now.getFullYear();
+  const month1 = now.getMonth() + 1;        // 1..12
+  const ym = year + '-' + String(month1).padStart(2, '0');
+  // Wiederholungs-Rhythmus: nur in passenden Monaten fällig
+  const rep = Math.max(1, +r.repeatMonths || 1);
+  if (rep > 1) {
+    // Anker: erster fälliger Monat = anchorYm (oder Erstellung). Wir nutzen anchorYm falls vorhanden.
+    const anchor = r.anchorYm || ym;
+    const [ay, am] = anchor.split('-').map(Number);
+    const diff = (year - ay) * 12 + (month1 - am);
+    if (diff < 0 || (diff % rep) !== 0) return false;
+  }
+  // Schon in diesem Zyklus erledigt?
+  if (r.lastDone === ym) return false;
+  // Fällig ab dem Zieltag des Monats
+  const dueDay = reminderDueDay(r, year, month1);
+  return now.getDate() >= dueDay;
+}
+
+function dueReminders(now) {
+  return getReminders().filter(r => reminderIsDue(r, now));
+}
+
+function addReminder() {
+  const r = { id: uid(), title: 'Neue Erinnerung', when: 'monthEnd', day: 1,
+    repeatMonths: 1, active: true, notify: false, lastDone: '',
+    anchorYm: new Date().toISOString().slice(0,7) };
+  getReminders().push(r);
+  saveData(); renderPage();
+}
+function updateReminder(id, field, val) {
+  const r = getReminders().find(x => String(x.id) === String(id));
+  if (!r) return;
+  if (field === 'day' || field === 'repeatMonths') val = +val || 1;
+  if (field === 'active' || field === 'notify') val = !!val;
+  r[field] = val;
+  saveData();
+  if (field === 'notify') { try { initReminders(); } catch {} }
+  if (field === 'when' || field === 'active') renderPage();
+}
+async function deleteReminder(id) {
+  if (!await uiConfirm({ title: 'Erinnerung löschen', icon: '🗑', message: 'Diese Erinnerung wirklich löschen?' })) return;
+  state.reminders = getReminders().filter(x => String(x.id) !== String(id));
+  saveData(); renderPage();
+}
+function reminderDone(id) {
+  const r = getReminders().find(x => String(x.id) === String(id));
+  if (!r) return;
+  r.lastDone = new Date().toISOString().slice(0,7); // aktueller Monat als erledigt
+  saveData(); renderPage();
+}
+function reminderSnooze(id) {
+  // "Später" – blendet den Banner für diese Sitzung aus (nicht persistent)
+  _snoozedReminders[id] = true;
+  renderPage();
+}
+let _snoozedReminders = {};
+
+// Beim Start: Tray-Betrieb aktivieren, wenn eine Erinnerung System-Hinweise nutzt,
+// und für fällige Erinnerungen mit notify=true eine Windows-Benachrichtigung zeigen.
+async function initReminders() {
+  try {
+    if (!window.EA) return; // nur in der installierten App
+    const anyNotify = getReminders().some(r => r.active && r.notify);
+    // Tray nur einschalten, wenn wirklich System-Hinweise gewünscht sind.
+    if (window.EA.setTrayEnabled) {
+      try { await window.EA.setTrayEnabled(!!anyNotify); } catch {}
+    }
+    // Fällige Erinnerungen mit System-Hinweis einmalig melden.
+    if (window.EA.notify) {
+      for (const r of dueReminders()) {
+        if (!r.notify) continue;
+        // pro Zyklus nur einmal benachrichtigen
+        const ym = new Date().toISOString().slice(0,7);
+        if (r.notifiedYm === ym) continue;
+        try {
+          await window.EA.notify({ title: '🔔 ' + (r.title || 'Erinnerung'),
+            body: 'Fällig ' + whenLabel(r) + ' · ' + repeatLabel(r) });
+          r.notifiedYm = ym;
+        } catch {}
+      }
+      saveData();
+    }
+  } catch (e) { console.error('initReminders:', e); }
+}
+
+function whenLabel(r) {
+  if (r.when === 'monthStart') return 'Monatsanfang';
+  if (r.when === 'monthEnd')   return 'Monatsende';
+  return 'am ' + (Math.max(1, Math.min(31, +r.day||1))) + '.';
+}
+function repeatLabel(r) {
+  const n = Math.max(1, +r.repeatMonths || 1);
+  return n === 1 ? 'monatlich' : ('alle ' + n + ' Monate');
+}
+
 function sparenKumuliertBisMonat(month) {
   const yr = (month || currentMonth).slice(0,4);
   let summe = 0;
@@ -126,6 +240,7 @@ const DEFAULT_DATA_RAW = {
   transactions: [],
   yearEditUnlocked: false,
   backupHistory: [],
+  reminders: [],
 };
 
 // Year-data accessors
@@ -1386,13 +1501,28 @@ function updateBadges() {
 }
 
 // ── RENDER PAGE ───────────────────────────────────────────────────────────
+function reminderBannerHtml() {
+  const due = dueReminders().filter(r => !_snoozedReminders[r.id]);
+  if (!due.length) return '';
+  return due.map(r => `<div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;background:linear-gradient(135deg,color-mix(in srgb,var(--accent) 12%,var(--paper)),var(--paper));border:1px solid color-mix(in srgb,var(--accent) 35%,var(--border));border-radius:10px;padding:12px 16px;margin-bottom:14px">
+      <span style="font-size:20px">🔔</span>
+      <div style="flex:1;min-width:180px">
+        <div style="font-weight:700;font-size:14px">${(r.title||'Erinnerung').replace(/</g,'&lt;')}</div>
+        <div style="font-size:12px;color:var(--muted-text)">Fällig ${whenLabel(r)} · ${repeatLabel(r)}</div>
+      </div>
+      <button class="btn btn-primary btn-sm" onclick="reminderDone('${r.id}')">✓ Erledigt</button>
+      <button class="btn btn-ghost btn-sm" onclick="reminderSnooze('${r.id}')">Später</button>
+    </div>`).join('');
+}
+
 function renderPage() {
   Object.values(chartInstances).forEach(c => { try { c.destroy(); } catch {} });
   chartInstances = {};
   const pages = { dashboard, jahresuebersicht, suche, buchungen, einkaeufe, ausgaben, einnahmen, spesen, fixkosten, sparen, umbuchungen, zaehler, finanzprodukte, tabellen, einstellungen, importPage };
   const fn = pages[currentPage === 'import' ? 'importPage' : currentPage];
-  if (fn) el('pageContent').innerHTML = fn();
-  else el('pageContent').innerHTML = '<div class="empty-state"><p>Seite nicht gefunden</p></div>';
+  const banner = reminderBannerHtml();
+  if (fn) el('pageContent').innerHTML = banner + fn();
+  else el('pageContent').innerHTML = banner + '<div class="empty-state"><p>Seite nicht gefunden</p></div>';
   afterRender();
 }
 
@@ -3814,6 +3944,36 @@ function einstellungen() {
       </div>
     </div>
 
+    <!-- ── ERINNERUNGEN ────────────────────────────────────────────────── -->
+    <div class="settings-section">
+      <div class="settings-section-header">🔔 Erinnerungen</div>
+      <div class="card mb-2">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px">
+          <span style="font-size:13px;color:var(--muted-text)">Erinnere dich an wiederkehrende Aufgaben (z.B. Zählerstände erfassen). Fällige Erinnerungen erscheinen als Banner in der App.</span>
+          <button class="btn btn-primary btn-sm" onclick="addReminder()">+ Erinnerung</button>
+        </div>
+        ${getReminders().length ? `<div class="table-wrap"><table>
+          <thead><tr><th>Bezeichnung</th><th>Zeitpunkt</th><th>Tag</th><th>Wiederholung</th><th>System-Hinweis</th><th>Aktiv</th><th></th></tr></thead>
+          <tbody>${getReminders().map(r => `<tr>
+            <td><input type="text" value="${(r.title||'').replace(/"/g,'&quot;')}" onchange="updateReminder('${r.id}','title',this.value)" style="background:transparent;border:none;color:var(--text);width:100%;font-size:13px" /></td>
+            <td><select onchange="updateReminder('${r.id}','when',this.value)">
+              <option value="monthEnd" ${r.when==='monthEnd'?'selected':''}>Monatsende</option>
+              <option value="monthStart" ${r.when==='monthStart'?'selected':''}>Monatsanfang</option>
+              <option value="day" ${r.when==='day'?'selected':''}>Bestimmter Tag</option>
+            </select></td>
+            <td>${r.when==='day' ? `<input type="number" min="1" max="31" value="${+r.day||1}" onchange="updateReminder('${r.id}','day',this.value)" style="width:56px" />` : '<span class="muted">–</span>'}</td>
+            <td><select onchange="updateReminder('${r.id}','repeatMonths',this.value)">
+              ${[[1,'monatlich'],[2,'alle 2 Monate'],[3,'alle 3 Monate'],[6,'alle 6 Monate'],[12,'jährlich']].map(([v,l])=>`<option value="${v}" ${(+r.repeatMonths||1)===v?'selected':''}>${l}</option>`).join('')}
+            </select></td>
+            <td><div class="div-switch ${r.notify?'div-switch-on':''}" onclick="updateReminder('${r.id}','notify',${r.notify?'false':'true'})" style="cursor:pointer;transform:scale(.85)"><div class="div-switch-thumb"></div></div></td>
+            <td><div class="div-switch ${r.active?'div-switch-on':''}" onclick="updateReminder('${r.id}','active',${r.active?'false':'true'})" style="cursor:pointer;transform:scale(.85)"><div class="div-switch-thumb"></div></div></td>
+            <td><button class="btn btn-ghost btn-sm" onclick="deleteReminder('${r.id}')" title="Löschen">✕</button></td>
+          </tr>`).join('')}</tbody>
+        </table></div>
+        <p style="font-size:11px;color:var(--muted-text);margin-top:10px;line-height:1.5">„System-Hinweis" zeigt zusätzlich eine Windows-Benachrichtigung (funktioniert in der installierten App). Der In-App-Banner erscheint immer, wenn eine Erinnerung fällig ist.</p>` : '<div class="empty-state" style="padding:20px"><div class="empty-icon">🔔</div><p>Noch keine Erinnerungen. Lege eine an, um an wiederkehrende Aufgaben erinnert zu werden.</p></div>'}
+      </div>
+    </div>
+
     <!-- ── DATEN & BACKUP ──────────────────────────────────────────────── -->
     <div class="settings-section">
       <div class="settings-section-header">💾 Daten & Backup</div>
@@ -5652,6 +5812,11 @@ window.updateConfig          = updateConfig;
 window.toggleConfig          = toggleConfig;
 window.updateSparzielSumme   = updateSparzielSumme;
 window.openUpdateManager     = openUpdateManager;
+window.addReminder           = addReminder;
+window.updateReminder        = updateReminder;
+window.deleteReminder        = deleteReminder;
+window.reminderDone          = reminderDone;
+window.reminderSnooze        = reminderSnooze;
 window.uiConfirm = uiConfirm;
 window.uiAlert = uiAlert;
 window.uiPrompt = uiPrompt;
@@ -5803,6 +5968,8 @@ window.deleteRegelEinnahme   = deleteRegelEinnahme;
   checkAutoBackup();
   // Auto-create sparen entries from linked fixkosten (silent)
   setTimeout(() => runSparenAutoEintragung().catch(e => console.error('autoEintragung:', e)), 1000);
+  // ── Erinnerungen: Tray-Betrieb + System-Benachrichtigungen ──────────────
+  setTimeout(() => initReminders(), 1500);
   // Tägliches Auto-Refresh der Wertpapier-Kurse beim App-Start
   setTimeout(() => maybeAutoRefreshKurse().catch(e => console.error('autoRefreshKurse:', e)), 2500);
   // ── Erststart-Erkennung ─────────────────────────────────────────────────
