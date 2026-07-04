@@ -1,1 +1,70 @@
+name: Release-Pipeline (veröffentlichen + aufräumen)
 
+# Diese Datei gehört ins Repo unter:  .github/workflows/release-pipeline.yml
+#
+# Was sie macht:
+#  - Bei Push eines Tags v* : erstellt ein GitHub-Release, hängt die ZIP aus build/ an
+#    und räumt anschließend alte Releases auf (nur die 2 neuesten bleiben).
+#  - Wöchentlich (Montag) und auf Knopfdruck: nur aufräumen (Sicherheitsnetz).
+
+on:
+  push:
+    tags: ['v*']
+  schedule:
+    - cron: '0 6 * * 1'      # Montag 06:00 UTC – nur Aufräumen
+  workflow_dispatch: {}        # Manuell startbar (Actions-Tab)
+
+permissions:
+  contents: write              # Nötig für Release- und Tag-Verwaltung
+
+jobs:
+  pipeline:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      KEEP: 2                   # So viele der neuesten Releases behalten
+    steps:
+      - name: Repo auschecken
+        uses: actions/checkout@v4
+
+      - name: Release veröffentlichen (nur bei Tag-Push)
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          set -euo pipefail
+          TAG="${GITHUB_REF_NAME}"
+          shopt -s nullglob
+          ASSETS=(build/*.zip)
+          if [ ${#ASSETS[@]} -eq 0 ]; then
+            echo "Keine ZIP in build/ – erstelle Release ohne Anhang."
+            gh release create "$TAG" --repo "$GITHUB_REPOSITORY" \
+              --title "$TAG" --notes "Automatisch veröffentlicht von der Update-Pipeline."
+          else
+            echo "Hänge an: ${ASSETS[*]}"
+            if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+              gh release upload "$TAG" "${ASSETS[@]}" --repo "$GITHUB_REPOSITORY" --clobber
+            else
+              gh release create "$TAG" "${ASSETS[@]}" --repo "$GITHUB_REPOSITORY" \
+                --title "$TAG" --notes "Automatisch veröffentlicht von der Update-Pipeline."
+            fi
+          fi
+
+      - name: Alte Releases aufräumen (2 neueste behalten)
+        run: |
+          set -euo pipefail
+          REPO="$GITHUB_REPOSITORY"
+          echo "Frage Releases ab..."
+          # JSON in Variable holen -> ein Fehler bricht den Schritt sichtbar ab
+          JSON="$(gh release list --repo "$REPO" --limit 200 --json tagName,createdAt)"
+          echo "Roh-JSON: $JSON"
+          mapfile -t TAGS < <(echo "$JSON" | jq -r 'sort_by(.createdAt) | reverse | .[].tagName')
+          echo "Releases (${#TAGS[@]}): ${TAGS[*]:-keine}"
+          if [ "${#TAGS[@]}" -le "$KEEP" ]; then
+            echo "Nur ${#TAGS[@]} Release(s) – nichts zu löschen."
+            exit 0
+          fi
+          echo "Behalten: ${TAGS[*]:0:$KEEP}"
+          for tag in "${TAGS[@]:$KEEP}"; do
+            echo "-> Lösche Release + Tag: $tag"
+            gh release delete "$tag" --repo "$REPO" --cleanup-tag --yes
+          done
+          echo "Fertig."
