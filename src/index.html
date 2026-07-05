@@ -162,7 +162,7 @@
     </div>
     <div class="form-grid form-grid-2">
       <label class="field">Datum <input type="date" id="qa_date" /></label>
-      <label class="field">Betrag (€) <input type="number" id="qa_amount" step="0.01" placeholder="0,00" /></label>
+      <label class="field">Betrag (€) <span style="display:flex;gap:6px;align-items:center"><input type="number" id="qa_amount" step="0.01" placeholder="0,00" style="flex:1" /><button type="button" class="btn btn-ghost btn-sm" onclick="openCalc('qa_amount')" title="Taschenrechner">🧮</button></span></label>
     </div>
     <div class="form-grid mt-2">
       <label class="field">Beschreibung <input type="text" id="qa_desc" placeholder="z.B. Kaufland…" /></label>
@@ -234,7 +234,7 @@
         </select>
       </label>
       <label class="field">Betrag / Monat (€)
-        <input type="number" id="re_amount" step="0.01" placeholder="0,00"/>
+        <input type="number" id="re_amount" step="0.01" placeholder="0,00" style="flex:1"/><button type="button" class="btn btn-ghost btn-sm" onclick="openCalc('re_amount')" title="Taschenrechner" style="margin-left:6px">🧮</button>
       </label>
       <label class="field">Gültig ab
         <input type="month" id="re_start" style="width:100%"/>
@@ -298,7 +298,7 @@
     <div class="modal-title">Neue Einzahlung</div>
     <div class="form-grid form-grid-2">
       <label class="field">Datum <input type="date" id="sp_date" /></label>
-      <label class="field">Betrag (€) <input type="number" id="sp_amount" step="0.01" placeholder="0,00" /></label>
+      <label class="field">Betrag (€) <span style="display:flex;gap:6px;align-items:center"><input type="number" id="sp_amount" step="0.01" placeholder="0,00" style="flex:1" /><button type="button" class="btn btn-ghost btn-sm" onclick="openCalc('sp_amount')" title="Taschenrechner">🧮</button></span></label>
       <label class="field">Kategorie / Anlageart
         <select id="sp_kat" onchange="onSparKatChange()">
           <option>Tagesgeld</option><option>Festgeld</option><option>ETF</option>
@@ -431,7 +431,7 @@
         </select>
       </label>
       <label class="field">Betrag (€)
-        <input type="number" id="fk_amount" step="0.01" placeholder="0,00" />
+        <input type="number" id="fk_amount" step="0.01" placeholder="0,00" style="flex:1" /><button type="button" class="btn btn-ghost btn-sm" onclick="openCalc('fk_amount')" title="Taschenrechner" style="margin-left:6px">🧮</button>
       </label>
       <label class="field">Fällig am (Tag)
         <input type="number" id="fk_day" min="1" max="31" value="1" />
@@ -540,6 +540,7 @@
 <div class="app-shell">
   <aside class="sidebar">
     <div class="sidebar-logo">
+      <img src="logo.png" alt="Liquid" style="width:48px;height:48px;object-fit:contain;display:block;margin:0 auto 8px;filter:drop-shadow(0 0 10px rgba(20,184,166,.35))" />
       <p class="eyebrow">Finanzverwaltung</p>
       <h1 id="userName" onclick="editUserName()" title="Klicken zum Bearbeiten" style="cursor:pointer" >Nutzer</h1>
       <div class="version" id="appVersion">v1.01</div>

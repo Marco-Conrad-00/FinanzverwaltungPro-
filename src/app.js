@@ -1501,6 +1501,100 @@ function updateBadges() {
 }
 
 // ── RENDER PAGE ───────────────────────────────────────────────────────────
+// ── TASCHENRECHNER-POPUP ────────────────────────────────────────────────────
+// Öffnet einen Rechner, dessen Ergebnis in das Feld mit targetId übernommen wird.
+let _calcTargetId = null;
+let _calcExpr = '';
+function openCalc(targetId) {
+  _calcTargetId = targetId;
+  const inp = document.getElementById(targetId);
+  const start = inp && inp.value ? String(inp.value).replace(',', '.') : '';
+  _calcExpr = (start && !isNaN(parseFloat(start))) ? start : '';
+  let overlay = document.getElementById('_calcOverlay');
+  if (overlay) overlay.remove();
+  overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.id = '_calcOverlay';
+  const btn = (label, action, extra) => `<button type="button" class="calc-btn ${extra||''}" onclick="calcPress('${action}')">${label}</button>`;
+  overlay.innerHTML =
+    '<div class="modal" style="max-width:300px;padding:0" onclick="event.stopPropagation()">' +
+      '<div style="padding:14px 18px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px">' +
+        '<span style="font-size:20px">🧮</span><h3 style="margin:0;font-size:15px;font-weight:600;color:var(--text)">Rechner</h3>' +
+      '</div>' +
+      '<div style="padding:14px 18px">' +
+        '<div id="_calcDisplay" style="background:var(--surface-2);border:1px solid var(--border);border-radius:8px;padding:10px 12px;font-family:ui-monospace,monospace;font-size:20px;text-align:right;min-height:44px;color:var(--text);overflow-x:auto;white-space:nowrap">0</div>' +
+        '<div id="_calcPreview" style="text-align:right;font-size:12px;color:var(--muted-text);min-height:16px;margin-top:4px"></div>' +
+        '<div class="calc-grid" style="display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-top:12px">' +
+          btn('C','clear','calc-fn') + btn('(','(','calc-fn') + btn(')',')','calc-fn') + btn('÷','/','calc-op') +
+          btn('7','7') + btn('8','8') + btn('9','9') + btn('×','*','calc-op') +
+          btn('4','4') + btn('5','5') + btn('6','6') + btn('−','-','calc-op') +
+          btn('1','1') + btn('2','2') + btn('3','3') + btn('+','+','calc-op') +
+          btn('0','0') + btn(',','.') + btn('⌫','back','calc-fn') + btn('=','eq','calc-eq') +
+        '</div>' +
+      '</div>' +
+      '<div style="padding:12px 18px;border-top:1px solid var(--border);display:flex;justify-content:flex-end;gap:8px;background:var(--surface);border-radius:0 0 14px 14px">' +
+        '<button class="btn btn-ghost" onclick="closeCalc()">Abbrechen</button>' +
+        '<button class="btn btn-primary" onclick="calcApply()">Übernehmen</button>' +
+      '</div>' +
+    '</div>';
+  document.body.appendChild(overlay);
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) closeCalc(); });
+  calcRender();
+  // Tastatur-Unterstützung
+  _calcKeyHandler = (e) => {
+    if (e.key >= '0' && e.key <= '9') calcPress(e.key);
+    else if (e.key === '.' || e.key === ',') calcPress('.');
+    else if (['+','-','*','/','(',')'].includes(e.key)) calcPress(e.key);
+    else if (e.key === 'Enter') { e.preventDefault(); calcApply(); }
+    else if (e.key === 'Escape') { e.preventDefault(); closeCalc(); }
+    else if (e.key === 'Backspace') { e.preventDefault(); calcPress('back'); }
+  };
+  document.addEventListener('keydown', _calcKeyHandler);
+}
+let _calcKeyHandler = null;
+function calcPress(action) {
+  if (action === 'clear') _calcExpr = '';
+  else if (action === 'back') _calcExpr = _calcExpr.slice(0, -1);
+  else if (action === 'eq') { const v = calcEval(_calcExpr); if (v !== null) _calcExpr = String(v); }
+  else _calcExpr += action;
+  calcRender();
+}
+function calcEval(expr) {
+  if (!expr) return null;
+  // Nur erlaubte Zeichen (Sicherheit): Ziffern, Operatoren, Klammern, Punkt
+  if (!/^[0-9+\-*/().\s]+$/.test(expr)) return null;
+  try {
+    const v = Function('"use strict";return (' + expr + ')')();
+    if (typeof v !== 'number' || !isFinite(v)) return null;
+    return Math.round(v * 100) / 100;
+  } catch { return null; }
+}
+function calcRender() {
+  const disp = document.getElementById('_calcDisplay');
+  const prev = document.getElementById('_calcPreview');
+  if (disp) disp.textContent = _calcExpr ? _calcExpr.replace(/\*/g,'×').replace(/\//g,'÷') : '0';
+  if (prev) { const v = calcEval(_calcExpr); prev.textContent = (v !== null && _calcExpr) ? ('= ' + fmtEur(v)) : ''; }
+}
+function calcApply() {
+  const v = calcEval(_calcExpr);
+  const val = (v !== null) ? v : parseFloat((_calcExpr||'').replace(',','.'));
+  if (_calcTargetId && !isNaN(val)) {
+    const inp = document.getElementById(_calcTargetId);
+    if (inp) {
+      inp.value = val;
+      inp.dispatchEvent(new Event('input', { bubbles: true }));
+      inp.dispatchEvent(new Event('change', { bubbles: true }));
+    }
+  }
+  closeCalc();
+}
+function closeCalc() {
+  const o = document.getElementById('_calcOverlay');
+  if (o) o.remove();
+  if (_calcKeyHandler) { document.removeEventListener('keydown', _calcKeyHandler); _calcKeyHandler = null; }
+  _calcTargetId = null; _calcExpr = '';
+}
+
 function reminderBannerHtml() {
   const due = dueReminders().filter(r => !_snoozedReminders[r.id]);
   if (!due.length) return '';
@@ -5817,6 +5911,10 @@ window.updateReminder        = updateReminder;
 window.deleteReminder        = deleteReminder;
 window.reminderDone          = reminderDone;
 window.reminderSnooze        = reminderSnooze;
+window.openCalc              = openCalc;
+window.calcPress             = calcPress;
+window.calcApply             = calcApply;
+window.closeCalc             = closeCalc;
 window.uiConfirm = uiConfirm;
 window.uiAlert = uiAlert;
 window.uiPrompt = uiPrompt;

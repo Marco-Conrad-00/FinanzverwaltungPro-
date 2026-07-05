@@ -503,3 +503,17 @@ button:disabled {
   background: var(--surface) !important;
   cursor: default;
 }
+
+/* ── Taschenrechner ─────────────────────────────────────────────── */
+.calc-btn{
+  padding:14px 0; font-size:17px; font-weight:600; cursor:pointer;
+  background:var(--surface-2); color:var(--text);
+  border:1px solid var(--border); border-radius:9px;
+  transition:.12s; user-select:none;
+}
+.calc-btn:hover{ background:var(--surface); border-color:var(--accent); }
+.calc-btn:active{ transform:scale(.95); }
+.calc-btn.calc-op{ background:color-mix(in srgb,var(--accent) 12%,var(--surface-2)); color:var(--accent); font-weight:700; }
+.calc-btn.calc-fn{ color:var(--muted-text); font-size:15px; }
+.calc-btn.calc-eq{ background:var(--accent); color:#fff; font-weight:700; }
+.calc-btn.calc-eq:hover{ background:var(--accent); filter:brightness(1.1); }

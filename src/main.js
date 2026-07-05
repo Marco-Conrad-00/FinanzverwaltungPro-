@@ -96,6 +96,7 @@ try {
   autoUpdater = require('electron-updater').autoUpdater;
   autoUpdater.autoDownload = true;
   autoUpdater.autoInstallOnAppQuit = true;
+  autoUpdater.fullChangelog = true;
 
   function sendUpdateStatus(channel, data) {
     if (win && win.webContents) win.webContents.send(channel, data);
@@ -114,6 +115,19 @@ try {
     sendUpdateStatus('update-progress', { percent: Math.round(p.percent) });
   });
   autoUpdater.on('update-downloaded', async (info) => {
+    // Release-Notes aus dem GitHub-Release (kann HTML oder Text sein).
+    let notes = '';
+    try {
+      let raw = info && info.releaseNotes;
+      if (Array.isArray(raw)) raw = raw.map(n => (n && n.note) || '').join('\n\n');
+      if (typeof raw === 'string' && raw.trim()) {
+        // HTML-Tags entfernen, Einträge lesbar machen
+        notes = raw.replace(/<li>/gi, '• ').replace(/<[^>]+>/g, '').replace(/&amp;/g,'&').replace(/&lt;/g,'<').replace(/&gt;/g,'>').replace(/\n{3,}/g,'\n\n').trim();
+        if (notes.length > 600) notes = notes.slice(0, 600) + '…';
+      }
+    } catch {}
+    const detail = 'Die App wird beim Neustart automatisch aktualisiert.'
+      + (notes ? ('\n\n─── Was ist neu ───\n' + notes) : '');
     const res = await dialog.showMessageBox(win, {
       type: 'info',
       buttons: ['Jetzt neu starten', 'Später'],
@@ -121,7 +135,7 @@ try {
       cancelId: 1,
       title: 'Update bereit',
       message: 'Version ' + info.version + ' wurde heruntergeladen.',
-      detail: 'Die App wird beim Neustart automatisch aktualisiert.'
+      detail
     });
     if (res.response === 0) autoUpdater.quitAndInstall();
   });
