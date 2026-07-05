@@ -154,6 +154,83 @@ function reminderSnooze(id) {
 }
 let _snoozedReminders = {};
 
+// ── "WAS IST NEU" NACH UPDATE ───────────────────────────────────────────────
+const GITHUB_REPO = { owner: 'Marco-Conrad-00', repo: 'FinanzverwaltungPro-' };
+
+async function checkWhatsNew() {
+  try {
+    if (!window.EA || !window.EA.getVersion) return;
+    const version = await window.EA.getVersion();
+    if (!version) return;
+    const seen = (state.config && state.config.lastSeenVersion) || '';
+    if (!seen) { state.config.lastSeenVersion = version; saveData(); return; }
+    if (seen === version) return;
+    let notes = '', titleVer = version;
+    try {
+      if (window.EA.fetchUrl) {
+        const url = 'https://api.github.com/repos/' + GITHUB_REPO.owner + '/' + GITHUB_REPO.repo + '/releases/latest';
+        const raw = await window.EA.fetchUrl(url);
+        // fetchUrl liefert { ok, status, body } – der Text steht in body.
+        const text = (raw && typeof raw === 'object' && 'body' in raw) ? raw.body : raw;
+        const data = typeof text === 'string' ? JSON.parse(text) : text;
+        if (data && data.body) notes = String(data.body).trim();
+        if (data && data.tag_name) titleVer = String(data.tag_name).replace(/^v/i, '');
+      }
+    } catch {}
+    state.config.lastSeenVersion = version;
+    saveData();
+    showWhatsNewModal(titleVer, notes);
+  } catch (e) { console.error('checkWhatsNew:', e); }
+}
+
+function mdToHtml(md) {
+  if (!md) return '<p style="color:var(--muted-text)">Keine Detailinfos für diese Version hinterlegt.</p>';
+  const esc = s => s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  const lines = md.split('\n');
+  let html = '', inList = false;
+  for (let line of lines) {
+    line = line.replace(/\r/g,'');
+    if (/^\s*[-*]\s+/.test(line)) {
+      if (!inList) { html += '<ul style="margin:6px 0 6px 18px;padding:0">'; inList = true; }
+      let item = esc(line.replace(/^\s*[-*]\s+/, '')).replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+      html += '<li style="margin:3px 0">' + item + '</li>';
+    } else {
+      if (inList) { html += '</ul>'; inList = false; }
+      const t = line.trim();
+      if (!t) continue;
+      if (/^#{1,6}\s/.test(t)) {
+        html += '<div style="font-weight:700;font-size:14px;margin:10px 0 4px">' + esc(t.replace(/^#{1,6}\s/, '')) + '</div>';
+      } else {
+        html += '<p style="margin:5px 0">' + esc(t).replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>') + '</p>';
+      }
+    }
+  }
+  if (inList) html += '</ul>';
+  return html;
+}
+
+function showWhatsNewModal(version, notes) {
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.innerHTML =
+    '<div class="modal" style="max-width:480px;padding:0;animation:fadeIn .2s ease-out" onclick="event.stopPropagation()">' +
+      '<div style="padding:20px 24px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:14px;background:linear-gradient(135deg,color-mix(in srgb,var(--accent) 14%,var(--paper)),var(--paper))">' +
+        '<div style="font-size:30px;line-height:1">🎉</div>' +
+        '<div><h3 style="margin:0;font-size:17px;font-weight:700;color:var(--text)">Update installiert</h3>' +
+        '<div style="font-size:13px;color:var(--muted-text)">Du nutzt jetzt Version ' + version + '</div></div>' +
+      '</div>' +
+      '<div style="padding:18px 24px;max-height:340px;overflow-y:auto;font-size:13px;line-height:1.55;color:var(--text)">' +
+        '<div style="font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--accent);margin-bottom:8px">Was ist neu</div>' +
+        mdToHtml(notes) +
+      '</div>' +
+      '<div style="padding:14px 24px;border-top:1px solid var(--border);display:flex;justify-content:flex-end;background:var(--surface);border-radius:0 0 14px 14px">' +
+        '<button class="btn btn-primary" onclick="this.closest(\'.modal-overlay\').remove()">Alles klar</button>' +
+      '</div>' +
+    '</div>';
+  document.body.appendChild(overlay);
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
+}
+
 // Beim Start: Tray-Betrieb aktivieren, wenn eine Erinnerung System-Hinweise nutzt,
 // und für fällige Erinnerungen mit notify=true eine Windows-Benachrichtigung zeigen.
 async function initReminders() {
@@ -716,8 +793,9 @@ async function loadData() {
 
   // ── Merge into state (preserves proxy properties) ───────────────────────
   const fields = ['meta','config','customCats','trash','imports','etfKurse','transactions',
-                   'years','dataVersion','currentYear','selectedYear','backupHistory','yearEditUnlocked'];
+                   'years','dataVersion','currentYear','selectedYear','backupHistory','yearEditUnlocked','reminders'];
   fields.forEach(f => { if (saved[f] !== undefined) state[f] = saved[f]; });
+  if (!Array.isArray(state.reminders)) state.reminders = [];
 
   if (state.meta.email  === undefined) state.meta.email  = '';
   if (state.meta.paypal === undefined) state.meta.paypal = '';
@@ -6068,6 +6146,8 @@ window.deleteRegelEinnahme   = deleteRegelEinnahme;
   setTimeout(() => runSparenAutoEintragung().catch(e => console.error('autoEintragung:', e)), 1000);
   // ── Erinnerungen: Tray-Betrieb + System-Benachrichtigungen ──────────────
   setTimeout(() => initReminders(), 1500);
+  // ── "Was ist neu" nach einem Update anzeigen ────────────────────────────
+  setTimeout(() => checkWhatsNew(), 2000);
   // Tägliches Auto-Refresh der Wertpapier-Kurse beim App-Start
   setTimeout(() => maybeAutoRefreshKurse().catch(e => console.error('autoRefreshKurse:', e)), 2500);
   // ── Erststart-Erkennung ─────────────────────────────────────────────────
