@@ -22,4 +22,6 @@ window.EA = {
   onUpdateProgress:  (cb) => ipcRenderer.on('update-progress', (_, d) => cb(d)),
   setTrayEnabled: (enabled) => ipcRenderer.invoke('set-tray-enabled', enabled),
   notify: (payload) => ipcRenderer.invoke('notify', payload),
+  setBackupDir: (dir) => ipcRenderer.invoke('set-backup-dir', dir),
+  onDataRecovered: (cb) => ipcRenderer.on('data-recovered', (_, d) => cb(d)),
 };

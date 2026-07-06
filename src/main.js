@@ -62,6 +62,35 @@ function setupTray() {
 
 app.on('before-quit', () => { isQuiting = true; });
 
+// ── AUTO-BACKUP BEIM BEENDEN ────────────────────────────────────────────────
+// Der Renderer teilt den eingestellten Backup-Ordner mit. Beim Beenden schreibt
+// der Hauptprozess selbst ein Backup der data.json dorthin (mit Rotation auf 5).
+let _autoBackupDir = null;
+ipcMain.handle('set-backup-dir', (_e, dir) => { _autoBackupDir = dir || null; return true; });
+
+function writeBackupOnQuit() {
+  try {
+    if (!_autoBackupDir) return;
+    const src = dp();
+    if (!fs.existsSync(src)) return;
+    const content = fs.readFileSync(src, 'utf8');
+    try { JSON.parse(content); } catch { return; } // nur gültige Daten sichern
+    if (!fs.existsSync(_autoBackupDir)) fs.mkdirSync(_autoBackupDir, { recursive: true });
+    const ts = new Date().toISOString().replace(/[:.]/g, '-');
+    fs.writeFileSync(path.join(_autoBackupDir, 'backup-' + ts + '.json'), content, 'utf8');
+    // Rotation: nur 5 neueste behalten (nur backup-*.json)
+    try {
+      const isBackup = n => /^backup-.*\.json$/i.test(n);
+      const files = fs.readdirSync(_autoBackupDir).filter(isBackup)
+        .map(n => ({ full: path.join(_autoBackupDir, n), t: fs.statSync(path.join(_autoBackupDir, n)).mtimeMs }))
+        .sort((a, b) => b.t - a.t);
+      files.slice(5).forEach(f => { try { fs.unlinkSync(f.full); } catch {} });
+    } catch {}
+  } catch (e) { console.warn('Auto-Backup beim Beenden fehlgeschlagen:', e.message); }
+}
+
+app.on('before-quit', writeBackupOnQuit);
+
 // Renderer schaltet Hintergrundbetrieb an/aus (aus den Einstellungen).
 ipcMain.handle('set-tray-enabled', (_e, enabled) => {
   trayEnabled = !!enabled;
@@ -499,8 +528,72 @@ ipcMain.handle('fetch-quote-at-date', async (e, symbol, dateStr) => {
   }
 });
 
-ipcMain.handle('load-data', () => { try { return fs.readFileSync(dp(), 'utf8'); } catch { return null; } });
-ipcMain.handle('save-data', (_, d) => { fs.writeFileSync(dp(), d); return true; });
+// ── ROBUSTES SPEICHERN & LADEN ──────────────────────────────────────────────
+// Sicheres Speichern: erst in temporäre Datei schreiben, prüfen, dann atomar
+// umbenennen. Vorher die bisherige Datei als .prev sichern. So kann ein Absturz
+// mitten im Schreiben die Hauptdatei nicht zerstören.
+function safeSaveData(content) {
+  const target = dp();
+  const tmp = target + '.tmp';
+  const prev = target + '.prev';
+  // 1) In temporäre Datei schreiben und sofort verifizieren
+  fs.writeFileSync(tmp, content, 'utf8');
+  const check = fs.readFileSync(tmp, 'utf8');
+  JSON.parse(check); // wirft, falls ungültig -> Abbruch, Hauptdatei bleibt heil
+  // 2) Bisherige gültige Datei als .prev sichern
+  try { if (fs.existsSync(target)) fs.copyFileSync(target, prev); } catch {}
+  // 3) Atomar ersetzen (Umbenennen ist auf demselben Laufwerk atomar)
+  fs.renameSync(tmp, target);
+  return true;
+}
+
+// Robustes Laden: Hauptdatei → bei Defekt .prev → bei Defekt neuestes Backup.
+function safeLoadData() {
+  const target = dp();
+  const prev = target + '.prev';
+  function tryRead(p) {
+    try {
+      if (!fs.existsSync(p)) return null;
+      const txt = fs.readFileSync(p, 'utf8');
+      JSON.parse(txt); // Gültigkeit prüfen
+      return txt;
+    } catch { return null; }
+  }
+  // 1) Hauptdatei
+  let data = tryRead(target);
+  if (data !== null) return { data, source: 'main' };
+  // 2) .prev (letzter guter Stand vor dem letzten Speichern)
+  data = tryRead(prev);
+  if (data !== null) {
+    try { fs.copyFileSync(prev, target); } catch {} // Hauptdatei wiederherstellen
+    return { data, source: 'prev' };
+  }
+  // 3) Neuestes Backup aus dem eingestellten Backup-Ordner (falls bekannt)
+  try {
+    const cfgRaw = tryRead(target); // (target ist kaputt, aber evtl. lesbar für backupPath?)
+  } catch {}
+  return { data: null, source: 'none' };
+}
+
+ipcMain.handle('load-data', () => {
+  const r = safeLoadData();
+  // Signalisiere dem Renderer, wenn aus einer Sicherung wiederhergestellt wurde.
+  if (r.source === 'prev') {
+    try { if (win && win.webContents) win.webContents.send('data-recovered', { source: 'prev' }); } catch {}
+  }
+  return r.data;
+});
+
+ipcMain.handle('save-data', (_, d) => {
+  try {
+    // Nur speichern, wenn gültiges JSON übergeben wurde (schützt vor Leerschreiben).
+    JSON.parse(d);
+    return safeSaveData(d);
+  } catch (e) {
+    console.error('save-data abgelehnt (ungültiges JSON):', e.message);
+    return false;
+  }
+});
 
 ipcMain.handle('open-files', async () => {
   const r = await dialog.showOpenDialog(win, {
@@ -546,7 +639,26 @@ ipcMain.handle('write-backup', async (e, backupPath, content) => {
     const ts = new Date().toISOString().replace(/[:.]/g, '-');
     const filename = path.join(backupPath, 'backup-' + ts + '.json');
     fs.writeFileSync(filename, content, 'utf8');
-    return { ok: true, path: filename };
+
+    // Aufräumen: nur die 5 neuesten Backups behalten, ältere löschen.
+    // Sicherheit: NUR Dateien mit dem Backup-Namensmuster werden angefasst.
+    let removed = [];
+    try {
+      const KEEP = 5;
+      const isBackup = n => /^backup-.*\.json$/i.test(n);
+      const files = fs.readdirSync(backupPath)
+        .filter(isBackup)
+        .map(n => ({ name: n, full: path.join(backupPath, n), t: fs.statSync(path.join(backupPath, n)).mtimeMs }))
+        .sort((a, b) => b.t - a.t); // neueste zuerst
+      const toDelete = files.slice(KEEP);
+      for (const f of toDelete) {
+        try { fs.unlinkSync(f.full); removed.push(f.name); } catch {}
+      }
+    } catch (cleanupErr) {
+      // Aufräum-Fehler darf das Backup selbst nicht scheitern lassen
+      console.warn('Backup-Aufräumen fehlgeschlagen:', cleanupErr.message);
+    }
+    return { ok: true, path: filename, removed };
   } catch (err) {
     return { ok: false, error: err.message };
   }

@@ -154,32 +154,46 @@ function reminderSnooze(id) {
 }
 let _snoozedReminders = {};
 
-// ── "WAS IST NEU" NACH UPDATE ───────────────────────────────────────────────
-const GITHUB_REPO = { owner: 'Marco-Conrad-00', repo: 'FinanzverwaltungPro-' };
+// ── "WAS IST NEU" / CHANGELOG ───────────────────────────────────────────────
+// ▼▼▼ CHANGELOG – wird bei jedem Update gepflegt. Neueste Version ZUERST. ▼▼▼
+// Format je Eintrag: { v: 'Version', date: 'YYYY-MM-DD', changes: ['...','...'] }
+// Änderungen dürfen mit **Fett** Markierung versehen werden.
+const CHANGELOG = [
+  { v: '1.0.5', date: '2026-07-06', changes: [
+    '**Mehr Datensicherheit**: Speichern erfolgt jetzt absturzsicher (die Hauptdatei kann bei einem Absturz nicht mehr beschädigt werden)',
+    '**Automatische Wiederherstellung**: Ist die Datendatei doch einmal defekt, greift die App automatisch auf die letzte gültige Sicherung zurück',
+    '**Backup beim Beenden**: Beim Schließen der App wird automatisch ein Backup in deinen Backup-Ordner geschrieben (nur die 5 neuesten werden behalten)',
+  ]},
+  { v: '1.0.4', date: '2026-07-05', changes: [
+    '**Änderungsverlauf** ("Was ist neu") wird jetzt automatisch in der App gepflegt und zeigt auch ältere Versionen',
+    '**Backup-Aufräumen**: es werden automatisch nur die 5 neuesten Backups behalten',
+    '**Taschenrechner** neben den Betragsfeldern (Einkäufe, Fixkosten, Sparen, Einnahmen)',
+    '**Erinnerungen** an wiederkehrende Aufgaben mit In-App-Banner und optionaler Windows-Benachrichtigung',
+    '**Onboarding**: Nutzungsbedingungen und geführte App-Tour beim ersten Start (jederzeit erneut aufrufbar)',
+    'Release-Notes werden nach einem Update im Modal angezeigt',
+    'Fehlerbehebung: Erinnerungen bleiben nach dem Neustart erhalten',
+  ]},
+];
+// ▲▲▲ ENDE CHANGELOG ▲▲▲
+
+function changelogToNotes(entry) {
+  if (!entry) return '';
+  return entry.changes.map(c => '- ' + c).join('\n');
+}
 
 async function checkWhatsNew() {
   try {
-    if (!window.EA || !window.EA.getVersion) return;
-    const version = await window.EA.getVersion();
+    let version = null;
+    if (window.EA && window.EA.getVersion) { try { version = await window.EA.getVersion(); } catch {} }
+    // Fallback: neueste Changelog-Version, falls keine App-Version verfügbar (Dev-Modus)
+    if (!version) version = CHANGELOG[0] ? CHANGELOG[0].v : null;
     if (!version) return;
     const seen = (state.config && state.config.lastSeenVersion) || '';
     if (!seen) { state.config.lastSeenVersion = version; saveData(); return; }
     if (seen === version) return;
-    let notes = '', titleVer = version;
-    try {
-      if (window.EA.fetchUrl) {
-        const url = 'https://api.github.com/repos/' + GITHUB_REPO.owner + '/' + GITHUB_REPO.repo + '/releases/latest';
-        const raw = await window.EA.fetchUrl(url);
-        // fetchUrl liefert { ok, status, body } – der Text steht in body.
-        const text = (raw && typeof raw === 'object' && 'body' in raw) ? raw.body : raw;
-        const data = typeof text === 'string' ? JSON.parse(text) : text;
-        if (data && data.body) notes = String(data.body).trim();
-        if (data && data.tag_name) titleVer = String(data.tag_name).replace(/^v/i, '');
-      }
-    } catch {}
     state.config.lastSeenVersion = version;
     saveData();
-    showWhatsNewModal(titleVer, notes);
+    showWhatsNewModal();  // zeigt neueste Version + Verlauf aus CHANGELOG
   } catch (e) { console.error('checkWhatsNew:', e); }
 }
 
@@ -209,19 +223,35 @@ function mdToHtml(md) {
   return html;
 }
 
-function showWhatsNewModal(version, notes) {
+function showWhatsNewModal() {
+  if (!CHANGELOG.length) return;
+  const newest = CHANGELOG[0];
+  const older = CHANGELOG.slice(1);
   const overlay = document.createElement('div');
   overlay.className = 'modal-overlay';
+  const newestHtml =
+    '<div style="font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--accent);margin-bottom:8px">Neu in Version ' + newest.v + '</div>' +
+    mdToHtml(changelogToNotes(newest));
+  const olderHtml = older.length ? (
+    '<div style="margin-top:18px;border-top:1px solid var(--border);padding-top:14px">' +
+    '<div style="font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--muted-text);margin-bottom:8px">Frühere Versionen</div>' +
+    older.map(e =>
+      '<details style="margin-bottom:6px">' +
+        '<summary style="cursor:pointer;font-weight:600;font-size:13px;color:var(--text);padding:4px 0">Version ' + e.v + (e.date ? ' <span style="color:var(--muted-text);font-weight:400">· ' + e.date + '</span>' : '') + '</summary>' +
+        '<div style="padding:4px 0 8px 4px">' + mdToHtml(changelogToNotes(e)) + '</div>' +
+      '</details>'
+    ).join('') +
+    '</div>'
+  ) : '';
   overlay.innerHTML =
-    '<div class="modal" style="max-width:480px;padding:0;animation:fadeIn .2s ease-out" onclick="event.stopPropagation()">' +
+    '<div class="modal" style="max-width:500px;padding:0;animation:fadeIn .2s ease-out" onclick="event.stopPropagation()">' +
       '<div style="padding:20px 24px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:14px;background:linear-gradient(135deg,color-mix(in srgb,var(--accent) 14%,var(--paper)),var(--paper))">' +
         '<div style="font-size:30px;line-height:1">🎉</div>' +
-        '<div><h3 style="margin:0;font-size:17px;font-weight:700;color:var(--text)">Update installiert</h3>' +
-        '<div style="font-size:13px;color:var(--muted-text)">Du nutzt jetzt Version ' + version + '</div></div>' +
+        '<div><h3 style="margin:0;font-size:17px;font-weight:700;color:var(--text)">Was ist neu</h3>' +
+        '<div style="font-size:13px;color:var(--muted-text)">Du nutzt jetzt Version ' + newest.v + '</div></div>' +
       '</div>' +
-      '<div style="padding:18px 24px;max-height:340px;overflow-y:auto;font-size:13px;line-height:1.55;color:var(--text)">' +
-        '<div style="font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--accent);margin-bottom:8px">Was ist neu</div>' +
-        mdToHtml(notes) +
+      '<div style="padding:18px 24px;max-height:400px;overflow-y:auto;font-size:13px;line-height:1.55;color:var(--text)">' +
+        newestHtml + olderHtml +
       '</div>' +
       '<div style="padding:14px 24px;border-top:1px solid var(--border);display:flex;justify-content:flex-end;background:var(--surface);border-radius:0 0 14px 14px">' +
         '<button class="btn btn-primary" onclick="this.closest(\'.modal-overlay\').remove()">Alles klar</button>' +
@@ -566,6 +596,7 @@ async function selectBackupPath(enableAfter) {
       state.config = state.config || {};
       state.config.backupPath = result.path;
       saveData();
+      try { window.EA.setBackupDir && window.EA.setBackupDir(result.path); } catch {}
       renderPage();
       showToast('Backup-Ordner gespeichert');
       if (enableAfter) onToggleAutoBackup();
@@ -4068,8 +4099,11 @@ function einstellungen() {
             <div style="font-size:11px;color:var(--muted);margin-top:2px">Modal für neue Einkäufe/Ausgaben/Einnahmen erscheint automatisch nach dem Start</div>
           </div>
         </div>
-        <div style="margin-top:10px">
+        <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap">
           <button class="btn btn-ghost btn-sm" onclick="restartSetup()">🔄 Willkommensassistent erneut starten</button>
+          <button class="btn btn-ghost btn-sm" onclick="startTour()">🧭 App-Tour erneut ansehen</button>
+          <button class="btn btn-ghost btn-sm" onclick="showTermsModal(function(){})">📋 Nutzungsbedingungen anzeigen</button>
+          <button class="btn btn-ghost btn-sm" onclick="showWhatsNewModal()">📝 Änderungsverlauf</button>
         </div>
       </div>
     </div>
@@ -5787,8 +5821,208 @@ async function archiveYear() {
   }
 }
 
-function showSetupScreen() {
-  const overlay = document.getElementById('setupOverlay');
+// ── ONBOARDING: Nutzungsbedingungen + Spotlight-Tour ────────────────────────
+// ▼▼▼ HIER DEN TEXT DER NUTZUNGSBEDINGUNGEN EINTRAGEN/ANPASSEN ▼▼▼
+// Unterstützt: Absätze (Leerzeile trennt), Aufzählung (Zeile beginnt mit "- "),
+// Überschrift (Zeile beginnt mit "# ").
+const NUTZUNGSBEDINGUNGEN = `# Willkommen bei Finanzverwaltung Pro
+
+Bitte lies die folgenden Hinweise aufmerksam durch, bevor du die App nutzt.
+
+# Zweck der App
+Diese Anwendung dient der privaten Verwaltung deiner Finanzen. Sie ersetzt keine steuerliche oder finanzielle Beratung.
+
+# Keine Gewähr
+Alle Berechnungen erfolgen nach bestem Wissen, jedoch ohne Gewähr auf Richtigkeit. Die Verantwortung für die eingegebenen Daten und deren Nutzung liegt bei dir.
+
+# Datenschutz
+Deine Daten werden lokal auf deinem Gerät gespeichert und nicht an Dritte übertragen.
+
+# Nutzung auf eigenes Risiko
+Die Nutzung der App erfolgt auf eigenes Risiko. Für etwaige Schäden oder Datenverluste wird keine Haftung übernommen.
+
+(Platzhalter – bitte durch deinen finalen Text ersetzen.)`;
+// ▲▲▲ ENDE NUTZUNGSBEDINGUNGEN ▲▲▲
+
+function termsToHtml(txt) {
+  const esc = s => s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  const blocks = txt.split('\n');
+  let html = '', inList = false;
+  for (let line of blocks) {
+    line = line.replace(/\r/g,'');
+    const t = line.trim();
+    if (/^-\s+/.test(t)) {
+      if (!inList) { html += '<ul style="margin:6px 0 10px 18px;padding:0">'; inList = true; }
+      html += '<li style="margin:4px 0">' + esc(t.replace(/^-\s+/,'')) + '</li>';
+      continue;
+    }
+    if (inList) { html += '</ul>'; inList = false; }
+    if (!t) continue;
+    if (/^#\s/.test(t)) {
+      html += '<div style="font-weight:700;font-size:15px;color:var(--text);margin:16px 0 6px">' + esc(t.replace(/^#\s/,'')) + '</div>';
+    } else {
+      html += '<p style="margin:6px 0;color:var(--muted-text);line-height:1.6">' + esc(t) + '</p>';
+    }
+  }
+  if (inList) html += '</ul>';
+  return html;
+}
+
+function showTermsModal(onAccept) {
+  const overlay = document.createElement('div');
+  overlay.id = 'termsOverlay';
+  overlay.style.cssText = 'position:fixed;inset:0;background:linear-gradient(135deg,var(--accent) 0%,#1a1916 100%);z-index:10000;display:flex;align-items:center;justify-content:center;padding:20px';
+  overlay.innerHTML = `
+    <div style="background:var(--paper);border-radius:16px;width:min(560px,94vw);max-height:88vh;display:flex;flex-direction:column;box-shadow:0 24px 60px rgba(0,0,0,.4);overflow:hidden">
+      <div style="padding:20px 26px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:12px">
+        <span style="font-size:26px">📋</span>
+        <h2 style="margin:0;font-size:18px;font-weight:700;color:var(--text)">Nutzungsbedingungen</h2>
+      </div>
+      <div id="termsScroll" style="padding:20px 26px;overflow-y:auto;flex:1;font-size:13px">${termsToHtml(NUTZUNGSBEDINGUNGEN)}</div>
+      <div style="padding:16px 26px;border-top:1px solid var(--border);background:var(--surface)">
+        <label id="termsCheckWrap" style="display:flex;align-items:center;gap:10px;font-size:13px;color:var(--muted-text);opacity:.5;cursor:not-allowed;margin-bottom:12px">
+          <input type="checkbox" id="termsCheck" disabled style="width:18px;height:18px;accent-color:var(--accent)" />
+          <span id="termsCheckLabel">Bitte scrolle bis zum Ende, um zu bestätigen</span>
+        </label>
+        <button id="termsAcceptBtn" disabled onclick="_acceptTerms()"
+          style="width:100%;padding:14px;background:var(--accent);color:#fff;border:none;border-radius:8px;font-size:15px;font-weight:700;cursor:not-allowed;opacity:.5;font-family:inherit">
+          Akzeptieren und fortfahren
+        </button>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+  _termsAcceptCb = onAccept;
+
+  const scroll = overlay.querySelector('#termsScroll');
+  const check = overlay.querySelector('#termsCheck');
+  const wrap = overlay.querySelector('#termsCheckWrap');
+  const label = overlay.querySelector('#termsCheckLabel');
+  const btn = overlay.querySelector('#termsAcceptBtn');
+
+  function enableCheckbox() {
+    check.disabled = false;
+    wrap.style.opacity = '1';
+    wrap.style.cursor = 'pointer';
+    label.textContent = 'Ich habe die Nutzungsbedingungen gelesen und akzeptiere sie';
+  }
+  // Scroll-Ende erkennen (oder wenn Text kurz genug ist, direkt freigeben)
+  function checkScrolled() {
+    if (scroll.scrollTop + scroll.clientHeight >= scroll.scrollHeight - 8) enableCheckbox();
+  }
+  scroll.addEventListener('scroll', checkScrolled);
+  setTimeout(checkScrolled, 100); // falls kein Scrollbalken nötig
+
+  check.addEventListener('change', () => {
+    const on = check.checked;
+    btn.disabled = !on;
+    btn.style.cursor = on ? 'pointer' : 'not-allowed';
+    btn.style.opacity = on ? '1' : '.5';
+  });
+}
+let _termsAcceptCb = null;
+function _acceptTerms() {
+  state.meta = state.meta || {};
+  state.meta.termsAccepted = true;
+  state.meta.termsAcceptedAt = new Date().toISOString();
+  saveData();
+  const o = document.getElementById('termsOverlay');
+  if (o) o.remove();
+  const cb = _termsAcceptCb; _termsAcceptCb = null;
+  if (typeof cb === 'function') cb();
+}
+
+// ── SPOTLIGHT-TOUR ──────────────────────────────────────────────────────────
+const TOUR_STEPS = [
+  { sel: null, title: 'Willkommen! 👋', text: 'Ich zeige dir in wenigen Schritten, wo du was findest. Du kannst die Tour jederzeit über „Überspringen" beenden.' },
+  { nav: 'dashboard', title: '📊 Dashboard', text: 'Dein Überblick: Cashflow pro Konto, Sparfortschritt und die wichtigsten Zahlen des Monats.' },
+  { nav: 'einkaeufe', title: '🛒 Einkäufe & Ausgaben', text: 'Hier erfasst du alltägliche Ausgaben – schnell, kategorisiert und einem Konto zugeordnet.' },
+  { nav: 'einnahmen', title: '💰 Einnahmen', text: 'Gehalt, Nebenjob und einmalige Einnahmen trägst du hier ein.' },
+  { nav: 'fixkosten', title: '🔁 Fixkosten', text: 'Wiederkehrende Kosten mit Rhythmus (monatlich, quartalsweise …) und optionaler Sparplan-Verknüpfung.' },
+  { nav: 'sparen', title: '🏦 Sparen & Depot', text: 'Sparpläne und dein Wertpapierdepot mit aktuellen Kursen.' },
+  { nav: 'umbuchungen', title: '🔄 Umbuchungen', text: 'Verschiebe Geld zwischen deinen Konten, ohne dass es als Ausgabe zählt.' },
+  { nav: 'suche', title: '🔍 Suche', text: 'Finde jede Buchung über alle Monate und Typen hinweg.' },
+  { nav: 'einstellungen', title: '⚙️ Einstellungen', text: 'Konten, Sparziel, Erinnerungen, Backups und Updates – alles zentral hier. Die Tour kannst du hier später erneut starten.' },
+  { sel: null, title: 'Fertig! 🎉', text: 'Das war der Rundgang. Leg einfach los – und wenn du etwas suchst, schau in die Einstellungen. Viel Erfolg!' },
+];
+let _tourIndex = 0;
+
+function startTour() {
+  _tourIndex = 0;
+  renderTourStep();
+}
+function endTour() {
+  document.getElementById('tourOverlay')?.remove();
+  document.getElementById('tourSpot')?.remove();
+  state.meta.tourDone = true;
+  saveData();
+}
+function tourNext() { _tourIndex++; if (_tourIndex >= TOUR_STEPS.length) { endTour(); return; } renderTourStep(); }
+function tourPrev() { if (_tourIndex > 0) { _tourIndex--; renderTourStep(); } }
+
+function renderTourStep() {
+  const step = TOUR_STEPS[_tourIndex];
+  if (!step) { endTour(); return; }
+  // Zielelement finden (robust: fehlt es, wird ohne Highlight zentriert gezeigt)
+  let target = null;
+  if (step.nav) {
+    target = document.querySelector(`.nav-item[onclick*="navigate('${step.nav}')"]`);
+    if (target) { try { navigate(step.nav); } catch {} }
+  }
+  // Overlay (abdunkeln)
+  let overlay = document.getElementById('tourOverlay');
+  if (!overlay) {
+    overlay = document.createElement('div');
+    overlay.id = 'tourOverlay';
+    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:10001;transition:.2s';
+    document.body.appendChild(overlay);
+  }
+  let spot = document.getElementById('tourSpot');
+  if (spot) spot.remove();
+
+  // Sprechblase
+  const total = TOUR_STEPS.length;
+  const isFirst = _tourIndex === 0;
+  const isLast = _tourIndex === total - 1;
+  const bubble = document.createElement('div');
+  bubble.id = 'tourSpot';
+  bubble.style.cssText = 'position:fixed;z-index:10002;background:var(--paper);border-radius:14px;padding:18px 20px;width:min(340px,86vw);box-shadow:0 20px 50px rgba(0,0,0,.45)';
+
+  bubble.innerHTML = `
+    <div style="font-size:16px;font-weight:700;color:var(--text);margin-bottom:6px">${step.title}</div>
+    <div style="font-size:13px;color:var(--muted-text);line-height:1.55;margin-bottom:14px">${step.text}</div>
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:10px">
+      <span style="font-size:12px;color:var(--muted-text)">${_tourIndex+1} / ${total}</span>
+      <div style="display:flex;gap:8px">
+        <button class="btn btn-ghost btn-sm" onclick="endTour()">Überspringen</button>
+        ${!isFirst ? '<button class="btn btn-ghost btn-sm" onclick="tourPrev()">Zurück</button>' : ''}
+        <button class="btn btn-primary btn-sm" onclick="tourNext()">${isLast ? 'Fertig' : 'Weiter'}</button>
+      </div>
+    </div>`;
+  document.body.appendChild(bubble);
+
+  // Position: neben dem Zielelement, sonst zentriert
+  if (target) {
+    const r = target.getBoundingClientRect();
+    // Highlight-Rahmen um das Element
+    const hl = document.createElement('div');
+    hl.id = 'tourHl';
+    document.getElementById('tourHl')?.remove();
+    hl.style.cssText = `position:fixed;z-index:10001;left:${r.left-4}px;top:${r.top-4}px;width:${r.width+8}px;height:${r.height+8}px;border:2px solid var(--accent);border-radius:8px;box-shadow:0 0 0 4px color-mix(in srgb,var(--accent) 30%,transparent);pointer-events:none;transition:.2s`;
+    overlay.appendChild(hl);
+    // Bubble rechts neben die Sidebar
+    let left = r.right + 16;
+    let top = Math.max(12, Math.min(r.top, window.innerHeight - 200));
+    if (left + 340 > window.innerWidth) left = Math.max(12, r.left - 356);
+    bubble.style.left = left + 'px';
+    bubble.style.top = top + 'px';
+  } else {
+    bubble.style.left = '50%';
+    bubble.style.top = '50%';
+    bubble.style.transform = 'translate(-50%,-50%)';
+  }
+}
+
+function showSetupScreen() {  const overlay = document.getElementById('setupOverlay');
   if (overlay) { overlay.style.display = 'flex'; return; }
 
   const div = document.createElement('div');
@@ -5879,7 +6113,12 @@ function completeSetup() {
 
   buildMonthSelector();
   navigate('dashboard');
-  if (state.config?.showStartupModal !== false) openQuickAdd();
+  // Nach dem Setup: Spotlight-Tour starten (nur wenn noch nicht gesehen).
+  if (!state.meta.tourDone) {
+    setTimeout(() => startTour(), 400);
+  } else if (state.config?.showStartupModal !== false) {
+    openQuickAdd();
+  }
 }
 
 async function editUserName() {
@@ -5993,6 +6232,13 @@ window.openCalc              = openCalc;
 window.calcPress             = calcPress;
 window.calcApply             = calcApply;
 window.closeCalc             = closeCalc;
+window._acceptTerms          = _acceptTerms;
+window.showTermsModal        = showTermsModal;
+window.startTour             = startTour;
+window.endTour               = endTour;
+window.tourNext              = tourNext;
+window.tourPrev              = tourPrev;
+window.showWhatsNewModal     = showWhatsNewModal;
 window.uiConfirm = uiConfirm;
 window.uiAlert = uiAlert;
 window.uiPrompt = uiPrompt;
@@ -6148,12 +6394,30 @@ window.deleteRegelEinnahme   = deleteRegelEinnahme;
   setTimeout(() => initReminders(), 1500);
   // ── "Was ist neu" nach einem Update anzeigen ────────────────────────────
   setTimeout(() => checkWhatsNew(), 2000);
+  // ── Robustheit: Backup-Ordner an Hauptprozess melden (für Backup beim Beenden)
+  if (window.EA && window.EA.setBackupDir && state.config && state.config.backupPath) {
+    try { window.EA.setBackupDir(state.config.backupPath); } catch {}
+  }
+  // ── Robustheit: Hinweis, falls Daten aus einer Sicherung wiederhergestellt wurden
+  if (window.EA && window.EA.onDataRecovered) {
+    window.EA.onDataRecovered(() => {
+      setTimeout(() => {
+        uiAlert({ title: 'Daten wiederhergestellt', icon: '🛟',
+          message: 'Die Hauptdatei war beschädigt und wurde automatisch aus der letzten gültigen Sicherung wiederhergestellt. Bitte prüfe kurz, ob alle Einträge vorhanden sind.' });
+      }, 1500);
+    });
+  }
   // Tägliches Auto-Refresh der Wertpapier-Kurse beim App-Start
   setTimeout(() => maybeAutoRefreshKurse().catch(e => console.error('autoRefreshKurse:', e)), 2500);
   // ── Erststart-Erkennung ─────────────────────────────────────────────────
   if (!state.meta.setupDone || !state.meta.userName) {
     buildMonthSelector();
-    showSetupScreen();
+    // Erst Nutzungsbedingungen (falls noch nicht akzeptiert), dann Willkommen.
+    if (!state.meta.termsAccepted) {
+      showTermsModal(() => showSetupScreen());
+    } else {
+      showSetupScreen();
+    }
     // Wire ESC and events even during setup
     document.addEventListener('click', e => {
     const sr = document.getElementById('searchResults');
