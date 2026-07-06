@@ -159,6 +159,11 @@ let _snoozedReminders = {};
 // Format je Eintrag: { v: 'Version', date: 'YYYY-MM-DD', changes: ['...','...'] }
 // Änderungen dürfen mit **Fett** Markierung versehen werden.
 const CHANGELOG = [
+  { v: '1.0.7', date: '2026-07-06', changes: [
+    '**Neues Dark-Mode-Design** „Graphit + Bernstein": edler, wärmerer Look mit goldenem Akzent',
+    'Flächen, Linien und Textfarben im Dark-Mode aufeinander abgestimmt (sehr guter Kontrast)',
+    'Der helle Modus bleibt unverändert',
+  ]},
   { v: '1.0.6', date: '2026-07-06', changes: [
     '**Nutzungsbedingungen** überarbeitet und erweitert (Zweck, keine Beratung, Datenschutz, Datensicherung, Haftung)',
     'In den Einstellungen ist jetzt sichtbar, dass die Bedingungen bestätigt wurden (mit Datum)',
@@ -4520,6 +4525,16 @@ function applyTheme(theme) {
     } catch(e) {}
   }
   try { localStorage.setItem('fv_theme', JSON.stringify({ theme })); } catch(e) {}
+  // Akzent an das Theme anpassen: Dark = Bernstein (CSS), Hell = konfigurierte Farbe.
+  const root2 = document.documentElement;
+  const nowDark = root2.classList.contains('theme-dark');
+  if (nowDark) {
+    ['--accent','--accent-dark','--accent-hover','--accent-light'].forEach(v => root2.style.removeProperty(v));
+  } else if ((state.config||{}).accent) {
+    root2.style.setProperty('--accent', state.config.accent);
+    root2.style.setProperty('--accent-dark', (typeof ACCENT_DARKS!=='undefined' && ACCENT_DARKS[state.config.accent]) || state.config.accent);
+    root2.style.setProperty('--accent-light', state.config.accent + '20');
+  }
 }
 function applyAccent(color) {
   updateConfig('accent', color);
@@ -4534,6 +4549,16 @@ function applyAccent(color) {
 function applySettings() {
   const cfg = state.config || {};
   if (cfg.theme) applyTheme(cfg.theme);
+  // Akzentfarbe: nur im Hell-Modus die konfigurierte Farbe erzwingen.
+  // Im Dark-Mode gilt der Bernstein-Akzent aus dem CSS (nicht überschreiben).
+  const isDark = document.documentElement.classList.contains('theme-dark');
+  if (isDark) {
+    // evtl. zuvor gesetzte Inline-Akzente entfernen, damit CSS (Bernstein) greift
+    const root = document.documentElement;
+    ['--accent','--accent-dark','--accent-hover','--accent-light'].forEach(v => root.style.removeProperty(v));
+  } else if (cfg.accent) {
+    applyAccent(cfg.accent);
+  }
   document.body.classList.toggle('compact', !!cfg.compactMode);
   try { localStorage.setItem('fv_theme', JSON.stringify({ theme: cfg.theme||'light' })); } catch(e) {}
 }

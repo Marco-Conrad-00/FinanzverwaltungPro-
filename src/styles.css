@@ -39,22 +39,33 @@
    DARK THEME
 ══════════════════════════════════════════════════════════════════ */
 .theme-dark {
-  --bg:          #111111;
-  --surface:     #181818;
-  --surface-2:   #222222;
-  --paper:       #1c1c1c;
-  --text:        #eeeeee;
-  --muted:       #888f8d;
-  --border:      #2e2e2e;
-  --input-bg:    #252525;
-  --input-text:  #eeeeee;
-  --input-border:#363636;
-  --accent-light:#0d2b28;
-  --green-bg:    #052e16;
-  --red-bg:      #2d0707;
-  --blue-bg:     #0c1a3a;
-  --amber-bg:    #2d1800;
-  --purple-bg:   #1a0933;
+  /* ── Graphit + Bernstein · Dark-Mode ──────────────────────────── */
+  --bg:          #121316;   /* tiefer Graphit-Hintergrund */
+  --surface:     #191b1f;   /* Karten/Flächen */
+  --surface-2:   #21242a;   /* abgesetzte Flächen, Inputs-Hover */
+  --paper:       #1b1e22;   /* Modals, Panels */
+  --text:        #e6e8ea;   /* klare, leicht kühle Schrift */
+  --muted:       #8a9099;   /* gedämpfter Text */
+  --border:      #2b2f36;   /* dezente Linien */
+  --input-bg:    #1f2228;
+  --input-text:  #e6e8ea;
+  --input-border:#333842;
+
+  /* Bernstein als Akzent (ersetzt Teal im Dark-Mode) */
+  --accent:      #f0b429;
+  --accent-dark: #d99a1f;
+  --accent-light:#3a2e0e;   /* dunkler Bernstein-Schleier für Hover/Flächen */
+
+  /* Zahlen-Farben: harmonisch auf Graphit abgestimmt (Logik bleibt gleich) */
+  --green:       #5ec98a;
+  --green-bg:    #10241a;
+  --red:         #e07a6a;
+  --red-bg:      #2a1512;
+  --amber:       #f0b429;
+  --amber-bg:    #2d2408;
+  --blue-bg:     #10203f;
+  --purple-bg:   #1c1030;
+
   color-scheme: dark;
 }
 
