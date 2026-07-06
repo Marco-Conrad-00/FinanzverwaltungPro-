@@ -160,8 +160,9 @@ let _snoozedReminders = {};
 // Änderungen dürfen mit **Fett** Markierung versehen werden.
 const CHANGELOG = [
   { v: '1.0.7', date: '2026-07-06', changes: [
-    '**Neues Dark-Mode-Design** „Graphit + Bernstein": edler, wärmerer Look mit goldenem Akzent',
-    'Flächen, Linien und Textfarben im Dark-Mode aufeinander abgestimmt (sehr guter Kontrast)',
+    '**Neues Dark-Mode-Design in Türkis/Blau** – passend zum Logo, modern und hochwertig',
+    'Aktiver Menüpunkt jetzt dezent blau/türkis hervorgehoben statt vollflächig',
+    'Buttons, Eingabefelder und Karten im neuen kontrastreichen Blau-Schema',
     'Der helle Modus bleibt unverändert',
   ]},
   { v: '1.0.6', date: '2026-07-06', changes: [

@@ -39,31 +39,34 @@
    DARK THEME
 ══════════════════════════════════════════════════════════════════ */
 .theme-dark {
-  /* ── Graphit + Bernstein · Dark-Mode ──────────────────────────── */
-  --bg:          #121316;   /* tiefer Graphit-Hintergrund */
-  --surface:     #191b1f;   /* Karten/Flächen */
-  --surface-2:   #21242a;   /* abgesetzte Flächen, Inputs-Hover */
-  --paper:       #1b1e22;   /* Modals, Panels */
-  --text:        #e6e8ea;   /* klare, leicht kühle Schrift */
-  --muted:       #8a9099;   /* gedämpfter Text */
-  --border:      #2b2f36;   /* dezente Linien */
-  --input-bg:    #1f2228;
-  --input-text:  #e6e8ea;
-  --input-border:#333842;
+  /* ── Türkis / Blau · Dark-Mode (passend zum Logo) ─────────────── */
+  --bg:          #0F172A;   /* Haupt-Hintergrund (Slate 900) */
+  --surface:     #1E293B;   /* Karten/Boxen (Slate 800) */
+  --surface-2:   #273449;   /* abgesetzte Flächen, Input-Hover */
+  --paper:       #1E293B;   /* Modals, Panels */
+  --sidebar:     #111827;   /* Sidebar (etwas dunkler) */
+  --text:        #F8FAFC;   /* Haupttext */
+  --muted:       #94A3B8;   /* Sekundärtext */
+  --border:      #334155;   /* Rahmen */
+  --input-bg:    #172033;
+  --input-text:  #F8FAFC;
+  --input-border:#334155;
 
-  /* Bernstein als Akzent (ersetzt Teal im Dark-Mode) */
-  --accent:      #f0b429;
-  --accent-dark: #d99a1f;
-  --accent-light:#3a2e0e;   /* dunkler Bernstein-Schleier für Hover/Flächen */
+  /* Primary (Buttons) = #0EA5E9, Hover = #0284C7, Akzent = #22D3EE */
+  --accent:      #0EA5E9;   /* Primary/Buttons */
+  --accent-dark: #0284C7;   /* Hover */
+  --accent-hover:#0284C7;
+  --accent-light:#0b2a3f;   /* dezenter blauer Schleier für aktive Flächen/Hover */
+  --accent2:     #22D3EE;   /* heller Türkis-Akzent (Highlights) */
 
-  /* Zahlen-Farben: harmonisch auf Graphit abgestimmt (Logik bleibt gleich) */
-  --green:       #5ec98a;
-  --green-bg:    #10241a;
-  --red:         #e07a6a;
-  --red-bg:      #2a1512;
-  --amber:       #f0b429;
-  --amber-bg:    #2d2408;
-  --blue-bg:     #10203f;
+  /* Zahlen-Farben */
+  --green:       #22C55E;   /* Erfolg/positive Werte */
+  --green-bg:    #0c2a1a;
+  --red:         #EF4444;   /* Fehler/negative Werte */
+  --red-bg:      #2a1114;
+  --amber:       #F59E0B;
+  --amber-bg:    #2a2008;
+  --blue-bg:     #0d2540;
   --purple-bg:   #1c1030;
 
   color-scheme: dark;
@@ -97,7 +100,7 @@ input::placeholder, textarea::placeholder { color: var(--muted); opacity: .7; }
 input:focus, textarea:focus {
   border-color: var(--accent);
   outline: none;
-  box-shadow: 0 0 0 2px rgba(15,118,110,.2);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 30%, transparent);
 }
 input:hover, textarea:hover { border-color: var(--muted); }
 
@@ -116,7 +119,7 @@ select {
   -webkit-appearance: none;
   background-image: none;
 }
-select:focus { border-color: var(--accent); outline: none; box-shadow: 0 0 0 2px rgba(15,118,110,.2); }
+select:focus { border-color: var(--accent); outline: none; box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 30%, transparent); }
 select:hover { border-color: var(--muted); }
 select option { background: var(--input-bg); color: var(--input-text); }
 
@@ -178,7 +181,7 @@ input[type="checkbox"]:checked::after {
   border-bottom: 2px solid #fff;
   transform: rotate(-45deg);
 }
-input[type="checkbox"]:focus { outline: none; box-shadow: 0 0 0 2px rgba(15,118,110,.3); }
+input[type="checkbox"]:focus { outline: none; box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 35%, transparent); }
 input[type="checkbox"]:disabled { opacity: .4; cursor: not-allowed; }
 
 /* SWITCH */
@@ -215,7 +218,7 @@ input[type="checkbox"]:disabled { opacity: .4; cursor: not-allowed; }
   display: flex; flex-direction: column;
   flex-shrink: 0; overflow-y: auto;
 }
-.theme-dark .sidebar { background: var(--surface-2); }
+.theme-dark .sidebar { background: var(--sidebar); }
 .sidebar-logo { padding: 20px 16px 12px; border-bottom: 1px solid var(--border); }
 .sidebar-logo .eyebrow { color: var(--accent); font-size: 10px; font-weight: 800; letter-spacing: .1em; text-transform: uppercase; margin-bottom: 3px; }
 .sidebar-logo h1 { font-size: 15px; font-weight: 700; line-height: 1.2; }
@@ -229,8 +232,16 @@ input[type="checkbox"]:disabled { opacity: .4; cursor: not-allowed; }
   border-radius: 6px; margin: 1px 6px;
   transition: background .1s, color .1s;
 }
-.nav-item:hover { background: rgba(15,118,110,.1); color: var(--text); }
+.nav-item:hover { background: color-mix(in srgb, var(--accent) 10%, transparent); color: var(--text); }
 .nav-item.active { background: var(--accent); color: #fff; }
+/* Dark-Mode: aktiver Menüpunkt dezent statt vollflächig */
+.theme-dark .nav-item.active {
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  color: var(--accent2);
+  font-weight: 700;
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+.theme-dark .nav-item:hover { background: color-mix(in srgb, var(--accent) 12%, transparent); }
 .sidebar-footer { margin-top: auto; padding: 12px; border-top: 1px solid var(--border); }
 .quick-add-btn {
   width: 100%; padding: 10px; background: var(--accent); color: #fff;
@@ -269,6 +280,8 @@ input[type="checkbox"]:disabled { opacity: .4; cursor: not-allowed; }
 }
 .btn-primary { background: var(--accent); color: #fff; }
 .btn-primary:hover { background: var(--accent-dark); }
+/* Dark-Mode: dunkler Text auf hellem Blau = besser lesbar, moderner Look */
+.theme-dark .btn-primary { color: #0F172A; font-weight: 700; }
 .btn-secondary { background: var(--text); color: var(--bg); }
 .btn-ghost { background: var(--surface-2); color: var(--accent); border: 1px solid var(--border); }
 .btn-ghost:hover { background: var(--accent-light); }
@@ -308,7 +321,7 @@ thead th {
 }
 tbody td { padding: 8px 12px; border-bottom: 1px solid var(--border); vertical-align: middle; }
 tbody tr:last-child td { border-bottom: none; }
-tbody tr:hover td { background: rgba(15,118,110,.04); }
+tbody tr:hover td { background: color-mix(in srgb, var(--accent) 6%, transparent); }
 .theme-dark tbody tr:hover td { background: rgba(255,255,255,.03); }
 td.amount { text-align: right; font-weight: 600; white-space: nowrap; }
 td.positive { color: var(--green); }
@@ -334,7 +347,7 @@ label.field input, label.field select, label.field textarea {
 label.field select { padding-right: 10px; }
 label.field input:focus, label.field select:focus, label.field textarea:focus {
   border-color: var(--accent); outline: none;
-  box-shadow: 0 0 0 2px rgba(15,118,110,.2);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 30%, transparent);
 }
 
 /* BADGES */
