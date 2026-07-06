@@ -159,6 +159,11 @@ let _snoozedReminders = {};
 // Format je Eintrag: { v: 'Version', date: 'YYYY-MM-DD', changes: ['...','...'] }
 // Änderungen dürfen mit **Fett** Markierung versehen werden.
 const CHANGELOG = [
+  { v: '1.0.6', date: '2026-07-06', changes: [
+    '**Nutzungsbedingungen** überarbeitet und erweitert (Zweck, keine Beratung, Datenschutz, Datensicherung, Haftung)',
+    'In den Einstellungen ist jetzt sichtbar, dass die Bedingungen bestätigt wurden (mit Datum)',
+    'Bedingungen lassen sich jederzeit erneut ansehen, ohne die Bestätigung zu verlieren',
+  ]},
   { v: '1.0.5', date: '2026-07-06', changes: [
     '**Mehr Datensicherheit**: Speichern erfolgt jetzt absturzsicher (die Hauptdatei kann bei einem Absturz nicht mehr beschädigt werden)',
     '**Automatische Wiederherstellung**: Ist die Datendatei doch einmal defekt, greift die App automatisch auf die letzte gültige Sicherung zurück',
@@ -4102,8 +4107,13 @@ function einstellungen() {
         <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap">
           <button class="btn btn-ghost btn-sm" onclick="restartSetup()">🔄 Willkommensassistent erneut starten</button>
           <button class="btn btn-ghost btn-sm" onclick="startTour()">🧭 App-Tour erneut ansehen</button>
-          <button class="btn btn-ghost btn-sm" onclick="showTermsModal(function(){})">📋 Nutzungsbedingungen anzeigen</button>
+          <button class="btn btn-ghost btn-sm" onclick="showTermsModal(null, true)">📋 Nutzungsbedingungen anzeigen</button>
           <button class="btn btn-ghost btn-sm" onclick="showWhatsNewModal()">📝 Änderungsverlauf</button>
+        </div>
+        <div style="margin-top:10px;display:flex;align-items:center;gap:8px;font-size:12px;color:var(--muted-text)">
+          ${termsAcceptedCurrent()
+            ? `<span style="color:var(--accent);font-weight:700">✓ Nutzungsbedingungen bestätigt</span>${state.meta?.termsAcceptedAt ? ' <span style="color:var(--muted-text)">· am ' + new Date(state.meta.termsAcceptedAt).toLocaleDateString('de-DE') + '</span>' : ''}`
+            : '<span style="color:var(--amber)">⚠ Nutzungsbedingungen noch nicht bestätigt</span>'}
         </div>
       </div>
     </div>
@@ -5822,26 +5832,41 @@ async function archiveYear() {
 }
 
 // ── ONBOARDING: Nutzungsbedingungen + Spotlight-Tour ────────────────────────
-// ▼▼▼ HIER DEN TEXT DER NUTZUNGSBEDINGUNGEN EINTRAGEN/ANPASSEN ▼▼▼
+// ▼▼▼ NUTZUNGSBEDINGUNGEN ▼▼▼
 // Unterstützt: Absätze (Leerzeile trennt), Aufzählung (Zeile beginnt mit "- "),
 // Überschrift (Zeile beginnt mit "# ").
+// Wird die Version erhöht, muss der Nutzer die Bedingungen erneut bestätigen.
+const NUTZUNGSBEDINGUNGEN_VERSION = 2;
 const NUTZUNGSBEDINGUNGEN = `# Willkommen bei Finanzverwaltung Pro
-
-Bitte lies die folgenden Hinweise aufmerksam durch, bevor du die App nutzt.
+Bitte lies die folgenden Hinweise sorgfältig durch, bevor du die App nutzt.
 
 # Zweck der App
-Diese Anwendung dient der privaten Verwaltung deiner Finanzen. Sie ersetzt keine steuerliche oder finanzielle Beratung.
+Finanzverwaltung Pro dient der privaten Verwaltung und Übersicht deiner Finanzen. Die App unterstützt dich dabei, Einnahmen, Ausgaben, Budgets, Kontostände und finanzielle Entwicklungen besser nachzuvollziehen. Sie dient ausschließlich der persönlichen Orientierung.
+
+# Keine Anlage-, Steuer- oder Rechtsberatung
+Finanzverwaltung Pro stellt keine Anlageberatung, Steuerberatung, Rechtsberatung oder sonstige verbindliche Beratung dar. Alle Auswertungen, Übersichten, Budgets, Prognosen und Berechnungen basieren auf den von dir eingegebenen Daten und dienen ausschließlich der privaten Information. Sie stellen keine Empfehlung dar, bestimmte Finanzprodukte zu kaufen oder zu verkaufen, Verträge abzuschließen oder konkrete finanzielle Entscheidungen zu treffen.
 
 # Keine Gewähr
-Alle Berechnungen erfolgen nach bestem Wissen, jedoch ohne Gewähr auf Richtigkeit. Die Verantwortung für die eingegebenen Daten und deren Nutzung liegt bei dir.
+Alle Berechnungen und Auswertungen erfolgen nach bestem Wissen, jedoch ohne Gewähr auf Richtigkeit, Vollständigkeit oder Aktualität. Die Verantwortung für die eingegebenen Daten sowie deren Nutzung liegt vollständig bei dir.
 
-# Datenschutz
-Deine Daten werden lokal auf deinem Gerät gespeichert und nicht an Dritte übertragen.
+# Datenschutz und lokale Speicherung
+Deine Daten werden lokal auf deinem Gerät gespeichert. Es erfolgt keine automatische Übertragung deiner Finanzdaten an Dritte, keine Cloud-Synchronisierung und keine serverseitige Verarbeitung durch Finanzverwaltung Pro. Bitte beachte, dass du selbst für den Schutz deines Geräts und deiner gespeicherten Daten verantwortlich bist.
+
+# Datensicherung und Geräteschutz
+Da deine Daten lokal gespeichert werden, bist du selbst für regelmäßige Sicherungen verantwortlich. Bitte erstelle bei Bedarf Backups und stelle sicher, dass dein Gerät ausreichend geschützt ist, zum Beispiel durch ein sicheres Benutzerkonto, Passwort, Virenschutz und regelmäßige Systemupdates.
+
+# Import und Export von Daten
+Sofern du Daten importierst oder exportierst, bist du selbst dafür verantwortlich, die Richtigkeit der Daten zu prüfen und exportierte Dateien sicher aufzubewahren.
+
+# Verfügbarkeit und Änderungen
+Es wird keine Garantie übernommen, dass die App jederzeit fehlerfrei, vollständig oder dauerhaft verfügbar ist. Funktionen können im Rahmen von Updates geändert, erweitert oder entfernt werden.
 
 # Nutzung auf eigenes Risiko
-Die Nutzung der App erfolgt auf eigenes Risiko. Für etwaige Schäden oder Datenverluste wird keine Haftung übernommen.
+Die Nutzung von Finanzverwaltung Pro erfolgt auf eigenes Risiko. Für finanzielle Entscheidungen, fehlerhafte Eingaben, unvollständige Daten, Datenverluste oder sonstige Schäden, die durch die Nutzung der App entstehen, wird keine Haftung übernommen.
 
-(Platzhalter – bitte durch deinen finalen Text ersetzen.)`;
+Mit der Nutzung der App bestätigst du, dass du diese Hinweise gelesen und verstanden hast.
+
+Stand: Juli 2026`;
 // ▲▲▲ ENDE NUTZUNGSBEDINGUNGEN ▲▲▲
 
 function termsToHtml(txt) {
@@ -5868,18 +5893,23 @@ function termsToHtml(txt) {
   return html;
 }
 
-function showTermsModal(onAccept) {
+function showTermsModal(onAccept, viewOnly) {
+  // viewOnly: nur ansehen (aus Einstellungen) – ändert den bestätigten Status NICHT.
+  // Wird nichts übergeben, aber Bedingungen sind schon in aktueller Version akzeptiert,
+  // automatisch als "nur ansehen" behandeln.
+  if (viewOnly === undefined && typeof onAccept !== 'function') viewOnly = true;
+  if (viewOnly === undefined && termsAcceptedCurrent() && typeof onAccept === 'function') {
+    // aus Einstellungen mit leerem Callback -> ansehen
+    viewOnly = true;
+  }
   const overlay = document.createElement('div');
   overlay.id = 'termsOverlay';
   overlay.style.cssText = 'position:fixed;inset:0;background:linear-gradient(135deg,var(--accent) 0%,#1a1916 100%);z-index:10000;display:flex;align-items:center;justify-content:center;padding:20px';
-  overlay.innerHTML = `
-    <div style="background:var(--paper);border-radius:16px;width:min(560px,94vw);max-height:88vh;display:flex;flex-direction:column;box-shadow:0 24px 60px rgba(0,0,0,.4);overflow:hidden">
-      <div style="padding:20px 26px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:12px">
-        <span style="font-size:26px">📋</span>
-        <h2 style="margin:0;font-size:18px;font-weight:700;color:var(--text)">Nutzungsbedingungen</h2>
-      </div>
-      <div id="termsScroll" style="padding:20px 26px;overflow-y:auto;flex:1;font-size:13px">${termsToHtml(NUTZUNGSBEDINGUNGEN)}</div>
-      <div style="padding:16px 26px;border-top:1px solid var(--border);background:var(--surface)">
+  const footer = viewOnly
+    ? `<div style="padding:16px 26px;border-top:1px solid var(--border);background:var(--surface);display:flex;justify-content:flex-end">
+         <button class="btn btn-primary" onclick="document.getElementById('termsOverlay')?.remove()" style="padding:12px 24px">Schließen</button>
+       </div>`
+    : `<div style="padding:16px 26px;border-top:1px solid var(--border);background:var(--surface)">
         <label id="termsCheckWrap" style="display:flex;align-items:center;gap:10px;font-size:13px;color:var(--muted-text);opacity:.5;cursor:not-allowed;margin-bottom:12px">
           <input type="checkbox" id="termsCheck" disabled style="width:18px;height:18px;accent-color:var(--accent)" />
           <span id="termsCheckLabel">Bitte scrolle bis zum Ende, um zu bestätigen</span>
@@ -5888,10 +5918,19 @@ function showTermsModal(onAccept) {
           style="width:100%;padding:14px;background:var(--accent);color:#fff;border:none;border-radius:8px;font-size:15px;font-weight:700;cursor:not-allowed;opacity:.5;font-family:inherit">
           Akzeptieren und fortfahren
         </button>
+      </div>`;
+  overlay.innerHTML = `
+    <div style="background:var(--paper);border-radius:16px;width:min(560px,94vw);max-height:88vh;display:flex;flex-direction:column;box-shadow:0 24px 60px rgba(0,0,0,.4);overflow:hidden">
+      <div style="padding:20px 26px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:12px">
+        <span style="font-size:26px">📋</span>
+        <h2 style="margin:0;font-size:18px;font-weight:700;color:var(--text)">Nutzungsbedingungen</h2>
       </div>
+      <div id="termsScroll" style="padding:20px 26px;overflow-y:auto;flex:1;font-size:13px">${termsToHtml(NUTZUNGSBEDINGUNGEN)}</div>
+      ${footer}
     </div>`;
   document.body.appendChild(overlay);
   _termsAcceptCb = onAccept;
+  if (viewOnly) return; // keine Scroll-/Checkbox-Logik nötig
 
   const scroll = overlay.querySelector('#termsScroll');
   const check = overlay.querySelector('#termsCheck');
@@ -5924,11 +5963,18 @@ function _acceptTerms() {
   state.meta = state.meta || {};
   state.meta.termsAccepted = true;
   state.meta.termsAcceptedAt = new Date().toISOString();
+  state.meta.termsAcceptedVersion = NUTZUNGSBEDINGUNGEN_VERSION;
   saveData();
   const o = document.getElementById('termsOverlay');
   if (o) o.remove();
   const cb = _termsAcceptCb; _termsAcceptCb = null;
   if (typeof cb === 'function') cb();
+}
+
+// Sind die Bedingungen in der AKTUELLEN Version bestätigt?
+function termsAcceptedCurrent() {
+  return !!state.meta && state.meta.termsAccepted === true
+    && (state.meta.termsAcceptedVersion || 1) >= NUTZUNGSBEDINGUNGEN_VERSION;
 }
 
 // ── SPOTLIGHT-TOUR ──────────────────────────────────────────────────────────
@@ -6412,8 +6458,8 @@ window.deleteRegelEinnahme   = deleteRegelEinnahme;
   // ── Erststart-Erkennung ─────────────────────────────────────────────────
   if (!state.meta.setupDone || !state.meta.userName) {
     buildMonthSelector();
-    // Erst Nutzungsbedingungen (falls noch nicht akzeptiert), dann Willkommen.
-    if (!state.meta.termsAccepted) {
+    // Erst Nutzungsbedingungen (falls noch nicht in aktueller Version akzeptiert), dann Willkommen.
+    if (!termsAcceptedCurrent()) {
       showTermsModal(() => showSetupScreen());
     } else {
       showSetupScreen();
@@ -6441,6 +6487,10 @@ window.deleteRegelEinnahme   = deleteRegelEinnahme;
 
   buildMonthSelector();
   updateBadges();
+  // Bestehende Nutzer: falls neue Bedingungs-Version, erneut bestätigen lassen.
+  if (!termsAcceptedCurrent()) {
+    showTermsModal(() => {});
+  }
   // Apply saved startPage from settings
   const validPages = ['dashboard','jahresuebersicht','buchungen','einkaeufe','ausgaben','einnahmen','spesen','fixkosten','sparen','zaehler','finanzprodukte','tabellen','einstellungen'];
   const savedStart = state.config?.startPage;
