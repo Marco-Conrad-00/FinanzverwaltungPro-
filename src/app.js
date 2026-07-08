@@ -160,6 +160,8 @@ let _snoozedReminders = {};
 // Änderungen dürfen mit **Fett** Markierung versehen werden.
 const CHANGELOG = [
   { v: '1.0.8', date: '2026-07-08', changes: [
+    '**Zähler-Grafik umschaltbar**: Zählerstand (Linie) oder Verbrauch (Balken)',
+    '**Vorjahre einblendbar** per Checkbox – durchgehend oder Jahre im Vergleich übereinander',
     '**Grafik bei den Zählerständen**: pro Zählertyp (Strom, Wasser …) zeigt eine Linie den Verlauf der Zählerstände über die Zeit',
     'Die Grafik erscheint automatisch, sobald mindestens zwei Werte erfasst sind, und passt sich dem Design an',
   ]},
@@ -5011,10 +5013,35 @@ function zaehler() {
       '<tbody>' + rowsHtml + '</tbody></table></div>' + monthlyHtml + '</div>';
   }).join('');
 
+  const yearsAvail = (typeof listYears==='function' ? listYears() : []).filter(y => y !== getSelectedYear());
+  const ctrlBar =
+    '<div style="display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-bottom:14px;padding:10px 14px;background:var(--surface);border:1px solid var(--border);border-radius:10px">' +
+      '<span style="font-size:12px;font-weight:700;color:var(--muted)">Grafik:</span>' +
+      '<div style="display:inline-flex;border:1px solid var(--border);border-radius:8px;overflow:hidden">' +
+        '<button class="btn btn-sm ' + (zChartOpts.mode==='stand'?'btn-primary':'btn-ghost') + '" onclick="zSetMode(\'stand\')" style="border-radius:0">📈 Zählerstand</button>' +
+        '<button class="btn btn-sm ' + (zChartOpts.mode==='verbrauch'?'btn-primary':'btn-ghost') + '" onclick="zSetMode(\'verbrauch\')" style="border-radius:0">📊 Verbrauch</button>' +
+      '</div>' +
+      (yearsAvail.length ?
+        '<button class="btn btn-ghost btn-sm" onclick="zToggleYearPicker()">📅 Vorjahre' + (zChartOpts.years.length?' ('+zChartOpts.years.length+')':'') + '</button>' : '') +
+    '</div>' +
+    (zChartOpts.showYearPicker && yearsAvail.length ?
+      '<div style="margin:-8px 0 14px;padding:12px 14px;background:var(--surface);border:1px solid var(--border);border-radius:10px">' +
+        '<div style="display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-bottom:10px">' +
+          '<span style="font-size:12px;color:var(--muted)">Zusätzlich anzeigen:</span>' +
+          yearsAvail.map(y => '<label style="display:inline-flex;align-items:center;gap:5px;font-size:13px;cursor:pointer"><input type="checkbox" ' + (zChartOpts.years.includes(y)?'checked':'') + ' onchange="zToggleYear(\'' + y + '\')" style="width:16px;height:16px;accent-color:var(--accent)"/>' + y + '</label>').join('') +
+        '</div>' +
+        (zChartOpts.years.length ?
+          '<div style="display:flex;gap:10px;align-items:center">' +
+            '<span style="font-size:12px;color:var(--muted)">Darstellung:</span>' +
+            '<label style="display:inline-flex;align-items:center;gap:5px;font-size:13px;cursor:pointer"><input type="radio" name="zym" ' + (zChartOpts.yearMode==='durchgehend'?'checked':'') + ' onchange="zSetYearMode(\'durchgehend\')" style="accent-color:var(--accent)"/> durchgehend</label>' +
+            '<label style="display:inline-flex;align-items:center;gap:5px;font-size:13px;cursor:pointer"><input type="radio" name="zym" ' + (zChartOpts.yearMode==='vergleich'?'checked':'') + ' onchange="zSetYearMode(\'vergleich\')" style="accent-color:var(--accent)"/> Jahre vergleichen</label>' +
+          '</div>' : '') +
+      '</div>' : '');
+
   return '<div>' +
     '<div style="display:flex;justify-content:flex-end;margin-bottom:14px">' +
     '<button class="btn btn-primary" onclick="openZaehlerModal()" ${lockAttr()}>+ Zählerstand</button></div>' +
-    (Object.keys(byType).length ? typeHtml :
+    (Object.keys(byType).length ? (ctrlBar + typeHtml) :
       '<div class="empty-state"><div class="empty-icon">⚡</div><p>Noch keine Zählerstände erfasst.</p></div>') +
     '</div>';
 }
@@ -5086,68 +5113,127 @@ function saveZaehlerModal() {
   });
   saveData(); closeZaehlerModal(); renderPage();
 }
+// ── Zähler-Grafik: Optionen (global für alle Zählertypen) ───────────────────
+const zChartOpts = {
+  mode: 'stand',        // 'stand' = Zählerstand (Linie), 'verbrauch' = Verbrauch (Balken)
+  years: [],            // zusätzlich anzuzeigende Jahre (neben dem gewählten)
+  yearMode: 'durchgehend', // 'durchgehend' = eine Linie über alle Jahre, 'vergleich' = Jahre übereinander
+  showYearPicker: false,
+};
+function zSetMode(m) { zChartOpts.mode = m; renderPage(); }
+function zSetYearMode(m) { zChartOpts.yearMode = m; renderPage(); }
+function zToggleYearPicker() { zChartOpts.showYearPicker = !zChartOpts.showYearPicker; renderPage(); }
+function zToggleYear(y) {
+  y = String(y);
+  const i = zChartOpts.years.indexOf(y);
+  if (i >= 0) zChartOpts.years.splice(i, 1); else zChartOpts.years.push(y);
+  renderPage();
+}
+
 function renderZaehlerCharts() {
   if (typeof Chart === 'undefined') return;
-  const items = [...state.zaehler].sort((a,b)=>(a.date||'').localeCompare(b.date||''));
-  const byType = {};
-  items.forEach(z => { const t = z.type || 'Strom'; (byType[t] = byType[t] || []).push(z); });
-
-  // Akzentfarbe aus dem Theme lesen (folgt dem blauen/hellen Design)
   const css = getComputedStyle(document.documentElement);
-  const accent = (css.getPropertyValue('--accent') || '#0EA5E9').trim();
+  const accent  = (css.getPropertyValue('--accent') || '#0EA5E9').trim();
   const accent2 = (css.getPropertyValue('--accent2') || accent).trim();
   const textCol = (css.getPropertyValue('--muted') || '#94A3B8').trim();
   const gridCol = (css.getPropertyValue('--border') || '#334155').trim();
+  const green   = (css.getPropertyValue('--green') || '#22C55E').trim();
+  // Farbpalette für mehrere Jahre (Vergleichsmodus)
+  const yearColors = [accent, '#22D3EE', '#a78bfa', '#f59e0b', '#f472b6', '#4ade80'];
 
-  Object.keys(byType).forEach(type => {
-    const rows = byType[type];
-    if (rows.length < 2) return;
+  const curYear = getSelectedYear();
+  const selectedYears = [curYear, ...zChartOpts.years.filter(y => y !== curYear)].sort();
+
+  // Zählerstände je Jahr laden: { jahr: [ {date,value,einheit,type}, ... ] }
+  function zaehlerOfYear(y) {
+    try { return (getYearData(y).zaehler || []); } catch { return []; }
+  }
+
+  // Alle im aktuellen Jahr vorkommenden Typen (damit für jeden ein Chart existiert)
+  const typesNow = {};
+  zaehlerOfYear(curYear).forEach(z => { typesNow[z.type || 'Strom'] = true; });
+
+  Object.keys(typesNow).forEach(type => {
     const id = 'zChart_' + type.replace(/[^a-zA-Z0-9]/g,'_');
     const ctx = document.getElementById(id);
     if (!ctx) return;
-    const einheit = rows[0]?.einheit || '';
-    const labels = rows.map(z => {
-      const d = z.date || '';
-      // kompaktes Datum TT.MM.JJ
-      const p = d.split('-');
-      return p.length === 3 ? (p[2] + '.' + p[1] + '.' + p[0].slice(2)) : d;
+
+    // Pro Jahr die Reihen dieses Typs sammeln, chronologisch
+    const perYear = {};
+    selectedYears.forEach(y => {
+      const rows = zaehlerOfYear(y).filter(z => (z.type||'Strom') === type)
+        .sort((a,b)=>(a.date||'').localeCompare(b.date||''));
+      if (rows.length) perYear[y] = rows;
     });
-    const data = rows.map(z => z.value || 0);
-    try {
-      chartInstances['z_' + id] = new Chart(ctx, {
-        type: 'line',
-        data: {
-          labels,
-          datasets: [{
-            label: 'Zählerstand' + (einheit ? ' (' + einheit + ')' : ''),
-            data,
-            borderColor: accent,
-            backgroundColor: accent + '22',
-            borderWidth: 2,
-            pointBackgroundColor: accent2,
-            pointRadius: 3,
-            tension: 0.25,
-            fill: true,
-          }]
-        },
-        options: {
-          responsive: true,
-          maintainAspectRatio: false,
-          plugins: {
-            legend: { display: true, labels: { color: textCol, font: { size: 11, family: 'Inter' }, boxWidth: 12 } },
-            tooltip: {
-              callbacks: {
-                label: (c) => ' ' + fmt(c.parsed.y) + (einheit ? ' ' + einheit : '')
-              }
-            }
-          },
-          scales: {
-            x: { ticks: { color: textCol, font: { size: 10 } }, grid: { color: gridCol + '55' } },
-            y: { ticks: { color: textCol, font: { size: 10 } }, grid: { color: gridCol + '55' } }
+    const anyRows = Object.values(perYear).flat();
+    if (anyRows.length < 2) return;
+    const einheit = anyRows[0]?.einheit || '';
+
+    let config;
+    const isVerbrauch = zChartOpts.mode === 'verbrauch';
+
+    if (zChartOpts.yearMode === 'vergleich' && selectedYears.length > 1) {
+      // Jahre übereinander: X = Monat (1–12), ein Datensatz je Jahr
+      const monthLabels = ['Jan','Feb','Mär','Apr','Mai','Jun','Jul','Aug','Sep','Okt','Nov','Dez'];
+      const datasets = Object.keys(perYear).map((y, idx) => {
+        const rows = perYear[y];
+        // Wert je Monat (letzter Stand im Monat) bzw. Verbrauch je Monat
+        const monthVal = new Array(12).fill(null);
+        if (isVerbrauch) {
+          for (let i = 1; i < rows.length; i++) {
+            const m = parseInt((rows[i].date||'').split('-')[1],10) - 1;
+            if (m>=0 && m<12) monthVal[m] = (monthVal[m]||0) + (rows[i].value - rows[i-1].value);
           }
+        } else {
+          rows.forEach(z => { const m = parseInt((z.date||'').split('-')[1],10)-1; if (m>=0&&m<12) monthVal[m] = z.value; });
         }
+        const col = yearColors[idx % yearColors.length];
+        return {
+          label: y,
+          data: monthVal,
+          borderColor: col,
+          backgroundColor: isVerbrauch ? col + 'cc' : col + '22',
+          borderWidth: 2, pointRadius: isVerbrauch ? 0 : 3,
+          tension: 0.25, fill: !isVerbrauch, spanGaps: true,
+        };
       });
-    } catch (e) { console.error('Zähler-Chart:', e); }
+      config = { type: isVerbrauch ? 'bar' : 'line', data: { labels: monthLabels, datasets } };
+    } else {
+      // Durchgehend: alle Jahre hintereinander, X = Datum
+      const rows = selectedYears.flatMap(y => perYear[y] || [])
+        .sort((a,b)=>(a.date||'').localeCompare(b.date||''));
+      const labels = rows.map(z => { const p=(z.date||'').split('-'); return p.length===3?(p[2]+'.'+p[1]+'.'+p[0].slice(2)):z.date; });
+      if (isVerbrauch) {
+        // Verbrauch = Differenz zum Vorwert (Balken), erster Punkt entfällt
+        const vals = [], vlabels = [];
+        for (let i = 1; i < rows.length; i++) { vals.push(rows[i].value - rows[i-1].value); vlabels.push(labels[i]); }
+        config = { type: 'bar', data: { labels: vlabels, datasets: [{
+          label: 'Verbrauch' + (einheit?' ('+einheit+')':''), data: vals,
+          backgroundColor: accent + 'cc', borderColor: accent, borderWidth: 1,
+        }]}};
+      } else {
+        config = { type: 'line', data: { labels, datasets: [{
+          label: 'Zählerstand' + (einheit?' ('+einheit+')':''), data: rows.map(z=>z.value||0),
+          borderColor: accent, backgroundColor: accent + '22', borderWidth: 2,
+          pointBackgroundColor: accent2, pointRadius: 3, tension: 0.25, fill: true,
+        }]}};
+      }
+    }
+
+    config.options = {
+      responsive: true, maintainAspectRatio: false,
+      plugins: {
+        legend: { display: true, labels: { color: textCol, font: { size: 11, family: 'Inter' }, boxWidth: 12 } },
+        tooltip: { callbacks: { label: (c) => ' ' + (c.dataset.label ? c.dataset.label + ': ' : '') + fmt(c.parsed.y) + (einheit ? ' ' + einheit : '') } }
+      },
+      scales: {
+        x: { ticks: { color: textCol, font: { size: 10 } }, grid: { color: gridCol + '55' } },
+        y: { ticks: { color: textCol, font: { size: 10 } }, grid: { color: gridCol + '55' } }
+      }
+    };
+
+    try { chartInstances['z_' + id] = new Chart(ctx, config); }
+    catch (e) { console.error('Zähler-Chart:', e); }
   });
 }
 
@@ -6475,6 +6561,10 @@ window.deleteUmbuchung          = deleteUmbuchung;
 
 // Zähler
 window.addZaehler                = addZaehler;
+window.zSetMode                  = zSetMode;
+window.zSetYearMode              = zSetYearMode;
+window.zToggleYearPicker         = zToggleYearPicker;
+window.zToggleYear               = zToggleYear;
 window.openFinanzproduktModal   = openFinanzproduktModal;
 window.closeFinanzproduktModal  = closeFinanzproduktModal;
 window.saveFinanzproduktModal   = saveFinanzproduktModal;
