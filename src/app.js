@@ -159,6 +159,9 @@ let _snoozedReminders = {};
 // Format je Eintrag: { v: 'Version', date: 'YYYY-MM-DD', changes: ['...','...'] }
 // Änderungen dürfen mit **Fett** Markierung versehen werden.
 const CHANGELOG = [
+  { v: '1.0.9', date: '2026-07-08', changes: [
+    '**Feedback-Bereich** in den Einstellungen: Fehler melden, Wünsche und Erweiterungen direkt per E-Mail senden – mit vorbereiteter Nachricht und automatischer Versions-Angabe',
+  ]},
   { v: '1.0.8', date: '2026-07-08', changes: [
     '**Zähler-Grafik umschaltbar**: Zählerstand (Linie) oder Verbrauch (Balken)',
     '**Vorjahre einblendbar** per Checkbox – durchgehend oder Jahre im Vergleich übereinander',
@@ -196,6 +199,40 @@ const CHANGELOG = [
 function changelogToNotes(entry) {
   if (!entry) return '';
   return entry.changes.map(c => '- ' + c).join('\n');
+}
+
+async function sendFeedback(kind) {
+  const FEEDBACK_EMAIL = 'Marco.Conrad00@gmail.com';
+  let version = '';
+  try { if (window.EA && window.EA.getVersion) version = await window.EA.getVersion(); } catch {}
+  if (!version) { const el2 = document.getElementById('appVersion'); version = el2 ? el2.textContent : ''; }
+
+  const map = {
+    bug:         { subj: 'Fehlermeldung', intro: 'Ich habe folgenden Fehler entdeckt:' },
+    wunsch:      { subj: 'Wunsch / Idee',  intro: 'Ich hätte folgenden Wunsch bzw. folgende Idee:' },
+    erweiterung: { subj: 'Erweiterung',    intro: 'Ich schlage folgende Erweiterung vor:' },
+  };
+  const m = map[kind] || map.wunsch;
+  const subject = 'Finanzverwaltung Pro – ' + m.subj + (version ? ' (' + version + ')' : '');
+  const bodyLines = [
+    m.intro,
+    '',
+    '',
+    '────────────────────',
+    'App: Finanzverwaltung Pro',
+    'Version: ' + (version || 'unbekannt'),
+    'Betriebssystem: ' + (navigator.platform || 'unbekannt'),
+  ];
+  if (kind === 'bug') {
+    bodyLines.splice(3, 0, 'Was ist passiert?', '', 'Was hattest du erwartet?', '', 'Schritte zum Nachstellen:', '');
+  }
+  const body = bodyLines.join('\n');
+  const url = 'mailto:' + FEEDBACK_EMAIL + '?subject=' + encodeURIComponent(subject) + '&body=' + encodeURIComponent(body);
+  // Öffnet das Standard-Mailprogramm des Nutzers
+  try {
+    if (window.EA && window.EA.openExternal) { window.EA.openExternal(url); }
+    else { window.location.href = url; }
+  } catch { window.location.href = url; }
 }
 
 async function checkWhatsNew() {
@@ -4308,10 +4345,30 @@ function einstellungen() {
       </div>
     </div>
 
-    <!-- ── SPENDEN ───────────────────────────────────────────────────── -->
+    <!-- ── FEEDBACK ───────────────────────────────────────────────────── -->
     <div class="settings-section">
-      <div class="settings-section-header">💖 Entwicklung unterstützen</div>
-      <div class="card mb-2" style="background:linear-gradient(135deg,color-mix(in srgb,var(--accent) 8%,var(--paper)),var(--paper));border-color:color-mix(in srgb,var(--accent) 30%,var(--border))">
+      <div class="settings-section-header">💬 Feedback &amp; Ideen</div>
+      <div class="card mb-2">
+        <p style="font-size:13px;color:var(--muted-text);line-height:1.6;margin-bottom:14px">Hast du einen Fehler entdeckt, einen Wunsch oder eine Idee für eine neue Funktion? Ich freue mich über deine Rückmeldung! Ein Klick öffnet dein E-Mail-Programm mit einer vorbereiteten Nachricht.</p>
+        <div style="display:flex;flex-wrap:wrap;gap:8px">
+          <button class="btn btn-primary btn-sm" onclick="sendFeedback('bug')">🐞 Fehler melden</button>
+          <button class="btn btn-ghost btn-sm" onclick="sendFeedback('wunsch')">💡 Wunsch / Idee</button>
+          <button class="btn btn-ghost btn-sm" onclick="sendFeedback('erweiterung')">✨ Erweiterung vorschlagen</button>
+        </div>
+        <div style="margin-top:14px;background:var(--surface-2);border-radius:8px;padding:10px 14px;display:flex;align-items:center;justify-content:space-between;gap:10px">
+          <div>
+            <p style="font-size:10px;font-weight:700;color:var(--muted-text);text-transform:uppercase;letter-spacing:.06em;margin-bottom:2px">E-Mail</p>
+            <p style="font-size:13px;font-weight:600;color:var(--accent)">Marco.Conrad00@gmail.com</p>
+          </div>
+          <button class="btn btn-ghost btn-sm" onclick="navigator.clipboard.writeText('Marco.Conrad00@gmail.com').then(()=>showToast('E-Mail kopiert!'))">📋 Kopieren</button>
+        </div>
+        <p style="font-size:11px;color:var(--muted-text);margin-top:10px">Deine App-Version wird automatisch mitgesendet – das hilft mir bei der Zuordnung.</p>
+      </div>
+    </div>
+
+    <!-- ── ENTWICKLUNG UNTERSTÜTZEN ───────────────────────────────────── -->
+    <div class="settings-section">
+      <div class="settings-section-header">💖 Entwicklung unterstützen</div>      <div class="card mb-2" style="background:linear-gradient(135deg,color-mix(in srgb,var(--accent) 8%,var(--paper)),var(--paper));border-color:color-mix(in srgb,var(--accent) 30%,var(--border))">
         <div style="display:flex;align-items:flex-start;gap:16px;flex-wrap:wrap">
           <div style="flex:1;min-width:200px">
             <p style="font-size:14px;font-weight:700;margin-bottom:6px">Finanzverwaltung Pro</p>
@@ -6565,6 +6622,7 @@ window.zSetMode                  = zSetMode;
 window.zSetYearMode              = zSetYearMode;
 window.zToggleYearPicker         = zToggleYearPicker;
 window.zToggleYear               = zToggleYear;
+window.sendFeedback              = sendFeedback;
 window.openFinanzproduktModal   = openFinanzproduktModal;
 window.closeFinanzproduktModal  = closeFinanzproduktModal;
 window.saveFinanzproduktModal   = saveFinanzproduktModal;

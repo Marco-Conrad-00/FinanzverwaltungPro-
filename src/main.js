@@ -575,6 +575,17 @@ function safeLoadData() {
   return { data: null, source: 'none' };
 }
 
+ipcMain.handle('open-external', async (_e, url) => {
+  try {
+    // Nur sichere Schemata zulassen (mailto, http, https)
+    if (typeof url === 'string' && /^(mailto:|https?:)/i.test(url)) {
+      await shell.openExternal(url);
+      return { ok: true };
+    }
+    return { ok: false, reason: 'ungültiges Schema' };
+  } catch (e) { return { ok: false, reason: e.message }; }
+});
+
 ipcMain.handle('load-data', () => {
   const r = safeLoadData();
   // Signalisiere dem Renderer, wenn aus einer Sicherung wiederhergestellt wurde.

@@ -23,5 +23,6 @@ window.EA = {
   setTrayEnabled: (enabled) => ipcRenderer.invoke('set-tray-enabled', enabled),
   notify: (payload) => ipcRenderer.invoke('notify', payload),
   setBackupDir: (dir) => ipcRenderer.invoke('set-backup-dir', dir),
+  openExternal: (url) => ipcRenderer.invoke('open-external', url),
   onDataRecovered: (cb) => ipcRenderer.on('data-recovered', (_, d) => cb(d)),
 };
