@@ -159,6 +159,10 @@ let _snoozedReminders = {};
 // Format je Eintrag: { v: 'Version', date: 'YYYY-MM-DD', changes: ['...','...'] }
 // Änderungen dürfen mit **Fett** Markierung versehen werden.
 const CHANGELOG = [
+  { v: '1.0.8', date: '2026-07-08', changes: [
+    '**Grafik bei den Zählerständen**: pro Zählertyp (Strom, Wasser …) zeigt eine Linie den Verlauf der Zählerstände über die Zeit',
+    'Die Grafik erscheint automatisch, sobald mindestens zwei Werte erfasst sind, und passt sich dem Design an',
+  ]},
   { v: '1.0.7', date: '2026-07-06', changes: [
     '**Neues Dark-Mode-Design in Türkis/Blau** – passend zum Logo, modern und hochwertig',
     'Aktiver Menüpunkt jetzt dezent blau/türkis hervorgehoben statt vollflächig',
@@ -1748,6 +1752,7 @@ function afterRender() {
   if (cv2 && av) cv2.textContent = av.textContent;
 
   if (currentPage === 'dashboard') renderCharts();
+  if (currentPage === 'zaehler') renderZaehlerCharts();
   if (currentPage === 'jahresuebersicht') renderJahresCharts();
 }
 
@@ -5000,6 +5005,7 @@ function zaehler() {
     return '<div class="card mb-2">' +
       '<div class="card-header"><h3>' + (typeIcons[type]||'📊') + ' ' + type + '</h3>' +
       '<span class="badge badge-muted">' + rows.length + ' Einträge</span></div>' +
+      (rows.length >= 2 ? '<div style="padding:14px 14px 4px"><div style="height:160px;position:relative"><canvas id="zChart_' + type.replace(/[^a-zA-Z0-9]/g,'_') + '"></canvas></div></div>' : '') +
       '<div class="table-wrap"><table>' +
       '<thead><tr><th>Datum</th><th>Typ</th><th>Zählerstand</th><th>Einheit</th><th>Verbrauch</th><th>Notiz</th><th></th></tr></thead>' +
       '<tbody>' + rowsHtml + '</tbody></table></div>' + monthlyHtml + '</div>';
@@ -5080,6 +5086,71 @@ function saveZaehlerModal() {
   });
   saveData(); closeZaehlerModal(); renderPage();
 }
+function renderZaehlerCharts() {
+  if (typeof Chart === 'undefined') return;
+  const items = [...state.zaehler].sort((a,b)=>(a.date||'').localeCompare(b.date||''));
+  const byType = {};
+  items.forEach(z => { const t = z.type || 'Strom'; (byType[t] = byType[t] || []).push(z); });
+
+  // Akzentfarbe aus dem Theme lesen (folgt dem blauen/hellen Design)
+  const css = getComputedStyle(document.documentElement);
+  const accent = (css.getPropertyValue('--accent') || '#0EA5E9').trim();
+  const accent2 = (css.getPropertyValue('--accent2') || accent).trim();
+  const textCol = (css.getPropertyValue('--muted') || '#94A3B8').trim();
+  const gridCol = (css.getPropertyValue('--border') || '#334155').trim();
+
+  Object.keys(byType).forEach(type => {
+    const rows = byType[type];
+    if (rows.length < 2) return;
+    const id = 'zChart_' + type.replace(/[^a-zA-Z0-9]/g,'_');
+    const ctx = document.getElementById(id);
+    if (!ctx) return;
+    const einheit = rows[0]?.einheit || '';
+    const labels = rows.map(z => {
+      const d = z.date || '';
+      // kompaktes Datum TT.MM.JJ
+      const p = d.split('-');
+      return p.length === 3 ? (p[2] + '.' + p[1] + '.' + p[0].slice(2)) : d;
+    });
+    const data = rows.map(z => z.value || 0);
+    try {
+      chartInstances['z_' + id] = new Chart(ctx, {
+        type: 'line',
+        data: {
+          labels,
+          datasets: [{
+            label: 'Zählerstand' + (einheit ? ' (' + einheit + ')' : ''),
+            data,
+            borderColor: accent,
+            backgroundColor: accent + '22',
+            borderWidth: 2,
+            pointBackgroundColor: accent2,
+            pointRadius: 3,
+            tension: 0.25,
+            fill: true,
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            legend: { display: true, labels: { color: textCol, font: { size: 11, family: 'Inter' }, boxWidth: 12 } },
+            tooltip: {
+              callbacks: {
+                label: (c) => ' ' + fmt(c.parsed.y) + (einheit ? ' ' + einheit : '')
+              }
+            }
+          },
+          scales: {
+            x: { ticks: { color: textCol, font: { size: 10 } }, grid: { color: gridCol + '55' } },
+            y: { ticks: { color: textCol, font: { size: 10 } }, grid: { color: gridCol + '55' } }
+          }
+        }
+      });
+    } catch (e) { console.error('Zähler-Chart:', e); }
+  });
+}
+
 function updateZaehlerEinheit(id, val) {
   const z = state.zaehler.find(x=>String(x.id) === String(id));
   if (z) { z.einheit = val; saveData(); renderPage(); }
