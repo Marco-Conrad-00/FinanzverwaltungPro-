@@ -1,0 +1,53 @@
+name: Alte Releases aufräumen
+
+# Gehört ins Repo unter:  .github/workflows/cleanup-releases.yml
+# Löscht ältere Releases + Tags und behält nur die N neuesten Versionen.
+# Nur manuell auslösbar (Actions -> "Alte Releases aufräumen" -> Run workflow),
+# damit nie versehentlich etwas gelöscht wird und es den Build nicht stört.
+
+on:
+  workflow_dispatch:
+    inputs:
+      keep:
+        description: "Wie viele der neuesten Versionen behalten"
+        default: "2"
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Repo auschecken (mit allen Tags)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Aufräumen
+        run: |
+          set -euo pipefail
+          REPO="$GITHUB_REPOSITORY"
+          KEEP="${{ github.event.inputs.keep }}"
+          [ -n "$KEEP" ] || KEEP=2
+          # Alle v*-Tags nach Version sortiert, neueste zuerst
+          mapfile -t TAGS < <(git tag -l 'v*' | sort -V -r)
+          echo "Gefundene Versionen (${#TAGS[@]}): ${TAGS[*]:-keine}"
+          if [ "${#TAGS[@]}" -le "$KEEP" ]; then
+            echo "Nur ${#TAGS[@]} Version(en) – nichts zu löschen (behalte $KEEP)."
+            exit 0
+          fi
+          echo "Behalten:  ${TAGS[*]:0:$KEEP}"
+          echo "Entfernen: ${TAGS[*]:$KEEP}"
+          for tag in "${TAGS[@]:$KEEP}"; do
+            echo "-> Entferne Version $tag"
+            if gh release view "$tag" --repo "$REPO" >/dev/null 2>&1; then
+              gh release delete "$tag" --repo "$REPO" --cleanup-tag --yes
+            else
+              git push origin ":refs/tags/$tag"
+            fi
+          done
+          echo "Fertig."
