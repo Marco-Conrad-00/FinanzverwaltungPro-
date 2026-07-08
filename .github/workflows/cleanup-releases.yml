@@ -6,6 +6,10 @@ name: Alte Releases aufräumen
 # damit nie versehentlich etwas gelöscht wird und es den Build nicht stört.
 
 on:
+  # Automatisch: sobald ein Release veröffentlicht wird, ältere aufräumen.
+  release:
+    types: [published]
+  # Manuell weiterhin möglich (mit wählbarer Anzahl).
   workflow_dispatch:
     inputs:
       keep:
@@ -45,9 +49,4 @@ jobs:
           for tag in "${TAGS[@]:$KEEP}"; do
             echo "-> Entferne Version $tag"
             if gh release view "$tag" --repo "$REPO" >/dev/null 2>&1; then
-              gh release delete "$tag" --repo "$REPO" --cleanup-tag --yes
-            else
-              git push origin ":refs/tags/$tag"
-            fi
-          done
-          echo "Fertig."
+              gh release d
