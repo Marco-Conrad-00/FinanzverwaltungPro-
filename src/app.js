@@ -159,6 +159,19 @@ let _snoozedReminders = {};
 // Format je Eintrag: { v: 'Version', date: 'YYYY-MM-DD', changes: ['...','...'] }
 // Änderungen dürfen mit **Fett** Markierung versehen werden.
 const CHANGELOG = [
+  { v: '1.0.11', date: '2026-07-10', changes: [
+    '**Jahr archivieren überarbeitet**: erstellt PDF-Bericht + Backup und führt danach in den Neues-Jahr-Dialog mit Übernahme-Optionen (Endsaldo, Fixkosten, wiederkehrende Einnahmen, Konten)',
+    'Wichtiger Fix: Der alte Archivieren-Ablauf stammte aus der Zeit vor der Mehrjahres-Verwaltung und hätte bestehende Jahre und Einstellungen überschreiben können',
+    'Das JSON-Backup beim Archivieren landet jetzt direkt im Backup-Ordner (falls eingerichtet) statt über einen Download-Dialog',
+    'Übernommene Fixkosten behalten ihren Fälligkeitstag im neuen Jahr',
+  ]},
+  { v: '1.0.10', date: '2026-07-09', changes: [
+    '**Tagesgenauer Saldo mit Fälligkeitstag**: Fixkosten und wiederkehrende Einnahmen zählen in jedem Monat erst ab ihrem Fälligkeitstag in den Saldo (z.B. Miete fällig am 16. → vom 01.–15. noch nicht abgezogen, ab dem 16. schon)',
+    'Der Saldo zeigt damit das real verfügbare Geld zum heutigen Tag; vergangene Monate und Zukunfts-Projektionen zählen weiterhin voll',
+    'Wiederkehrende Einnahmen haben jetzt ein eigenes Tag-Feld (Tag des Geldeingangs) neben dem Startmonat',
+    '**Feedback**: Versandweg wählbar – Standard-Mailprogramm oder Gmail direkt im Browser',
+    '**Einstellungen aufgeräumt**: Die drei Kategorien-Bereiche sind jetzt aufklappbar und zeigen zugeklappt die Anzahl eigener Einträge',
+  ]},
   { v: '1.0.9', date: '2026-07-08', changes: [
     '**Feedback-Bereich** in den Einstellungen: Fehler melden, Wünsche und Erweiterungen direkt per E-Mail senden – mit vorbereiteter Nachricht und automatischer Versions-Angabe',
   ]},
@@ -227,8 +240,17 @@ async function sendFeedback(kind) {
     bodyLines.splice(3, 0, 'Was ist passiert?', '', 'Was hattest du erwartet?', '', 'Schritte zum Nachstellen:', '');
   }
   const body = bodyLines.join('\n');
-  const url = 'mailto:' + FEEDBACK_EMAIL + '?subject=' + encodeURIComponent(subject) + '&body=' + encodeURIComponent(body);
-  // Öffnet das Standard-Mailprogramm des Nutzers
+  // Versandweg: Standard-Mailprogramm (mailto) oder Gmail im Browser (config.feedbackVia)
+  const via = (state.config && state.config.feedbackVia) || 'mailto';
+  let url;
+  if (via === 'gmail') {
+    // Öffnet direkt das Gmail-Verfassen-Fenster im Browser (zuverlässig, wenn
+    // kein Mail-Programm eingerichtet ist und Gmail im Browser genutzt wird).
+    url = 'https://mail.google.com/mail/?view=cm&fs=1&to=' + encodeURIComponent(FEEDBACK_EMAIL)
+        + '&su=' + encodeURIComponent(subject) + '&body=' + encodeURIComponent(body);
+  } else {
+    url = 'mailto:' + FEEDBACK_EMAIL + '?subject=' + encodeURIComponent(subject) + '&body=' + encodeURIComponent(body);
+  }
   try {
     if (window.EA && window.EA.openExternal) { window.EA.openExternal(url); }
     else { window.location.href = url; }
@@ -1049,6 +1071,30 @@ function fixkostenAktivImMonat(f, month) {
   if (iv <= 1) return true;
   return (monthDiff(start, month) % iv) === 0;
 }
+
+// ── TAGESGENAUE SALDO-REGEL (FÄLLIGKEITSTAG) ────────────────────────────────
+// Eine Position (Fixkost oder wiederkehrende Einnahme) mit Tag > 1 zählt in
+// JEDEM Monat erst ab diesem Fälligkeitstag in den Saldo:
+//   Miete fällig am 16.  →  vom 01.–15. des laufenden Monats noch nicht
+//   abgezogen, ab dem 16. schon. Gleiches gilt für Einnahmen (Geldeingang).
+// Regeln:
+//  - Vergangene Monate zählen immer voll (der Tag ist längst erreicht).
+//  - Zukünftige Monate / Projektionen über den heutigen Monat hinaus zählen
+//    voll (der Saldo eines künftigen Monats meint dessen Monatsende).
+//  - Nur im real laufenden Monat wird der heutige Tag gegen den
+//    Fälligkeitstag geprüft.
+//  - Fälligkeitstag größer als Monatslänge (31. im April) → letzter Tag.
+function faelligkeitstagErreicht(tag, m, grenze) {
+  tag = +tag || 1;
+  if (tag <= 1) return true;                     // Standard: ab Monatsbeginn (Altbestand)
+  const heuteM = thisMonth();
+  if (m !== heuteM) return true;                 // Vergangenheit/Zukunft: voll
+  if (grenze && grenze > heuteM) return true;    // Projektion über heute hinaus: voll
+  const [y, mo] = m.split('-').map(Number);
+  const tageImMonat = new Date(y, mo, 0).getDate();
+  if (tag > tageImMonat) tag = tageImMonat;      // 31. in 30-Tage-Monat → letzter Tag
+  return new Date().getDate() >= tag;
+}
 function fixkostenForMonth(month) {
   return state.fixkosten.filter(f => fixkostenAktivImMonat(f, month));
 }
@@ -1167,9 +1213,9 @@ function kontoNetBis(kontoId, month) {
     if ((r.kontoId||defaultKontoId()) !== kontoId) return;
     const start = r.startMonth || (yr + '-01');
     const end = r.endMonth || grenze;
-    // Monate von start bis min(end, grenze) zählen
+    // Monate von start bis min(end, grenze) zählen – tagesgenau im Startmonat.
     const bisM = (end < grenze) ? end : grenze;
-    if (bisM >= start) monthsBetween(start, bisM).forEach(() => { regel += (+r.amount||0); });
+    if (bisM >= start) monthsBetween(start, bisM).forEach((m2) => { if (faelligkeitstagErreicht(r.startTag, m2, grenze)) regel += (+r.amount||0); });
   });
   // Fixkosten-Sparen mit Zielkonto = diesem Konto: monatliche Sparbeträge gutschreiben.
   // Nur Bargeld-Sparen (kein Wertpapierkauf) zählt als Cash-Zufluss aufs Konto.
@@ -1181,7 +1227,7 @@ function kontoNetBis(kontoId, month) {
     const start = f.start || (yr + '-01');
     const end = f.end || grenze;
     const bisM = (end < grenze) ? end : grenze;
-    if (bisM >= start) monthsBetween(start, bisM).forEach((m) => { if (fixkostenAktivImMonat(f, m)) sparTransfer += (+f.amount||0); });
+    if (bisM >= start) monthsBetween(start, bisM).forEach((m) => { if (fixkostenAktivImMonat(f, m) && faelligkeitstagErreicht(f.day, m, grenze)) sparTransfer += (+f.amount||0); });
   });
   // Umbuchungen: Abgang bei vonKonto, Zugang bei nachKonto (bis einschl. month)
   let umb = 0;
@@ -1202,9 +1248,10 @@ function kontoNetBis(kontoId, month) {
     if (getGehaltKonto(yr) === kontoId)   sonst += (+inc.gehalt||0);
     if (getNebenjobKonto(yr) === kontoId) sonst += (+inc.nebenjob||0);
     // Fixkosten mindern ihr zugeordnetes Konto (Default für Altbestand ohne kontoId).
+    // Tagesgenau: zählt im laufenden Monat erst ab dem Fälligkeitstag (f.day).
     (state.fixkosten||[]).forEach(f => {
       if ((f.kontoId||def) !== kontoId) return;
-      if (fixkostenAktivImMonat(f, m)) sonst -= (+f.amount||0);
+      if (fixkostenAktivImMonat(f, m) && faelligkeitstagErreicht(f.day, m, grenze)) sonst -= (+f.amount||0);
     });
     // Einkäufe mindern ihr zugeordnetes Konto (Default für Altbestand).
     (state.einkaeufe||[]).forEach(e => {
@@ -2362,7 +2409,7 @@ function regelEinnahmeRow(r) {
   return '<tr>' +
     '<td><input type="text" value="' + (r.source||'').replace(/"/g,'&quot;') + '" onchange="updateRegelEinnahme(\'' + r.id + '\',\'source\',this.value)" /></td>' +
     '<td><select onchange="updateRegelEinnahme(\'' + r.id + '\',\'type\',this.value)">' + typeOpts + '</select></td>' +
-    '<td><input type="month" value="' + (r.startMonth||'') + '" onchange="updateRegelEinnahme(\'' + r.id + '\',\'startMonth\',this.value)" style="width:145px"/></td>' +
+    '<td style="white-space:nowrap"><input type="month" value="' + (r.startMonth||'') + '" onchange="updateRegelEinnahme(\'' + r.id + '\',\'startMonth\',this.value)" style="width:145px"/> <input type="number" min="1" max="31" value="' + (+r.startTag||1) + '" onchange="updateRegelEinnahme(\'' + r.id + '\',\'startTag\',+this.value)" title="Tag des Geldeingangs – zählt im laufenden Monat erst ab diesem Tag in den Saldo" style="width:52px;text-align:center"/></td>' +
     '<td><input type="month" value="' + (r.endMonth||'') + '" onchange="updateRegelEinnahme(\'' + r.id + '\',\'endMonth\',this.value)" style="width:145px" placeholder="Kein Ende"/></td>' +
     '<td><input type="text" value="' + (r.note||'').replace(/"/g,'&quot;') + '" onchange="updateRegelEinnahme(\'' + r.id + '\',\'note\',this.value)" placeholder="Notiz…"/></td>' +
     '<td style="white-space:nowrap"><input type="number" value="' + (+r.amount||0).toFixed(2) + '" step="0.01" onchange="updateRegelEinnahme(\'' + r.id + '\',\'amount\',+this.value)" style="width:90px;text-align:right"/> ' + currencySymbol() + '</td>' +
@@ -3046,6 +3093,7 @@ async function runSparenAutoEintragung() {
       if (f.end && m > f.end) continue;
       if (m > today_ym) continue;  // future months not yet auto-created
       if (!fixkostenAktivImMonat(f, m)) continue;  // Rhythmus berücksichtigen
+      if (!faelligkeitstagErreicht(f.day, m, today_ym)) continue;  // Fälligkeitstag noch nicht erreicht
       // Check ob bereits eingetragen (entweder Auto oder manuell mit gleichem Wertpapier+Monat)
       const sym = f.sparenLink?.symbol || '';
       const alreadyExists = (state.sparen||[]).some(s => {
@@ -3939,13 +3987,13 @@ function saldoBreakdown(kontoId) {
   // Wiederkehrende Einnahmen
   (state.regelEinnahmen||[]).forEach(r => {
     if ((r.kontoId||def)!==kontoId) return;
-    months.forEach(m => { if ((!r.startMonth||r.startMonth<=m)&&(!r.endMonth||r.endMonth>=m)) b.regelEinnahmen += (+r.amount||0); });
+    months.forEach(m => { if ((!r.startMonth||r.startMonth<=m)&&(!r.endMonth||r.endMonth>=m)&&faelligkeitstagErreicht(r.startTag, m, grenze)) b.regelEinnahmen += (+r.amount||0); });
   });
   // Sparpläne (intern) → Gutschrift Zielkonto
   (state.fixkosten||[]).forEach(f => {
     if (!f.sparenLink || f.sparenLink.extern || f.sparenLink.zielkonto!==kontoId) return;
     if (f.sparenLink.sparTyp && f.sparenLink.sparTyp!=='bargeld') return;
-    months.forEach(m => { if (m<=grenze && fixkostenAktivImMonat(f, m)) b.sparTransfer += (+f.amount||0); });
+    months.forEach(m => { if (m<=grenze && fixkostenAktivImMonat(f, m) && faelligkeitstagErreicht(f.day, m, grenze)) b.sparTransfer += (+f.amount||0); });
   });
   // Umbuchungen
   (state.umbuchungen||[]).forEach(u => {
@@ -3961,7 +4009,7 @@ function saldoBreakdown(kontoId) {
     if (getNebenjobKonto(yr)===kontoId) b.nebenjob += (+inc.nebenjob||0);
     (state.fixkosten||[]).forEach(f => {
       if ((f.kontoId||def)!==kontoId) return;
-      if (fixkostenAktivImMonat(f, m)) b.fixkosten -= (+f.amount||0);
+      if (fixkostenAktivImMonat(f, m) && faelligkeitstagErreicht(f.day, m, grenze)) b.fixkosten -= (+f.amount||0);
     });
     (state.einkaeufe||[]).forEach(e => { if (e.month===m && (e.kontoId||def)===kontoId) b.einkaeufe -= (+e.amount||0); });
     (state.spesen||[]).forEach(t => { if (t.month===m && (t.kontoId||def)===kontoId) b.spesen += (+(t.allowance||0) - +(t.ausgaben||0)); });
@@ -4299,7 +4347,13 @@ function einstellungen() {
                          einnahme: ['💰 Einnahmen-Typen', 'Standardtypen wie „Gehalt", „Verkauf" + eigene (gilt auch für wiederkehrende Einnahmen)'],
                          einkauf: ['🛒 Einkaufs-Kategorien', 'Standardkategorien wie „Supermarkt", „Drogerie" + eigene'] };
         const list = getCustomCats(group);
-        return '<div class="card mb-2"><h4 style="font-size:13px;font-weight:700;margin-bottom:4px">' + labels[group][0] + '</h4>' +
+        const isOpen = (window._catOpen = window._catOpen || {})[group];
+        return '<details class="card mb-2" style="padding:0;overflow:hidden"' + (isOpen ? ' open' : '') + ' ontoggle="window._catOpen[\'' + group + '\']=this.open">' +
+          '<summary style="cursor:pointer;padding:14px 16px;display:flex;align-items:center;justify-content:space-between;gap:10px;list-style:none;user-select:none">' +
+            '<span style="font-size:13px;font-weight:700">' + labels[group][0] + '</span>' +
+            '<span class="badge badge-muted" style="font-size:10px">' + list.length + ' eigene</span>' +
+          '</summary>' +
+          '<div style="padding:0 16px 14px">' +
           '<p style="font-size:11px;color:var(--muted);margin-bottom:10px">' + labels[group][1] + '</p>' +
           (list.length > 0
             ? '<div class="table-wrap" style="margin-bottom:10px"><table><tbody>' + list.map((c,i) =>
@@ -4310,7 +4364,7 @@ function einstellungen() {
           '<div style="display:flex;gap:8px">' +
             '<input type="text" id="new_cat_' + group + '" placeholder="Neuer Eintrag…" style="flex:1" />' +
             '<button class="btn btn-primary btn-sm" onclick="addCustomCatByGroup(&quot;' + group + '&quot;)">+ Hinzufügen</button>' +
-          '</div></div>';
+          '</div></div></details>';
       }).join('')}
     </div>
 
@@ -4354,6 +4408,13 @@ function einstellungen() {
           <button class="btn btn-primary btn-sm" onclick="sendFeedback('bug')">🐞 Fehler melden</button>
           <button class="btn btn-ghost btn-sm" onclick="sendFeedback('wunsch')">💡 Wunsch / Idee</button>
           <button class="btn btn-ghost btn-sm" onclick="sendFeedback('erweiterung')">✨ Erweiterung vorschlagen</button>
+        </div>
+        <div style="display:flex;align-items:center;gap:8px;margin-top:12px;font-size:12px;color:var(--muted-text)">
+          <span>Senden über:</span>
+          <select onchange="updateConfig('feedbackVia',this.value);renderPage()" style="font-size:12px;padding:4px 8px">
+            <option value="mailto" ${(state.config?.feedbackVia||'mailto')==='mailto'?'selected':''}>✉️ Standard-Mailprogramm</option>
+            <option value="gmail" ${state.config?.feedbackVia==='gmail'?'selected':''}>🌐 Gmail im Browser</option>
+          </select>
         </div>
         <div style="margin-top:14px;background:var(--surface-2);border-radius:8px;padding:10px 14px;display:flex;align-items:center;justify-content:space-between;gap:10px">
           <div>
@@ -6014,9 +6075,9 @@ function buildJahresberichtHTML(year, userName, totals, rows) {
 
 async function archiveYear() {
   const year = getSelectedYear();
-  if (!await uiConfirm({ message: `Jahr ${year} archivieren und als PDF speichern?`, title: 'Jahr archivieren', icon: '📦' })) return;
+  if (!await uiConfirm({ message: `Jahr ${year} abschließen?<br><br>Es wird ein <b>PDF-Jahresbericht</b> erstellt (Speicherort wählst du im nächsten Fenster) und ein <b>JSON-Backup</b> gesichert.`, title: 'Jahr archivieren', icon: '📦', okLabel: 'Bericht erstellen' })) return;
 
-  // ── PDF Jahresbericht erstellen ────────────────────────────────────────
+  // ── PDF Jahresbericht erstellen (für das AUSGEWÄHLTE Jahr) ─────────────
   const rows = allMonths2026.map(m => {
     const f = monthFinancials(m);
     const inc = state.incomeByMonth[m] || {};
@@ -6028,47 +6089,38 @@ async function archiveYear() {
     acc.ausg += f.ausgTotal; acc.cf += f.cashflow;
     return acc;
   }, {gehalt:0,nj:0,fix:0,eink:0,ausg:0,cf:0});
-
-  // ── A4 PDF via Electron printToPDF ──────────────────────────────────
   const userName = state.meta.userName || 'Nutzer';
   const pdfHtml = buildJahresberichtHTML(year, userName, totals, rows);
-
-    if (window.EA && window.EA.printToPdf) {
+  if (window.EA && window.EA.printToPdf) {
     await window.EA.printToPdf({ html: pdfHtml, filename: 'Jahresbericht_' + year + '.pdf' });
   }
 
-  // ── JSON Backup ────────────────────────────────────────────────────────
-  const blob = new Blob([JSON.stringify(state, null, 2)], {type:'application/json'});
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url; a.download = `Finanzverwaltung_${year}_Backup.json`; a.click();
-  URL.revokeObjectURL(url);
-
-  // ── Neues Jahr starten ─────────────────────────────────────────────────
-  const newYear = year + 1;
-  const lastCF = monthFinancials(`${year}-12`).cashflow;
-  const newStart = Math.round(((state.meta.startgeld||0) + lastCF) * 100) / 100;
-  if (await uiConfirm({ title: 'Jahr abschließen', icon: '📦', message: `Jahresbericht wird gedruckt + Backup gespeichert!<br><br>Jetzt ${newYear} starten?<br>Startgeld: ${fmtEur(newStart)}`, okLabel: `${newYear} starten`, cancelLabel: 'Abbrechen' })) {
-    const fresh = JSON.parse(JSON.stringify(DEFAULT_DATA));
-    fresh.meta = { ...state.meta, year: newYear, startgeld: newStart };
-    const newIncome = {};
-    Object.keys(fresh.incomeByMonth).forEach(k => {
-      newIncome[k.replace('2026', String(newYear))] = fresh.incomeByMonth[k];
-    });
-    fresh.incomeByMonth = newIncome;
-    fresh.fixkosten = DEFAULT_DATA.fixkosten.map(f => ({
-      ...f,
-      start: f.start.replace('2026', String(newYear)),
-      end: f.end.replace('2026', String(newYear))
-    }));
-    Object.assign(state, fresh);
-    state.einkaeufe = []; state.ausgaben = []; state.einnahmen = [];
-    state.spesen = []; state.sparen = []; state.zaehler = [];
-    allMonths2026.splice(0, allMonths2026.length, ...monthsBetween(`${newYear}-01`, `${newYear}-12`));
-    currentMonth = `${newYear}-01`;
-    saveData(); buildMonthSelector(); navigate('dashboard');
-    uiAlert(`✓ Jahr ${newYear} gestartet! Viel Erfolg!`);
+  // ── JSON-Backup: bevorzugt still in den Backup-Ordner, sonst Download ──
+  let backupZiel = '';
+  const json = JSON.stringify(state, null, 2);
+  if (window.EA && window.EA.writeBackup && state.config && state.config.backupPath) {
+    try {
+      const r = await window.EA.writeBackup(state.config.backupPath, json);
+      if (r && r.ok) backupZiel = state.config.backupPath;
+    } catch {}
   }
+  if (!backupZiel) {
+    const blob = new Blob([json], {type:'application/json'});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = `Finanzverwaltung_${year}_Backup.json`; a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  // ── Abschluss: in den modernen Neues-Jahr-Dialog führen ────────────────
+  // (KEIN Zurücksetzen der Daten mehr – das alte Verhalten konnte im
+  //  Mehrjahres-System zu Datenverlust führen.)
+  const weiter = await uiConfirm({
+    title: 'Jahr ' + year + ' archiviert', icon: '✅',
+    message: `Jahresbericht erstellt` + (backupZiel ? `<br>Backup gespeichert in:<br><b>${backupZiel}</b>` : `<br>Backup als Download gespeichert`) +
+      `<br><br>Möchtest du jetzt das <b>nächste Jahr anlegen</b>? Dort kannst du per Häkchen Endsaldo, <b>Fixkosten</b>, wiederkehrende Einnahmen und Konten übernehmen.`,
+    okLabel: 'Neues Jahr anlegen', cancelLabel: 'Später' });
+  if (weiter) createNewYear();
 }
 
 // ── ONBOARDING: Nutzungsbedingungen + Spotlight-Tour ────────────────────────
