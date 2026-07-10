@@ -62,6 +62,27 @@ function setIncomeKonto(field, kontoId, yr) {
   if (!state.config.incomeKonten[yr]) state.config.incomeKonten[yr] = {};
   state.config.incomeKonten[yr][field] = kontoId;
 }
+// Jahres-Eingangstag Gehalt/Nebenjob (1..31). Global pro Jahr, jederzeit anpassbar.
+// Tag 1 = ab Monatsbeginn (Standard/Altbestand). Wird in der tagesgenauen
+// Saldo-Regel genauso ausgewertet wie der Fälligkeitstag von Fixkosten.
+function getIncomeTag(field, yr) {
+  const c = (state.config && state.config.incomeTag) || {};
+  return +((c[(yr||getSelectedYear())] || {})[field]) || 1;
+}
+function setIncomeTag(field, tag, yr) {
+  yr = yr || getSelectedYear();
+  if (!state.config) state.config = {};
+  if (!state.config.incomeTag) state.config.incomeTag = {};
+  if (!state.config.incomeTag[yr]) state.config.incomeTag[yr] = {};
+  state.config.incomeTag[yr][field] = Math.min(31, Math.max(1, +tag || 1));
+}
+function updateIncomeTag(field, tag) {
+  if (!requireUnlocked()) return;
+  setIncomeTag(field, tag);
+  saveData(); if (typeof updateBadges==='function') updateBadges(); renderPage();
+  const t = getIncomeTag(field);
+  showToast((field==='gehalt'?'Gehalt':'Nebenjob') + ' kommt am ' + t + '. (ganzes Jahr)', 'info');
+}
 
 // ── SPARZIEL ────────────────────────────────────────────────────────────────
 function getSparziel() {
@@ -1245,8 +1266,9 @@ function kontoNetBis(kontoId, month) {
   const months = monthsBetween(yr + '-01', grenze);
   months.forEach(m => {
     const inc = state.incomeByMonth[m] || { gehalt: 0, nebenjob: 0 };
-    if (getGehaltKonto(yr) === kontoId)   sonst += (+inc.gehalt||0);
-    if (getNebenjobKonto(yr) === kontoId) sonst += (+inc.nebenjob||0);
+    // Tagesgenau: im laufenden Monat erst ab dem eingestellten Eingangstag.
+    if (getGehaltKonto(yr) === kontoId   && faelligkeitstagErreicht(getIncomeTag('gehalt', yr), m, grenze))   sonst += (+inc.gehalt||0);
+    if (getNebenjobKonto(yr) === kontoId && faelligkeitstagErreicht(getIncomeTag('nebenjob', yr), m, grenze)) sonst += (+inc.nebenjob||0);
     // Fixkosten mindern ihr zugeordnetes Konto (Default für Altbestand ohne kontoId).
     // Tagesgenau: zählt im laufenden Monat erst ab dem Fälligkeitstag (f.day).
     (state.fixkosten||[]).forEach(f => {
@@ -2464,9 +2486,19 @@ function einnahmen() {
           <input type="number" value="${(+inc.gehalt||0).toFixed(2)}" step="0.01"
             onchange="updateFixedIncome('${currentMonth}','gehalt',+this.value)" /> ${currencySymbol()}
         </label>
+        <label class="field">Gehalt kommt am (Tag, ganzes Jahr ${getSelectedYear()})
+          <input type="number" min="1" max="31" value="${getIncomeTag('gehalt')}"
+            onchange="updateIncomeTag('gehalt',+this.value)" ${lockAttr()}
+            title="Tag des Geldeingangs – zählt im laufenden Monat erst ab diesem Tag in den verfügbaren Saldo (1 = ab Monatsanfang)" />
+        </label>
         <label class="field">Nebenjob ${monthLabel(currentMonth)}
           <input type="number" value="${(+inc.nebenjob||0).toFixed(2)}" step="0.01"
             onchange="updateFixedIncome('${currentMonth}','nebenjob',+this.value)" /> ${currencySymbol()}
+        </label>
+        <label class="field">Nebenjob kommt am (Tag, ganzes Jahr ${getSelectedYear()})
+          <input type="number" min="1" max="31" value="${getIncomeTag('nebenjob')}"
+            onchange="updateIncomeTag('nebenjob',+this.value)" ${lockAttr()}
+            title="Tag des Geldeingangs – zählt im laufenden Monat erst ab diesem Tag in den verfügbaren Saldo (1 = ab Monatsanfang)" />
         </label>
         <label class="field">Gehalt → Konto (ganzes Jahr ${getSelectedYear()})
           <select onchange="updateIncomeKonto('gehalt',this.value)" ${lockAttr()}>
