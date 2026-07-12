@@ -151,6 +151,9 @@ td select, td input {
   -webkit-appearance: none;
   background-image: none !important;
 }
+/* Textfelder in Tabellen brauchen Mindestbreite, damit Namen wie
+   „Unfallversicherung" oder „Miete/Nebenkosten" nicht abgeschnitten werden. */
+td input[type="text"] { min-width: 140px; text-overflow: ellipsis; }
 td select:hover, td input:hover { border-color: var(--border); background: var(--input-bg); }
 td select:focus, td input:focus { border-color: var(--accent); outline: none; background: var(--input-bg); }
 td input[type=number] { text-align: right; }

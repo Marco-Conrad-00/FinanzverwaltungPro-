@@ -159,6 +159,10 @@ let _snoozedReminders = {};
 // Format je Eintrag: { v: 'Version', date: 'YYYY-MM-DD', changes: ['...','...'] }
 // Änderungen dürfen mit **Fett** Markierung versehen werden.
 const CHANGELOG = [
+  { v: '1.0.12', date: '2026-07-10', changes: [
+    '**Darstellung bei breitem Fenster korrigiert**: Namen in den Tabellen (z.B. „Unfallversicherung", „Miete/Nebenkosten") werden nicht mehr abgeschnitten',
+    '**Sparen & Depot**: Bearbeiten- und Löschen-Button erscheinen jetzt in jeder Zeile sauber untereinander (vorher fehlte bei manchen Einträgen der Stift)',
+  ]},
   { v: '1.0.11', date: '2026-07-10', changes: [
     '**Jahr archivieren überarbeitet**: erstellt PDF-Bericht + Backup und führt danach in den Neues-Jahr-Dialog mit Übernahme-Optionen (Endsaldo, Fixkosten, wiederkehrende Einnahmen, Konten)',
     'Wichtiger Fix: Der alte Archivieren-Ablauf stammte aus der Zeit vor der Mehrjahres-Verwaltung und hätte bestehende Jahre und Einstellungen überschreiben können',
