@@ -134,7 +134,9 @@ function updateReminder(id, field, val) {
   r[field] = val;
   saveData();
   if (field === 'notify') { try { initReminders(); } catch {} }
-  if (field === 'when' || field === 'active') renderPage();
+  // Nach jeder Änderung neu zeichnen, damit die Schalter sofort ihren
+  // neuen Zustand zeigen (notify und active sind unabhängig voneinander).
+  renderPage();
 }
 async function deleteReminder(id) {
   if (!await uiConfirm({ title: 'Erinnerung löschen', icon: '🗑', message: 'Diese Erinnerung wirklich löschen?' })) return;
@@ -159,6 +161,9 @@ let _snoozedReminders = {};
 // Format je Eintrag: { v: 'Version', date: 'YYYY-MM-DD', changes: ['...','...'] }
 // Änderungen dürfen mit **Fett** Markierung versehen werden.
 const CHANGELOG = [
+  { v: '1.0.13', date: '2026-07-13', changes: [
+    '**Erinnerungen-Fix**: Der Schalter „System-Hinweis" lässt sich jetzt unabhängig vom „Aktiv"-Schalter umlegen und zeigt seinen Zustand sofort korrekt an',
+  ]},
   { v: '1.0.12', date: '2026-07-10', changes: [
     '**Darstellung bei breitem Fenster korrigiert**: Namen in den Tabellen (z.B. „Unfallversicherung", „Miete/Nebenkosten") werden nicht mehr abgeschnitten',
     '**Sparen & Depot**: Bearbeiten- und Löschen-Button erscheinen jetzt in jeder Zeile sauber untereinander (vorher fehlte bei manchen Einträgen der Stift)',
