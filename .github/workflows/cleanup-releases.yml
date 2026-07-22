@@ -2,20 +2,37 @@ name: Alte Releases aufräumen
 
 # Gehört ins Repo unter:  .github/workflows/cleanup-releases.yml
 # Löscht ältere Releases + Tags und behält nur die N neuesten Versionen.
-# Nur manuell auslösbar (Actions -> "Alte Releases aufräumen" -> Run workflow),
-# damit nie versehentlich etwas gelöscht wird und es den Build nicht stört.
+#
+# Wird auf zwei Wegen ausgelöst:
+#   1) Automatisch von build.yml, direkt nach einem erfolgreichen Tag-Build
+#      (workflow_call). Läuft damit bei jedem release_new_version.sh-Lauf.
+#   2) Manuell über Actions -> "Alte Releases aufräumen" -> Run workflow,
+#      dort mit wählbarer Anzahl und optionalem Trockenlauf.
 
 on:
-  # Automatisch: sobald ein Release veröffentlicht wird, ältere aufräumen.
-  release:
-    types: [published]
-  # Manuell weiterhin möglich (mit wählbarer Anzahl).
   workflow_dispatch:
     inputs:
       keep:
         description: "Wie viele der neuesten Versionen behalten"
         default: "2"
         required: true
+      dry_run:
+        description: "Trockenlauf: nur anzeigen, nichts löschen"
+        type: boolean
+        default: false
+        required: false
+  workflow_call:
+    inputs:
+      keep:
+        description: "Wie viele der neuesten Versionen behalten"
+        type: string
+        default: "2"
+        required: false
+      dry_run:
+        description: "Trockenlauf: nur anzeigen, nichts löschen"
+        type: boolean
+        default: false
+        required: false
 
 permissions:
   contents: write
@@ -25,6 +42,8 @@ jobs:
     runs-on: ubuntu-latest
     env:
       GH_TOKEN: ${{ github.token }}
+      KEEP: ${{ inputs.keep }}
+      DRY_RUN: ${{ inputs.dry_run }}
     steps:
       - name: Repo auschecken (mit allen Tags)
         uses: actions/checkout@v4
@@ -35,18 +54,62 @@ jobs:
         run: |
           set -euo pipefail
           REPO="$GITHUB_REPOSITORY"
-          KEEP="${{ github.event.inputs.keep }}"
-          [ -n "$KEEP" ] || KEEP=2
-          # Alle v*-Tags nach Version sortiert, neueste zuerst
-          mapfile -t TAGS < <(git tag -l 'v*' | sort -V -r)
+
+          # Fallback, falls die Eingabe leer ankommt (z. B. bei workflow_call ohne "with").
+          [ -n "${KEEP:-}" ] || KEEP=2
+          case "$KEEP" in
+            ''|*[!0-9]*) echo "::error::Ungueltiger Wert fuer keep: '$KEEP'"; exit 1 ;;
+          esac
+          if [ "$KEEP" -lt 1 ]; then
+            echo "::error::keep muss mindestens 1 sein."; exit 1
+          fi
+
+          # Versionen aus BEIDEN Quellen sammeln:
+          #  - git-Tags (v*)
+          #  - Releases laut API, damit auch reine ENTWUERFE (drafts) erfasst werden,
+          #    deren Tag lokal evtl. noch nicht existiert.
+          mapfile -t TAGS < <(
+            {
+              git tag -l 'v*'
+              gh release list --repo "$REPO" --limit 200 \
+                --json tagName --jq '.[].tagName' 2>/dev/null | grep '^v' || true
+            } | sort -u -V -r
+          )
+
           echo "Gefundene Versionen (${#TAGS[@]}): ${TAGS[*]:-keine}"
-          if [ "${#TAGS[@]}" -le "$KEEP" ]; then
-            echo "Nur ${#TAGS[@]} Version(en) – nichts zu löschen (behalte $KEEP)."
+
+          if [ "${#TAGS[@]}" -eq 0 ]; then
+            echo "Keine Versionen gefunden - nichts zu tun."
             exit 0
           fi
+          if [ "${#TAGS[@]}" -le "$KEEP" ]; then
+            echo "Nur ${#TAGS[@]} Version(en) - nichts zu loeschen (behalte $KEEP)."
+            exit 0
+          fi
+
           echo "Behalten:  ${TAGS[*]:0:$KEEP}"
           echo "Entfernen: ${TAGS[*]:$KEEP}"
+
+          if [ "${DRY_RUN:-false}" = "true" ]; then
+            echo "TROCKENLAUF aktiv - es wird nichts geloescht."
+            exit 0
+          fi
+
+          FEHLER=0
           for tag in "${TAGS[@]:$KEEP}"; do
             echo "-> Entferne Version $tag"
             if gh release view "$tag" --repo "$REPO" >/dev/null 2>&1; then
-              gh release d
+              # Erfasst auch Entwuerfe; --cleanup-tag entfernt den zugehoerigen Tag mit.
+              gh release delete "$tag" --repo "$REPO" --cleanup-tag --yes \
+                || { echo "::warning::Release $tag konnte nicht geloescht werden."; FEHLER=1; }
+            else
+              # Tag ohne Release: nur den Tag entfernen.
+              git push origin ":refs/tags/$tag" \
+                || { echo "::warning::Tag $tag konnte nicht geloescht werden."; FEHLER=1; }
+            fi
+          done
+
+          if [ "$FEHLER" -ne 0 ]; then
+            echo "::warning::Aufraeumen abgeschlossen, aber einzelne Eintraege blieben bestehen."
+          fi
+          echo "Fertig."

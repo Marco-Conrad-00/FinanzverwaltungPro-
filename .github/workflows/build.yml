@@ -47,3 +47,15 @@ jobs:
             dist/*.exe
             dist/latest.yml
             dist/*.blockmap
+
+  # Nach erfolgreichem Tag-Build: alte Releases/Tags aufraeumen (behaelt 2).
+  # Laeuft ueber den Tag-Push-Event und damit zuverlaessig bei jedem Release -
+  # unabhaengig davon, ob der Entwurf schon freigegeben wurde.
+  cleanup:
+    needs: build-windows
+    if: startsWith(github.ref, 'refs/tags/')
+    uses: ./.github/workflows/cleanup-releases.yml
+    permissions:
+      contents: write
+    with:
+      keep: "2"
