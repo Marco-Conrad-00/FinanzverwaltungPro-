@@ -161,6 +161,13 @@ let _snoozedReminders = {};
 // Format je Eintrag: { v: 'Version', date: 'YYYY-MM-DD', changes: ['...','...'] }
 // Änderungen dürfen mit **Fett** Markierung versehen werden.
 const CHANGELOG = [
+  { v: '1.0.17', date: '2026-07-22', changes: [
+    '**Konten sind jetzt vor versehentlichem Löschen geschützt**: Vor dem Löschen erscheint immer eine Rückfrage mit Kontoname, aktuellem Saldo und dem Hinweis, dass Buchungen umgehängt werden',
+    '**Optionaler PIN-Schutz**: In den Einstellungen unter „Konto-Löschschutz" lässt sich eine PIN festlegen, die beim Löschen eines Kontos abgefragt wird (3 Versuche)',
+    'Die PIN wird nur als Prüfsumme (SHA-256) gespeichert, niemals im Klartext',
+    'Ist der Schutz aktiv, zeigt der Löschen-Button ein Schloss-Symbol statt des roten ×',
+    'PIN lässt sich jederzeit ändern oder wieder entfernen (jeweils nur mit Kenntnis der aktuellen PIN)',
+  ]},
   { v: '1.0.13', date: '2026-07-13', changes: [
     '**Erinnerungen-Fix**: Der Schalter „System-Hinweis" lässt sich jetzt unabhängig vom „Aktiv"-Schalter umlegen und zeigt seinen Zustand sofort korrekt an',
   ]},
@@ -1151,11 +1158,64 @@ function updateKonto(id, field, val) {
   if (field === 'start') syncStartgeldAusKonten();
   saveData(); renderPage();
 }
-function deleteKonto(id) {
+// ── PIN-SCHUTZ FÜRS KONTO-LÖSCHEN ───────────────────────────────────────────
+// Speicherort: state.config.deleteLockPinHash (SHA-256, kein Klartext).
+// state.config steht bereits in der loadData-Allowlist – kein neues Feld nötig.
+async function hashPin(pin) {
+  const txt = 'fvpro-delpin-v1:' + String(pin);
+  try {
+    if (typeof crypto !== 'undefined' && crypto.subtle) {
+      const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(txt));
+      return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2,'0')).join('');
+    }
+  } catch {}
+  // Fallback (sehr selten – z.B. non-secure context): simpler djb2-Hash
+  let h = 5381; for (let i=0;i<txt.length;i++) h = ((h*33) ^ txt.charCodeAt(i)) >>> 0;
+  return 'djb2:' + h.toString(16);
+}
+function deletePinIsSet() {
+  return !!(state.config && state.config.deleteLockPinHash);
+}
+// Fragt die PIN ab. Gibt true zurück, wenn korrekt (oder keine PIN gesetzt).
+async function verifyDeletePin(kontoName) {
+  if (!deletePinIsSet()) return true; // kein Schutz aktiv → erlauben
+  for (let versuch = 0; versuch < 3; versuch++) {
+    const eingabe = await uiPrompt({
+      title: 'Sicherheits-PIN', icon: '🔒', type: 'password',
+      message: 'Konto „' + (kontoName||'') + '" löschen. Bitte deine Sicherheits-PIN eingeben.'
+             + (versuch>0 ? '<br><span style="color:var(--red)">Falsche PIN, noch ' + (3-versuch) + ' Versuch(e).</span>' : ''),
+      placeholder: 'PIN', okLabel: 'Bestätigen', cancelLabel: 'Abbrechen',
+    });
+    if (eingabe === null) return false; // abgebrochen
+    const h = await hashPin(eingabe);
+    if (h === state.config.deleteLockPinHash) return true;
+  }
+  await uiAlert({ title: 'Abgebrochen', icon: '⛔',
+    message: 'PIN dreimal falsch – Löschen abgebrochen. Falls du die PIN vergessen hast, kannst du sie in den Einstellungen unter „Konto-Löschschutz" zurücksetzen (dazu musst du die aktuelle PIN kennen) oder ein Backup einspielen.' });
+  return false;
+}
+async function deleteKonto(id) {
   if (!requireUnlocked()) return;
   const yd = getYearData();
   const ks = getKonten();
   if (ks.length <= 1) { showToast('Mindestens ein Konto muss bleiben','info'); return; }
+  const konto = ks.find(k => k.id === id);
+  const kName = konto ? (konto.name || 'Konto') : 'Konto';
+  // 1) PIN-Abfrage (falls Schutz aktiv)
+  const pinOk = await verifyDeletePin(kName);
+  if (!pinOk) return;
+  // 2) Sicherheits-Rückfrage (immer, auch ohne PIN)
+  const ok = await uiConfirm({
+    title: 'Konto löschen', icon: '🗑️', danger: true,
+    message: 'Konto „' + kName + '" wirklich löschen?',
+    details: [
+      'Aktueller Saldo: ' + fmtEur(kontoSaldo(id)),
+      'Buchungen dieses Kontos bleiben erhalten und werden auf ein anderes Konto umgehängt.',
+      'Dies kann nicht rückgängig gemacht werden.',
+    ],
+    okLabel: 'Endgültig löschen', cancelLabel: 'Abbrechen',
+  });
+  if (!ok) return;
   // Buchungen dieses Kontos auf das erste verbleibende Konto umhängen
   const rest = ks.filter(k => k.id !== id);
   const fallback = (rest.find(k=>k.cashflow) || rest[0]).id;
@@ -1165,6 +1225,47 @@ function deleteKonto(id) {
   syncStartgeldAusKonten();
   saveData(); renderPage();
   showToast('Konto gelöscht, Buchungen umgehängt','info');
+}
+// ── PIN in den Einstellungen setzen / ändern / entfernen ────────────────────
+async function setDeletePin() {
+  const p1 = await uiPrompt({
+    title: 'Löschschutz-PIN festlegen', icon: '🔒', type: 'password',
+    message: 'Neue PIN wählen (mind. 4 Zeichen). Sie wird beim Löschen von Konten abgefragt.',
+    placeholder: 'Neue PIN', okLabel: 'Weiter', cancelLabel: 'Abbrechen',
+  });
+  if (p1 === null) return;
+  if (String(p1).length < 4) { await uiAlert({ title:'Zu kurz', icon:'⚠', message:'Die PIN muss mindestens 4 Zeichen lang sein.' }); return; }
+  const p2 = await uiPrompt({
+    title: 'PIN bestätigen', icon: '🔒', type: 'password',
+    message: 'Bitte dieselbe PIN nochmal eingeben.',
+    placeholder: 'PIN wiederholen', okLabel: 'Speichern', cancelLabel: 'Abbrechen',
+  });
+  if (p2 === null) return;
+  if (p1 !== p2) { await uiAlert({ title:'Nicht identisch', icon:'⚠', message:'Die beiden Eingaben stimmen nicht überein. Bitte erneut versuchen.' }); return; }
+  if (!state.config) state.config = {};
+  state.config.deleteLockPinHash = await hashPin(p1);
+  saveData(); renderPage();
+  showToast('Löschschutz-PIN gesetzt','info');
+}
+async function changeDeletePin() {
+  // Aktuelle PIN prüfen, dann neue setzen
+  const ok = await verifyDeletePin('(PIN ändern)');
+  if (!ok) return;
+  await setDeletePin();
+}
+async function removeDeletePin() {
+  const ok = await verifyDeletePin('(Löschschutz entfernen)');
+  if (!ok) return;
+  const sure = await uiConfirm({
+    title: 'Löschschutz entfernen', icon: '🔓', danger: true,
+    message: 'PIN-Schutz für das Löschen von Konten wirklich deaktivieren?',
+    details: ['Konten können danach ohne PIN gelöscht werden (die normale Rückfrage bleibt aber bestehen).'],
+    okLabel: 'Entfernen', cancelLabel: 'Abbrechen',
+  });
+  if (!sure) return;
+  delete state.config.deleteLockPinHash;
+  saveData(); renderPage();
+  showToast('Löschschutz-PIN entfernt','info');
 }
 // Gesamt-Startgeld = Summe aller Konten-Startwerte (hält startBalance konsistent).
 function syncStartgeldAusKonten() {
@@ -4189,8 +4290,27 @@ function einstellungen() {
                 <button class="btn-icon" onclick="setKontoIstStand('${k.id}')" title="Aktuellen Kontostand setzen – legt eine Korrektur-Buchung an, damit der Saldo deinem echten Stand entspricht" style="width:auto;min-width:0;padding:0 8px;font-size:12px;white-space:nowrap;gap:4px">🎯 Stand setzen</button>
                 <button class="btn-icon" onclick="zeigeSaldoDiagnose('${k.id}')" title="Zeigt, woraus sich der Saldo zusammensetzt" style="width:auto;min-width:0;padding:0 8px;font-size:12px;white-space:nowrap;gap:4px">🔍 Diagnose</button>
                 <button class="btn-icon" onclick="resetKontoKorrekturen('${k.id}')" title="Entfernt alle alten Kontostand-Korrekturen dieses Kontos (danach neu „Stand setzen“)" style="width:auto;min-width:0;padding:0 8px;font-size:12px;white-space:nowrap;gap:4px">🧹 Korrekturen</button>
-                ${getKonten().length>1 ? `<button class="btn-icon danger" onclick="deleteKonto('${k.id}')" title="Konto löschen">×</button>` : ''}
+                ${getKonten().length>1 ? `<button class="btn-icon danger" onclick="deleteKonto('${k.id}')" title="${deletePinIsSet()?'Konto löschen (PIN erforderlich)':'Konto löschen'}">${deletePinIsSet()?'🔒':'×'}</button>` : ''}
               </div>`).join('')}
+            <div style="margin-top:14px;padding:12px 14px;border:1px solid var(--border);border-radius:10px;background:var(--surface-2)">
+              <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+                <span style="font-size:16px">${deletePinIsSet()?'🔒':'🔓'}</span>
+                <strong style="font-size:13px">Konto-Löschschutz</strong>
+                <span style="font-size:12px;color:${deletePinIsSet()?'var(--green)':'var(--muted)'}">
+                  ${deletePinIsSet()?'aktiv – Löschen erfordert PIN':'nicht aktiv'}
+                </span>
+                <span style="flex:1"></span>
+                ${deletePinIsSet()
+                  ? `<button class="btn btn-sm btn-ghost" onclick="changeDeletePin()">PIN ändern</button>
+                     <button class="btn btn-sm btn-ghost" onclick="removeDeletePin()">Schutz entfernen</button>`
+                  : `<button class="btn btn-sm btn-primary" onclick="setDeletePin()">PIN festlegen</button>`}
+              </div>
+              <div style="font-size:12px;color:var(--muted);margin-top:8px">
+                Schützt das Löschen von Konten mit einer PIN. Die PIN wird nur als Prüfsumme
+                gespeichert, nicht im Klartext. Vergisst du sie, lässt sie sich nur mit der
+                aktuellen PIN ändern – notiere sie dir sicher.
+              </div>
+            </div>
           </div>
           </label>
           <label class="field">Startseite
@@ -6566,6 +6686,10 @@ window.zeigeSaldoDiagnose = zeigeSaldoDiagnose;
 window.resetKontoKorrekturen = resetKontoKorrekturen;
 window.updateKonto       = updateKonto;
 window.deleteKonto       = deleteKonto;
+window.setDeletePin      = setDeletePin;
+window.changeDeletePin   = changeDeletePin;
+window.removeDeletePin   = removeDeletePin;
+window.deletePinIsSet    = deletePinIsSet;
 window.clearAllData          = clearAllData;
 window.resetApp              = resetApp;
 window.updateConfig          = updateConfig;
