@@ -161,6 +161,15 @@ let _snoozedReminders = {};
 // Format je Eintrag: { v: 'Version', date: 'YYYY-MM-DD', changes: ['...','...'] }
 // Änderungen dürfen mit **Fett** Markierung versehen werden.
 const CHANGELOG = [
+  { v: '1.0.18', date: '2026-07-22', changes: [
+    '**Neuer Bereich „PV-Anlage"** (optional): erfasst je Monat Produktion, Verbrauch, Netzbezug und Einspeisung',
+    '**Autarkie** wird automatisch berechnet ((Verbrauch − Bezug) ÷ Verbrauch) und farblich bewertet – ab 80 % grün, ab 50 % gelb, darunter rot',
+    '**Eigenverbrauchsquote** ((Produktion − Einspeisung) ÷ Produktion) je Monat und im Jahresschnitt',
+    '**Drei Auswertungen**: Jahresproduktion als Balken, Ø Autarkie im Jahresverlauf als Linie und ein Monatsvergleich mehrerer Jahre übereinander',
+    'Der Menüpunkt erscheint erst nach Aktivierung in den Einstellungen – wer keine PV-Anlage hat, sieht ihn gar nicht',
+    'Jahre lassen sich frei anlegen (auch vor dem Startjahr der App, z.B. ab Inbetriebnahme) und sind vom Finanzjahr unabhängig',
+    'Ausblenden des Bereichs löscht keine Daten',
+  ]},
   { v: '1.0.17', date: '2026-07-22', changes: [
     '**Konten sind jetzt vor versehentlichem Löschen geschützt**: Vor dem Löschen erscheint immer eine Rückfrage mit Kontoname, aktuellem Saldo und dem Hinweis, dass Buchungen umgehängt werden',
     '**Optionaler PIN-Schutz**: In den Einstellungen unter „Konto-Löschschutz" lässt sich eine PIN festlegen, die beim Löschen eines Kontos abgefragt wird (3 Versuche)',
@@ -916,7 +925,8 @@ async function loadData() {
 
   // ── Merge into state (preserves proxy properties) ───────────────────────
   const fields = ['meta','config','customCats','trash','imports','etfKurse','transactions',
-                   'years','dataVersion','currentYear','selectedYear','backupHistory','yearEditUnlocked','reminders'];
+                   'years','dataVersion','currentYear','selectedYear','backupHistory','yearEditUnlocked','reminders',
+                   'pv','pvConfig'];
   fields.forEach(f => { if (saved[f] !== undefined) state[f] = saved[f]; });
   if (!Array.isArray(state.reminders)) state.reminders = [];
 
@@ -1655,6 +1665,7 @@ function navigate(page) {
     fixkosten: ['Planung', 'Fixkosten'],
     sparen: ['Planung', 'Sparen & Depot'],
     zaehler: ['Planung', 'Zählerstände'],
+    pv: ['Planung', 'PV-Anlage'],
     finanzprodukte: ['Planung', 'Finanzprodukte'],  
     einstellungen: ['App', 'Einstellungen'],
     tabellen: ['Planung', 'Eigene Tabellen'],
@@ -1932,7 +1943,7 @@ function reminderBannerHtml() {
 function renderPage() {
   Object.values(chartInstances).forEach(c => { try { c.destroy(); } catch {} });
   chartInstances = {};
-  const pages = { dashboard, jahresuebersicht, suche, buchungen, einkaeufe, ausgaben, einnahmen, spesen, fixkosten, sparen, umbuchungen, zaehler, finanzprodukte, tabellen, einstellungen, importPage };
+  const pages = { dashboard, jahresuebersicht, suche, buchungen, einkaeufe, ausgaben, einnahmen, spesen, fixkosten, sparen, umbuchungen, zaehler, pv, finanzprodukte, tabellen, einstellungen, importPage };
   const fn = pages[currentPage === 'import' ? 'importPage' : currentPage];
   const banner = reminderBannerHtml();
   if (fn) el('pageContent').innerHTML = banner + fn();
@@ -1949,6 +1960,7 @@ function afterRender() {
 
   if (currentPage === 'dashboard') renderCharts();
   if (currentPage === 'zaehler') renderZaehlerCharts();
+  if (currentPage === 'pv') renderPvCharts();
   if (currentPage === 'jahresuebersicht') renderJahresCharts();
 }
 
@@ -4311,6 +4323,25 @@ function einstellungen() {
                 aktuellen PIN ändern – notiere sie dir sicher.
               </div>
             </div>
+            <div style="margin-top:12px;padding:12px 14px;border:1px solid var(--border);border-radius:10px;background:var(--surface-2)">
+              <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+                <span style="font-size:16px">☀️</span>
+                <strong style="font-size:13px">PV-Anlage</strong>
+                <span style="font-size:12px;color:${pvAktiv()?'var(--green)':'var(--muted)'}">
+                  ${pvAktiv()?'aktiv – Menüpunkt sichtbar':'nicht aktiv'}
+                </span>
+                <span style="flex:1"></span>
+                ${pvAktiv()
+                  ? `<button class="btn btn-sm btn-ghost" onclick="navigate('pv')">Öffnen</button>
+                     <button class="btn btn-sm btn-ghost" onclick="pvDeaktivieren()">Ausblenden</button>`
+                  : `<button class="btn btn-sm btn-primary" onclick="pvAktivieren()">Aktivieren</button>`}
+              </div>
+              <div style="font-size:12px;color:var(--muted);margin-top:8px">
+                Eigener Bereich für Photovoltaik: Produktion, Verbrauch, Netzbezug und
+                Einspeisung pro Monat – mit Autarkie, Eigenverbrauchsquote und
+                Jahresvergleich. Beim Ausblenden bleiben alle Daten erhalten.
+              </div>
+            </div>
           </div>
           </label>
           <label class="field">Startseite
@@ -5055,6 +5086,10 @@ async function resetApp() {
   });
   if (!ok2) return;
   Object.assign(state, JSON.parse(JSON.stringify(DEFAULT_DATA)));
+  // PV liegt bewusst außerhalb der Jahresstruktur und ist nicht in DEFAULT_DATA
+  // → beim Werksreset explizit mit entfernen.
+  state.pv = {};
+  state.pvConfig = { jahre: [], chartJahre: [], vergleichAktiv: false };
   saveData();
   // Clear saved data on disk too
   if (window.EA) window.EA.saveData('{}').catch(()=>{});
@@ -5184,6 +5219,352 @@ async function deleteFinanzprodukt(id) {
   if (!await uiConfirm({ message: 'Eintrag löschen?', title: 'Löschen', icon: '🗑' })) return;
   state.finanzprodukte = (state.finanzprodukte||[]).filter(fp=>String(fp.id) !== String(id));
   saveData(); renderPage();
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// PV-ANLAGE (optional aktivierbar, Menüpunkt erscheint erst nach Aktivierung)
+// ════════════════════════════════════════════════════════════════════════════
+// Datenmodell BEWUSST entkoppelt vom Finanzjahr: state.pv = { '2024': [12 Monate], ... }
+// Grund: PV-Jahre (z.B. ab Inbetriebnahme 2024) sind unabhängig von den
+// Finanz-Jahren der App. 'pv' + 'pvConfig' stehen in der loadData-Allowlist.
+// Je Monat: { produktion, verbrauch, bezug, einspeisung }  (alle kWh, '' = leer)
+const PV_MONATE = ['Januar','Februar','März','April','Mai','Juni','Juli','August','September','Oktober','November','Dezember'];
+
+function pvAktiv() { return !!(state.config && state.config.pvAktiv); }
+function pvStore() {
+  if (!state.pv || typeof state.pv !== 'object' || Array.isArray(state.pv)) state.pv = {};
+  return state.pv;
+}
+function pvCfg() {
+  if (!state.pvConfig || typeof state.pvConfig !== 'object') {
+    state.pvConfig = { jahre: [], chartJahre: [], vergleichAktiv: false };
+  }
+  if (!Array.isArray(state.pvConfig.jahre))       state.pvConfig.jahre = [];
+  if (!Array.isArray(state.pvConfig.chartJahre))  state.pvConfig.chartJahre = [];
+  return state.pvConfig;
+}
+function pvLeeresJahr() {
+  return Array.from({length:12}, () => ({ produktion:'', verbrauch:'', bezug:'', einspeisung:'' }));
+}
+function pvJahrDaten(jahr) {
+  const st = pvStore();
+  if (!Array.isArray(st[jahr]) || st[jahr].length !== 12) st[jahr] = pvLeeresJahr();
+  // Fehlende Felder nachziehen (Robustheit bei alten Datenständen)
+  st[jahr] = st[jahr].map(m => ({
+    produktion:  m && m.produktion  !== undefined ? m.produktion  : '',
+    verbrauch:   m && m.verbrauch   !== undefined ? m.verbrauch   : '',
+    bezug:       m && m.bezug       !== undefined ? m.bezug       : '',
+    einspeisung: m && m.einspeisung !== undefined ? m.einspeisung : '',
+  }));
+  return st[jahr];
+}
+function pvJahre() { return pvCfg().jahre.slice().sort(); }
+function pvNum(v) { const n = parseFloat(v); return isFinite(n) ? n : null; }
+// Autarkie = (Verbrauch − Bezug) / Verbrauch – nur wenn beide Werte vorhanden.
+function pvAutarkie(m) {
+  const v = pvNum(m.verbrauch), b = pvNum(m.bezug);
+  if (v === null || b === null || v <= 0) return null;
+  return (v - b) / v;
+}
+// Eigenverbrauchsquote = (Produktion − Einspeisung) / Produktion
+function pvEigenverbrauch(m) {
+  const p = pvNum(m.produktion), e = pvNum(m.einspeisung);
+  if (p === null || e === null || p <= 0) return null;
+  return (p - e) / p;
+}
+function pvJahresSumme(jahr) {
+  const d = pvJahrDaten(jahr);
+  const s = { produktion:0, verbrauch:0, bezug:0, einspeisung:0 };
+  let hat = { produktion:false, verbrauch:false, bezug:false, einspeisung:false };
+  d.forEach(m => {
+    ['produktion','verbrauch','bezug','einspeisung'].forEach(f => {
+      const n = pvNum(m[f]);
+      if (n !== null) { s[f] += n; hat[f] = true; }
+    });
+  });
+  ['produktion','verbrauch','bezug','einspeisung'].forEach(f => { if (!hat[f]) s[f] = null; });
+  // Ø Autarkie über die Monate, in denen sie berechenbar ist
+  const aWerte = d.map(pvAutarkie).filter(x => x !== null);
+  s.autarkie = aWerte.length ? aWerte.reduce((a,b)=>a+b,0) / aWerte.length : null;
+  const eWerte = d.map(pvEigenverbrauch).filter(x => x !== null);
+  s.eigenverbrauch = eWerte.length ? eWerte.reduce((a,b)=>a+b,0) / eWerte.length : null;
+  return s;
+}
+// Ampelfarben wie im Google-Sheet: >=80% grün, 50–80% gelb, <50% rot
+function pvAmpel(q) {
+  if (q === null) return { bg:'transparent', fg:'var(--muted)' };
+  if (q >= 0.8)  return { bg:'rgba(34,197,94,.14)',  fg:'var(--green)' };
+  if (q >= 0.5)  return { bg:'rgba(234,179,8,.14)',  fg:'#a86b00' };
+  return { bg:'rgba(239,68,68,.14)', fg:'var(--red)' };
+}
+function pvPct(q) { return q === null ? '–' : (q*100).toFixed(1).replace('.', ',') + ' %'; }
+function pvFmt(n) { return n === null ? '–' : fmt(n); }
+
+// ── PV: Aktivierung / Jahre verwalten ──────────────────────────────────────
+async function pvAktivieren() {
+  if (!state.config) state.config = {};
+  state.config.pvAktiv = true;
+  const cfg = pvCfg();
+  if (!cfg.jahre.length) {
+    const j = String(new Date().getFullYear());
+    cfg.jahre = [j];
+    pvJahrDaten(j);
+  }
+  saveData();
+  pvNavSichtbarkeit();
+  navigate('pv');
+  showToast('PV-Bereich aktiviert','info');
+}
+async function pvDeaktivieren() {
+  const ok = await uiConfirm({
+    title: 'PV-Bereich ausblenden', icon: '☀️',
+    message: 'Den Menüpunkt „PV-Anlage" ausblenden?',
+    details: ['Deine erfassten PV-Daten bleiben vollständig erhalten.',
+              'Du kannst den Bereich jederzeit in den Einstellungen wieder einblenden.'],
+    okLabel: 'Ausblenden', cancelLabel: 'Abbrechen',
+  });
+  if (!ok) return;
+  state.config.pvAktiv = false;
+  saveData();
+  pvNavSichtbarkeit();
+  navigate('einstellungen');
+  showToast('PV-Bereich ausgeblendet – Daten bleiben gespeichert','info');
+}
+// Blendet den Sidebar-Eintrag je nach Aktivierung ein/aus.
+function pvNavSichtbarkeit() {
+  const btn = document.getElementById('navPv');
+  if (btn) btn.style.display = pvAktiv() ? '' : 'none';
+}
+async function pvJahrHinzufuegen() {
+  const cfg = pvCfg();
+  const vorschlag = cfg.jahre.length
+    ? String(Math.max(...cfg.jahre.map(Number)) + 1)
+    : String(new Date().getFullYear());
+  const eingabe = await uiPrompt({
+    title: 'PV-Jahr hinzufügen', icon: '📅', type: 'number',
+    message: 'Welches Jahr soll erfasst werden?',
+    value: vorschlag, placeholder: 'z.B. 2024', okLabel: 'Hinzufügen',
+  });
+  if (eingabe === null) return;
+  const j = String(parseInt(eingabe, 10));
+  if (!/^\d{4}$/.test(j)) { await uiAlert({ title:'Ungültig', icon:'⚠', message:'Bitte eine vierstellige Jahreszahl eingeben.' }); return; }
+  if (cfg.jahre.includes(j)) { showToast('Jahr ' + j + ' ist bereits angelegt','info'); return; }
+  cfg.jahre.push(j);
+  cfg.jahre.sort();
+  pvJahrDaten(j);
+  saveData(); renderPage();
+  showToast('Jahr ' + j + ' angelegt','info');
+}
+async function pvJahrEntfernen(jahr) {
+  const ok = await uiConfirm({
+    title: 'PV-Jahr entfernen', icon: '🗑️', danger: true,
+    message: 'Jahr ' + jahr + ' mit allen erfassten PV-Werten löschen?',
+    details: ['Dies kann nicht rückgängig gemacht werden.'],
+    okLabel: 'Löschen', cancelLabel: 'Abbrechen',
+  });
+  if (!ok) return;
+  const cfg = pvCfg();
+  cfg.jahre = cfg.jahre.filter(j => j !== jahr);
+  cfg.chartJahre = cfg.chartJahre.filter(j => j !== jahr);
+  delete pvStore()[jahr];
+  saveData(); renderPage();
+  showToast('Jahr ' + jahr + ' entfernt','info');
+}
+function pvUpdate(jahr, monatIdx, feld, wert) {
+  const d = pvJahrDaten(jahr);
+  const i = parseInt(monatIdx, 10);
+  if (!d[i]) return;
+  const s = String(wert).trim().replace(',', '.');
+  d[i][feld] = s === '' ? '' : (isFinite(parseFloat(s)) ? parseFloat(s) : '');
+  saveData();
+  renderPage();
+}
+function pvToggleChartJahr(jahr) {
+  const cfg = pvCfg();
+  const i = cfg.chartJahre.indexOf(jahr);
+  if (i >= 0) cfg.chartJahre.splice(i, 1); else cfg.chartJahre.push(jahr);
+  saveData(); renderPage();
+}
+function pvToggleVergleich() {
+  const cfg = pvCfg();
+  cfg.vergleichAktiv = !cfg.vergleichAktiv;
+  saveData(); renderPage();
+}
+
+// ── PV: Seite ──────────────────────────────────────────────────────────────
+function pv() {
+  if (!pvAktiv()) {
+    return '<div class="empty-state"><div class="empty-icon">☀️</div>' +
+      '<p>Der PV-Bereich ist nicht aktiviert.</p>' +
+      '<button class="btn btn-primary" onclick="pvAktivieren()" style="margin-top:10px">PV-Bereich aktivieren</button></div>';
+  }
+  const jahre = pvJahre();
+  const cfg = pvCfg();
+
+  const kopf =
+    '<div style="display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:space-between;margin-bottom:14px">' +
+      '<div style="font-size:13px;color:var(--muted)">' +
+        'Autarkie = (Verbrauch − Bezug) ÷ Verbrauch &nbsp;·&nbsp; ' +
+        'Eigenverbrauch = (Produktion − Einspeisung) ÷ Produktion' +
+      '</div>' +
+      '<button class="btn btn-primary btn-sm" onclick="pvJahrHinzufuegen()">+ Jahr</button>' +
+    '</div>';
+
+  if (!jahre.length) {
+    return '<div>' + kopf + '<div class="empty-state"><div class="empty-icon">📅</div>' +
+      '<p>Noch kein PV-Jahr angelegt.</p></div></div>';
+  }
+
+  // Mehrjahresvergleich (Chart) – Auswahl
+  const vergleich =
+    '<div style="margin-bottom:14px;padding:12px 14px;background:var(--surface);border:1px solid var(--border);border-radius:10px">' +
+      '<div style="display:flex;flex-wrap:wrap;gap:10px;align-items:center">' +
+        '<span style="font-size:12px;font-weight:700;color:var(--muted)">Monatsvergleich:</span>' +
+        jahre.map(j => '<label style="display:inline-flex;align-items:center;gap:5px;font-size:13px;cursor:pointer">' +
+          '<input type="checkbox" ' + (cfg.chartJahre.includes(j)?'checked':'') +
+          ' onchange="pvToggleChartJahr(\'' + j + '\')" style="width:16px;height:16px;accent-color:var(--accent)"/>' + j + '</label>').join('') +
+        (cfg.chartJahre.length ? '' : '<span style="font-size:12px;color:var(--muted)">– Jahre auswählen für den Monatsvergleich</span>') +
+      '</div>' +
+      (cfg.chartJahre.length ?
+        '<div style="height:230px;position:relative;margin-top:12px"><canvas id="pvChartVergleich"></canvas></div>' : '') +
+    '</div>';
+
+  // Jahresübersicht (2 Charts wie im Sheet)
+  const uebersicht = jahre.length ?
+    '<div class="card mb-2"><div class="card-header"><h3>📊 Jahresübersicht</h3></div>' +
+      '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:14px;padding:14px">' +
+        '<div style="height:240px;position:relative"><canvas id="pvChartProd"></canvas></div>' +
+        '<div style="height:240px;position:relative"><canvas id="pvChartAut"></canvas></div>' +
+      '</div></div>' : '';
+
+  const jahrBloecke = jahre.map(jahr => {
+    const d = pvJahrDaten(jahr);
+    const s = pvJahresSumme(jahr);
+    const zeilen = d.map((m, i) => {
+      const a = pvAutarkie(m), ev = pvEigenverbrauch(m);
+      const amp = pvAmpel(a);
+      const inp = (feld, val) =>
+        '<input type="number" step="0.1" value="' + (val === '' ? '' : val) + '" ' +
+        'onchange="pvUpdate(\'' + jahr + '\',' + i + ',\'' + feld + '\',this.value)" ' +
+        'placeholder="–" style="width:100%;text-align:right"/>';
+      return '<tr>' +
+        '<td style="white-space:nowrap">' + PV_MONATE[i] + '</td>' +
+        '<td>' + inp('produktion',  m.produktion)  + '</td>' +
+        '<td>' + inp('verbrauch',   m.verbrauch)   + '</td>' +
+        '<td>' + inp('bezug',       m.bezug)       + '</td>' +
+        '<td>' + inp('einspeisung', m.einspeisung) + '</td>' +
+        '<td style="text-align:right;font-weight:600;background:' + amp.bg + ';color:' + amp.fg + '">' + pvPct(a) + '</td>' +
+        '<td style="text-align:right;color:var(--muted)">' + pvPct(ev) + '</td>' +
+      '</tr>';
+    }).join('');
+    const sAmp = pvAmpel(s.autarkie);
+    return '<div class="card mb-2">' +
+      '<div class="card-header"><h3>☀️ ' + jahr + '</h3>' +
+        '<div style="display:flex;gap:8px;align-items:center">' +
+          '<span class="badge badge-muted">Σ ' + pvFmt(s.produktion) + ' kWh</span>' +
+          '<button class="btn-icon danger" onclick="pvJahrEntfernen(\'' + jahr + '\')" title="Jahr entfernen">×</button>' +
+        '</div>' +
+      '</div>' +
+      '<div class="table-wrap"><table>' +
+      '<thead><tr>' +
+        '<th>Monat</th><th style="text-align:right">Produktion kWh</th><th style="text-align:right">Verbrauch kWh</th>' +
+        '<th style="text-align:right">Bezug kWh</th><th style="text-align:right">Einspeisung kWh</th>' +
+        '<th style="text-align:right">Autarkie</th><th style="text-align:right">Eigenverbr.</th>' +
+      '</tr></thead>' +
+      '<tbody>' + zeilen + '</tbody>' +
+      '<tfoot><tr style="font-weight:700;background:var(--surface-2)">' +
+        '<td>Summe / Ø</td>' +
+        '<td style="text-align:right">' + pvFmt(s.produktion) + '</td>' +
+        '<td style="text-align:right">' + pvFmt(s.verbrauch) + '</td>' +
+        '<td style="text-align:right">' + pvFmt(s.bezug) + '</td>' +
+        '<td style="text-align:right">' + pvFmt(s.einspeisung) + '</td>' +
+        '<td style="text-align:right;background:' + sAmp.bg + ';color:' + sAmp.fg + '">' + pvPct(s.autarkie) + '</td>' +
+        '<td style="text-align:right;color:var(--muted)">' + pvPct(s.eigenverbrauch) + '</td>' +
+      '</tr></tfoot>' +
+      '</table></div></div>';
+  }).join('');
+
+  return '<div>' + kopf + vergleich + uebersicht + jahrBloecke + '</div>';
+}
+
+// ── PV: Diagramme ──────────────────────────────────────────────────────────
+function renderPvCharts() {
+  if (typeof Chart === 'undefined' || !pvAktiv()) return;
+  const jahre = pvJahre();
+  if (!jahre.length) return;
+  const css = getComputedStyle(document.documentElement);
+  const accent  = (css.getPropertyValue('--accent')  || '#0EA5E9').trim();
+  const accent2 = (css.getPropertyValue('--accent2') || '#22D3EE').trim();
+  const green   = (css.getPropertyValue('--green')   || '#22C55E').trim();
+  const textCol = (css.getPropertyValue('--text')    || '#e5e7eb').trim();
+  const gridCol = (css.getPropertyValue('--border')  || '#334155').trim();
+  const achse = {
+    x: { ticks:{ color:textCol, font:{size:10} }, grid:{ color: gridCol + '55' } },
+    y: { ticks:{ color:textCol, font:{size:10} }, grid:{ color: gridCol + '55' }, beginAtZero:true },
+  };
+  const legende = { labels:{ color:textCol, font:{size:11}, boxWidth:12 } };
+
+  // 1) Jahresproduktion (Balken)
+  const cProd = document.getElementById('pvChartProd');
+  if (cProd) {
+    try {
+      chartInstances.pvProd = new Chart(cProd.getContext('2d'), {
+        type:'bar',
+        data:{ labels: jahre, datasets:[{
+          label:'Jahresproduktion (kWh)',
+          data: jahre.map(j => { const v = pvJahresSumme(j).produktion; return v === null ? 0 : v; }),
+          backgroundColor: accent + 'cc', borderColor: accent, borderWidth:1,
+        }]},
+        options:{ responsive:true, maintainAspectRatio:false,
+          plugins:{ legend:{ display:false }, title:{ display:true, text:'Jahresproduktion (kWh)', color:textCol, font:{size:12} },
+            tooltip:{ callbacks:{ label:(c)=>' ' + fmt(c.parsed.y) + ' kWh' } } },
+          scales: achse },
+      });
+    } catch(e) { console.error('PV-Chart Produktion:', e); }
+  }
+  // 2) Ø Autarkie pro Jahr (Linie, 0–100 %)
+  const cAut = document.getElementById('pvChartAut');
+  if (cAut) {
+    try {
+      chartInstances.pvAut = new Chart(cAut.getContext('2d'), {
+        type:'line',
+        data:{ labels: jahre, datasets:[{
+          label:'Ø Autarkie',
+          data: jahre.map(j => { const a = pvJahresSumme(j).autarkie; return a === null ? null : +(a*100).toFixed(1); }),
+          borderColor: green, backgroundColor: green + '22', borderWidth:2,
+          pointBackgroundColor: green, pointRadius:4, tension:0.25, fill:true, spanGaps:true,
+        }]},
+        options:{ responsive:true, maintainAspectRatio:false,
+          plugins:{ legend:{ display:false }, title:{ display:true, text:'Ø Autarkie pro Jahr', color:textCol, font:{size:12} },
+            tooltip:{ callbacks:{ label:(c)=> c.parsed.y === null ? ' –' : ' ' + String(c.parsed.y).replace('.',',') + ' %' } } },
+          scales:{ x: achse.x, y:{ ...achse.y, min:0, max:100, ticks:{ ...achse.y.ticks, callback:(v)=>v+' %' } } } },
+      });
+    } catch(e) { console.error('PV-Chart Autarkie:', e); }
+  }
+  // 3) Monatsvergleich ausgewählter Jahre (Produktion)
+  const cVgl = document.getElementById('pvChartVergleich');
+  const sel = pvCfg().chartJahre.filter(j => jahre.includes(j)).sort();
+  if (cVgl && sel.length) {
+    const farben = [accent, accent2, green, '#f59e0b', '#a78bfa', '#f472b6'];
+    try {
+      chartInstances.pvVgl = new Chart(cVgl.getContext('2d'), {
+        type:'line',
+        data:{ labels: PV_MONATE, datasets: sel.map((j, i) => {
+          const d = pvJahrDaten(j);
+          const col = farben[i % farben.length];
+          return {
+            label: j, data: d.map(m => pvNum(m.produktion)),
+            borderColor: col, backgroundColor: col + '22',
+            borderWidth:2, pointRadius:3, tension:0.25, fill:false, spanGaps:true,
+          };
+        })},
+        options:{ responsive:true, maintainAspectRatio:false,
+          plugins:{ legend: legende, title:{ display:true, text:'Produktion je Monat im Jahresvergleich (kWh)', color:textCol, font:{size:12} },
+            tooltip:{ callbacks:{ label:(c)=> ' ' + c.dataset.label + ': ' + (c.parsed.y===null?'–':fmt(c.parsed.y) + ' kWh') } } },
+          scales: achse },
+      });
+    } catch(e) { console.error('PV-Chart Vergleich:', e); }
+  }
 }
 
 function zaehlerMonthlyBreakdown(entries) {
@@ -6686,6 +7067,15 @@ window.zeigeSaldoDiagnose = zeigeSaldoDiagnose;
 window.resetKontoKorrekturen = resetKontoKorrekturen;
 window.updateKonto       = updateKonto;
 window.deleteKonto       = deleteKonto;
+window.pvAktivieren      = pvAktivieren;
+window.pvDeaktivieren    = pvDeaktivieren;
+window.pvJahrHinzufuegen = pvJahrHinzufuegen;
+window.pvJahrEntfernen   = pvJahrEntfernen;
+window.pvUpdate          = pvUpdate;
+window.pvToggleChartJahr = pvToggleChartJahr;
+window.pvToggleVergleich = pvToggleVergleich;
+window.pvNavSichtbarkeit = pvNavSichtbarkeit;
+window.pvAktiv           = pvAktiv;
 window.setDeletePin      = setDeletePin;
 window.changeDeletePin   = changeDeletePin;
 window.removeDeletePin   = removeDeletePin;
@@ -6864,6 +7254,7 @@ window.deleteRegelEinnahme   = deleteRegelEinnahme;
   currentMonth = thisMonth();
 
   applySettings();
+  pvNavSichtbarkeit();
   cleanOldTrash();
   checkAutoBackup();
   // Auto-create sparen entries from linked fixkosten (silent)
@@ -6924,7 +7315,7 @@ window.deleteRegelEinnahme   = deleteRegelEinnahme;
     showTermsModal(() => {});
   }
   // Apply saved startPage from settings
-  const validPages = ['dashboard','jahresuebersicht','buchungen','einkaeufe','ausgaben','einnahmen','spesen','fixkosten','sparen','zaehler','finanzprodukte','tabellen','einstellungen'];
+  const validPages = ['dashboard','jahresuebersicht','buchungen','einkaeufe','ausgaben','einnahmen','spesen','fixkosten','sparen','zaehler','pv','finanzprodukte','tabellen','einstellungen'];
   const savedStart = state.config?.startPage;
   const startPage = (savedStart && validPages.includes(savedStart)) ? savedStart : 'dashboard';
   navigate(startPage);
