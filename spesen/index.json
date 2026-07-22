@@ -1,0 +1,1088 @@
+{
+ "version": "2026-01-01",
+ "stand": "BMF-Schreiben vom 05.12.2025, gültig ab 01.01.2026",
+ "quelle": "https://www.bundesfinanzministerium.de/Content/DE/Downloads/BMF_Schreiben/Steuerarten/Lohnsteuer/2025-12-05-steuerliche-behandlung-reisekosten-2026.pdf",
+ "hinweis": "Für nicht aufgeführte Länder gilt der Pauschbetrag für Luxemburg. 'ganz' = ab 24 Std., 'halb' = An-/Abreisetag bzw. über 8 Std.",
+ "laender": [
+  {
+   "land": "Albanien",
+   "ganz": 33,
+   "halb": 22
+  },
+  {
+   "land": "Algerien",
+   "ganz": 47,
+   "halb": 32
+  },
+  {
+   "land": "Andorra",
+   "ganz": 45,
+   "halb": 30
+  },
+  {
+   "land": "Angola",
+   "ganz": 40,
+   "halb": 27
+  },
+  {
+   "land": "Argentinien",
+   "ganz": 42,
+   "halb": 28
+  },
+  {
+   "land": "Armenien",
+   "ganz": 29,
+   "halb": 20
+  },
+  {
+   "land": "Aserbaidschan",
+   "ganz": 44,
+   "halb": 29
+  },
+  {
+   "land": "Australien / Canberra",
+   "ganz": 74,
+   "halb": 49
+  },
+  {
+   "land": "Australien / Sydney",
+   "ganz": 57,
+   "halb": 38
+  },
+  {
+   "land": "Australien / im Übrigen",
+   "ganz": 57,
+   "halb": 38
+  },
+  {
+   "land": "Bahrain",
+   "ganz": 48,
+   "halb": 32
+  },
+  {
+   "land": "Bangladesch",
+   "ganz": 46,
+   "halb": 31
+  },
+  {
+   "land": "Barbados",
+   "ganz": 54,
+   "halb": 36
+  },
+  {
+   "land": "Belgien",
+   "ganz": 59,
+   "halb": 40
+  },
+  {
+   "land": "Benin",
+   "ganz": 40,
+   "halb": 27
+  },
+  {
+   "land": "Bhutan",
+   "ganz": 27,
+   "halb": 18
+  },
+  {
+   "land": "Bolivien",
+   "ganz": 46,
+   "halb": 31
+  },
+  {
+   "land": "Bosnien und Herzegowina",
+   "ganz": 32,
+   "halb": 21
+  },
+  {
+   "land": "Botsuana",
+   "ganz": 40,
+   "halb": 27
+  },
+  {
+   "land": "Brasilien / Brasilia",
+   "ganz": 51,
+   "halb": 34
+  },
+  {
+   "land": "Brasilien / Rio de Janeiro",
+   "ganz": 69,
+   "halb": 46
+  },
+  {
+   "land": "Brasilien / Sao Paulo",
+   "ganz": 46,
+   "halb": 31
+  },
+  {
+   "land": "Brasilien / im Übrigen",
+   "ganz": 46,
+   "halb": 31
+  },
+  {
+   "land": "Brunei",
+   "ganz": 45,
+   "halb": 30
+  },
+  {
+   "land": "Bulgarien",
+   "ganz": 38,
+   "halb": 25
+  },
+  {
+   "land": "Burkina Faso",
+   "ganz": 39,
+   "halb": 26
+  },
+  {
+   "land": "Burundi",
+   "ganz": 58,
+   "halb": 39
+  },
+  {
+   "land": "Chile",
+   "ganz": 44,
+   "halb": 29
+  },
+  {
+   "land": "China / Hongkong",
+   "ganz": 83,
+   "halb": 56
+  },
+  {
+   "land": "China / Peking",
+   "ganz": 57,
+   "halb": 38
+  },
+  {
+   "land": "China / Shanghai",
+   "ganz": 48,
+   "halb": 32
+  },
+  {
+   "land": "China / im Übrigen",
+   "ganz": 48,
+   "halb": 32
+  },
+  {
+   "land": "Costa Rica",
+   "ganz": 60,
+   "halb": 40
+  },
+  {
+   "land": "Côte d’Ivoire",
+   "ganz": 60,
+   "halb": 40
+  },
+  {
+   "land": "Departments 77, 78, 91 bis / im Übrigen",
+   "ganz": 53,
+   "halb": 36
+  },
+  {
+   "land": "Deutschland",
+   "ganz": 28,
+   "halb": 14
+  },
+  {
+   "land": "Dominikanische Republik",
+   "ganz": 50,
+   "halb": 33
+  },
+  {
+   "land": "Dschibuti",
+   "ganz": 77,
+   "halb": 52
+  },
+  {
+   "land": "Dänemark",
+   "ganz": 75,
+   "halb": 50
+  },
+  {
+   "land": "Ecuador",
+   "ganz": 27,
+   "halb": 18
+  },
+  {
+   "land": "El Salvador",
+   "ganz": 65,
+   "halb": 44
+  },
+  {
+   "land": "Eritrea",
+   "ganz": 46,
+   "halb": 31
+  },
+  {
+   "land": "Estland",
+   "ganz": 39,
+   "halb": 26
+  },
+  {
+   "land": "Fidschi",
+   "ganz": 32,
+   "halb": 21
+  },
+  {
+   "land": "Finnland",
+   "ganz": 54,
+   "halb": 36
+  },
+  {
+   "land": "Frankreich / Paris (inkl. Dept. 77, 78, 91–95)",
+   "ganz": 58,
+   "halb": 39
+  },
+  {
+   "land": "Frankreich / im Übrigen",
+   "ganz": 53,
+   "halb": 36
+  },
+  {
+   "land": "Gabun",
+   "ganz": 64,
+   "halb": 43
+  },
+  {
+   "land": "Gambia",
+   "ganz": 40,
+   "halb": 27
+  },
+  {
+   "land": "Georgien",
+   "ganz": 45,
+   "halb": 30
+  },
+  {
+   "land": "Ghana",
+   "ganz": 46,
+   "halb": 31
+  },
+  {
+   "land": "Griechenland / Athen",
+   "ganz": 40,
+   "halb": 27
+  },
+  {
+   "land": "Griechenland / im Übrigen",
+   "ganz": 36,
+   "halb": 24
+  },
+  {
+   "land": "Guatemala",
+   "ganz": 46,
+   "halb": 31
+  },
+  {
+   "land": "Guinea",
+   "ganz": 59,
+   "halb": 40
+  },
+  {
+   "land": "Guinea-Bissau",
+   "ganz": 32,
+   "halb": 21
+  },
+  {
+   "land": "Honduras",
+   "ganz": 57,
+   "halb": 38
+  },
+  {
+   "land": "Indien / Bangalore",
+   "ganz": 42,
+   "halb": 28
+  },
+  {
+   "land": "Indien / Chennai",
+   "ganz": 22,
+   "halb": 15
+  },
+  {
+   "land": "Indien / Kalkutta",
+   "ganz": 32,
+   "halb": 21
+  },
+  {
+   "land": "Indien / Mumbai",
+   "ganz": 53,
+   "halb": 36
+  },
+  {
+   "land": "Indien / Neu Delhi",
+   "ganz": 46,
+   "halb": 31
+  },
+  {
+   "land": "Indien / im Übrigen",
+   "ganz": 22,
+   "halb": 15
+  },
+  {
+   "land": "Indonesien",
+   "ganz": 45,
+   "halb": 30
+  },
+  {
+   "land": "Iran",
+   "ganz": 33,
+   "halb": 22
+  },
+  {
+   "land": "Irland",
+   "ganz": 64,
+   "halb": 43
+  },
+  {
+   "land": "Island",
+   "ganz": 62,
+   "halb": 41
+  },
+  {
+   "land": "Israel",
+   "ganz": 59,
+   "halb": 40
+  },
+  {
+   "land": "Italien / Mailand",
+   "ganz": 42,
+   "halb": 28
+  },
+  {
+   "land": "Italien / Rom",
+   "ganz": 48,
+   "halb": 32
+  },
+  {
+   "land": "Italien / im Übrigen",
+   "ganz": 42,
+   "halb": 28
+  },
+  {
+   "land": "Jamaika",
+   "ganz": 39,
+   "halb": 26
+  },
+  {
+   "land": "Japan / Osaka",
+   "ganz": 33,
+   "halb": 22
+  },
+  {
+   "land": "Japan / Tokio",
+   "ganz": 50,
+   "halb": 33
+  },
+  {
+   "land": "Japan / im Übrigen",
+   "ganz": 33,
+   "halb": 22
+  },
+  {
+   "land": "Jordanien",
+   "ganz": 57,
+   "halb": 38
+  },
+  {
+   "land": "Kambodscha",
+   "ganz": 42,
+   "halb": 28
+  },
+  {
+   "land": "Kamerun",
+   "ganz": 56,
+   "halb": 37
+  },
+  {
+   "land": "Kanada / Ottawa",
+   "ganz": 62,
+   "halb": 41
+  },
+  {
+   "land": "Kanada / Toronto",
+   "ganz": 54,
+   "halb": 36
+  },
+  {
+   "land": "Kanada / Vancouver",
+   "ganz": 63,
+   "halb": 42
+  },
+  {
+   "land": "Kanada / im Übrigen",
+   "ganz": 54,
+   "halb": 36
+  },
+  {
+   "land": "Kap Verde",
+   "ganz": 38,
+   "halb": 25
+  },
+  {
+   "land": "Kasachstan",
+   "ganz": 33,
+   "halb": 22
+  },
+  {
+   "land": "Katar",
+   "ganz": 81,
+   "halb": 54
+  },
+  {
+   "land": "Kenia",
+   "ganz": 48,
+   "halb": 32
+  },
+  {
+   "land": "Kirgisistan",
+   "ganz": 35,
+   "halb": 24
+  },
+  {
+   "land": "Kolumbien",
+   "ganz": 34,
+   "halb": 23
+  },
+  {
+   "land": "Kongo, Demokratische Republik",
+   "ganz": 65,
+   "halb": 44
+  },
+  {
+   "land": "Kongo, Republik",
+   "ganz": 53,
+   "halb": 36
+  },
+  {
+   "land": "Korea, Republik",
+   "ganz": 39,
+   "halb": 26
+  },
+  {
+   "land": "Kosovo",
+   "ganz": 24,
+   "halb": 16
+  },
+  {
+   "land": "Kroatien",
+   "ganz": 46,
+   "halb": 31
+  },
+  {
+   "land": "Kuba",
+   "ganz": 51,
+   "halb": 34
+  },
+  {
+   "land": "Kuwait",
+   "ganz": 63,
+   "halb": 42
+  },
+  {
+   "land": "Laos",
+   "ganz": 35,
+   "halb": 24
+  },
+  {
+   "land": "Lesotho",
+   "ganz": 28,
+   "halb": 19
+  },
+  {
+   "land": "Lettland",
+   "ganz": 46,
+   "halb": 31
+  },
+  {
+   "land": "Libanon",
+   "ganz": 69,
+   "halb": 46
+  },
+  {
+   "land": "Liberia",
+   "ganz": 65,
+   "halb": 44
+  },
+  {
+   "land": "Liechtenstein",
+   "ganz": 57,
+   "halb": 38
+  },
+  {
+   "land": "Litauen",
+   "ganz": 48,
+   "halb": 32
+  },
+  {
+   "land": "Luxemburg",
+   "ganz": 63,
+   "halb": 42
+  },
+  {
+   "land": "Madagaskar",
+   "ganz": 33,
+   "halb": 22
+  },
+  {
+   "land": "Malawi",
+   "ganz": 41,
+   "halb": 28
+  },
+  {
+   "land": "Malaysia",
+   "ganz": 36,
+   "halb": 24
+  },
+  {
+   "land": "Malediven",
+   "ganz": 70,
+   "halb": 47
+  },
+  {
+   "land": "Mali",
+   "ganz": 42,
+   "halb": 28
+  },
+  {
+   "land": "Malta",
+   "ganz": 59,
+   "halb": 40
+  },
+  {
+   "land": "Marokko",
+   "ganz": 41,
+   "halb": 28
+  },
+  {
+   "land": "Marshall Inseln",
+   "ganz": 45,
+   "halb": 30
+  },
+  {
+   "land": "Mauretanien",
+   "ganz": 35,
+   "halb": 24
+  },
+  {
+   "land": "Mauritius",
+   "ganz": 44,
+   "halb": 29
+  },
+  {
+   "land": "Mexiko",
+   "ganz": 40,
+   "halb": 27
+  },
+  {
+   "land": "Moldau, Republik",
+   "ganz": 26,
+   "halb": 17
+  },
+  {
+   "land": "Monaco",
+   "ganz": 52,
+   "halb": 35
+  },
+  {
+   "land": "Mongolei",
+   "ganz": 23,
+   "halb": 16
+  },
+  {
+   "land": "Montenegro",
+   "ganz": 32,
+   "halb": 21
+  },
+  {
+   "land": "Mosambik",
+   "ganz": 51,
+   "halb": 34
+  },
+  {
+   "land": "Myanmar",
+   "ganz": 23,
+   "halb": 16
+  },
+  {
+   "land": "Namibia",
+   "ganz": 28,
+   "halb": 19
+  },
+  {
+   "land": "Nepal",
+   "ganz": 33,
+   "halb": 22
+  },
+  {
+   "land": "Neuseeland",
+   "ganz": 58,
+   "halb": 39
+  },
+  {
+   "land": "Nicaragua",
+   "ganz": 46,
+   "halb": 31
+  },
+  {
+   "land": "Niederlande",
+   "ganz": 58,
+   "halb": 39
+  },
+  {
+   "land": "Niger",
+   "ganz": 42,
+   "halb": 28
+  },
+  {
+   "land": "Nigeria",
+   "ganz": 52,
+   "halb": 35
+  },
+  {
+   "land": "Nordmazedonien",
+   "ganz": 27,
+   "halb": 18
+  },
+  {
+   "land": "Norwegen",
+   "ganz": 75,
+   "halb": 50
+  },
+  {
+   "land": "Oman",
+   "ganz": 64,
+   "halb": 43
+  },
+  {
+   "land": "Pakistan",
+   "ganz": 41,
+   "halb": 28
+  },
+  {
+   "land": "Palau",
+   "ganz": 51,
+   "halb": 34
+  },
+  {
+   "land": "Panama",
+   "ganz": 41,
+   "halb": 28
+  },
+  {
+   "land": "Papua-Neuguinea",
+   "ganz": 59,
+   "halb": 40
+  },
+  {
+   "land": "Paraguay",
+   "ganz": 39,
+   "halb": 26
+  },
+  {
+   "land": "Peru",
+   "ganz": 52,
+   "halb": 35
+  },
+  {
+   "land": "Philippinen",
+   "ganz": 41,
+   "halb": 28
+  },
+  {
+   "land": "Polen / Breslau",
+   "ganz": 34,
+   "halb": 23
+  },
+  {
+   "land": "Polen / Warschau",
+   "ganz": 40,
+   "halb": 27
+  },
+  {
+   "land": "Polen / im Übrigen",
+   "ganz": 34,
+   "halb": 23
+  },
+  {
+   "land": "Portugal",
+   "ganz": 32,
+   "halb": 21
+  },
+  {
+   "land": "Ruanda",
+   "ganz": 44,
+   "halb": 29
+  },
+  {
+   "land": "Rumänien",
+   "ganz": 38,
+   "halb": 25
+  },
+  {
+   "land": "Russische Föderation / Moskau",
+   "ganz": 30,
+   "halb": 20
+  },
+  {
+   "land": "Russische Föderation / St. Petersburg",
+   "ganz": 28,
+   "halb": 19
+  },
+  {
+   "land": "Russische Föderation / im Übrigen",
+   "ganz": 28,
+   "halb": 19
+  },
+  {
+   "land": "Sambia",
+   "ganz": 38,
+   "halb": 25
+  },
+  {
+   "land": "Samoa",
+   "ganz": 39,
+   "halb": 26
+  },
+  {
+   "land": "San Marino",
+   "ganz": 34,
+   "halb": 23
+  },
+  {
+   "land": "Saudi-Arabien / Djidda",
+   "ganz": 57,
+   "halb": 38
+  },
+  {
+   "land": "Saudi-Arabien / Riad",
+   "ganz": 56,
+   "halb": 37
+  },
+  {
+   "land": "Saudi-Arabien / im Übrigen",
+   "ganz": 56,
+   "halb": 37
+  },
+  {
+   "land": "Schweden",
+   "ganz": 66,
+   "halb": 44
+  },
+  {
+   "land": "Schweiz / Bern",
+   "ganz": 82,
+   "halb": 55
+  },
+  {
+   "land": "Schweiz / Genf",
+   "ganz": 70,
+   "halb": 47
+  },
+  {
+   "land": "Schweiz / im Übrigen",
+   "ganz": 70,
+   "halb": 47
+  },
+  {
+   "land": "Senegal",
+   "ganz": 48,
+   "halb": 32
+  },
+  {
+   "land": "Serbien",
+   "ganz": 27,
+   "halb": 18
+  },
+  {
+   "land": "Sierra Leone",
+   "ganz": 57,
+   "halb": 38
+  },
+  {
+   "land": "Simbabwe",
+   "ganz": 63,
+   "halb": 42
+  },
+  {
+   "land": "Singapur",
+   "ganz": 71,
+   "halb": 48
+  },
+  {
+   "land": "Slowakische Republik",
+   "ganz": 33,
+   "halb": 22
+  },
+  {
+   "land": "Slowenien",
+   "ganz": 38,
+   "halb": 25
+  },
+  {
+   "land": "Spanien / Barcelona",
+   "ganz": 34,
+   "halb": 23
+  },
+  {
+   "land": "Spanien / Kanarische Inseln",
+   "ganz": 36,
+   "halb": 24
+  },
+  {
+   "land": "Spanien / Madrid",
+   "ganz": 42,
+   "halb": 28
+  },
+  {
+   "land": "Spanien / Palma de Mallorca",
+   "ganz": 44,
+   "halb": 29
+  },
+  {
+   "land": "Spanien / im Übrigen",
+   "ganz": 34,
+   "halb": 23
+  },
+  {
+   "land": "Sri Lanka",
+   "ganz": 36,
+   "halb": 24
+  },
+  {
+   "land": "São Tomé – Príncipe",
+   "ganz": 36,
+   "halb": 24
+  },
+  {
+   "land": "Südafrika / Johannesburg",
+   "ganz": 36,
+   "halb": 24
+  },
+  {
+   "land": "Südafrika / Kapstadt",
+   "ganz": 33,
+   "halb": 22
+  },
+  {
+   "land": "Südafrika / im Übrigen",
+   "ganz": 29,
+   "halb": 20
+  },
+  {
+   "land": "Südsudan",
+   "ganz": 51,
+   "halb": 34
+  },
+  {
+   "land": "Tadschikistan",
+   "ganz": 27,
+   "halb": 18
+  },
+  {
+   "land": "Taiwan",
+   "ganz": 51,
+   "halb": 34
+  },
+  {
+   "land": "Tansania",
+   "ganz": 44,
+   "halb": 29
+  },
+  {
+   "land": "Thailand",
+   "ganz": 36,
+   "halb": 24
+  },
+  {
+   "land": "Togo",
+   "ganz": 36,
+   "halb": 24
+  },
+  {
+   "land": "Tonga",
+   "ganz": 29,
+   "halb": 20
+  },
+  {
+   "land": "Trinidad und Tobago",
+   "ganz": 66,
+   "halb": 44
+  },
+  {
+   "land": "Tschad",
+   "ganz": 42,
+   "halb": 28
+  },
+  {
+   "land": "Tschechische Republik",
+   "ganz": 32,
+   "halb": 21
+  },
+  {
+   "land": "Tunesien",
+   "ganz": 40,
+   "halb": 27
+  },
+  {
+   "land": "Turkmenistan",
+   "ganz": 28,
+   "halb": 19
+  },
+  {
+   "land": "Türkei / Ankara",
+   "ganz": 32,
+   "halb": 21
+  },
+  {
+   "land": "Türkei / Izmir",
+   "ganz": 44,
+   "halb": 29
+  },
+  {
+   "land": "Türkei / im Übrigen",
+   "ganz": 24,
+   "halb": 16
+  },
+  {
+   "land": "USA / Atlanta",
+   "ganz": 77,
+   "halb": 52
+  },
+  {
+   "land": "USA / Boston",
+   "ganz": 63,
+   "halb": 42
+  },
+  {
+   "land": "USA / Chicago",
+   "ganz": 65,
+   "halb": 44
+  },
+  {
+   "land": "USA / Houston",
+   "ganz": 62,
+   "halb": 41
+  },
+  {
+   "land": "USA / Los Angeles",
+   "ganz": 64,
+   "halb": 43
+  },
+  {
+   "land": "USA / Miami",
+   "ganz": 65,
+   "halb": 44
+  },
+  {
+   "land": "USA / New York City",
+   "ganz": 66,
+   "halb": 44
+  },
+  {
+   "land": "USA / San Francisco",
+   "ganz": 59,
+   "halb": 40
+  },
+  {
+   "land": "USA / Washington, D. C.",
+   "ganz": 66,
+   "halb": 44
+  },
+  {
+   "land": "USA / im Übrigen",
+   "ganz": 59,
+   "halb": 40
+  },
+  {
+   "land": "Uganda",
+   "ganz": 45,
+   "halb": 30
+  },
+  {
+   "land": "Ukraine",
+   "ganz": 33,
+   "halb": 22
+  },
+  {
+   "land": "Ungarn",
+   "ganz": 32,
+   "halb": 21
+  },
+  {
+   "land": "Uruguay",
+   "ganz": 40,
+   "halb": 27
+  },
+  {
+   "land": "Usbekistan",
+   "ganz": 32,
+   "halb": 21
+  },
+  {
+   "land": "Vatikanstaat",
+   "ganz": 48,
+   "halb": 32
+  },
+  {
+   "land": "Venezuela",
+   "ganz": 51,
+   "halb": 34
+  },
+  {
+   "land": "Vereinigte Arabische Emirate",
+   "ganz": 81,
+   "halb": 54
+  },
+  {
+   "land": "Vereinigtes Königreich / London",
+   "ganz": 66,
+   "halb": 44
+  },
+  {
+   "land": "Vereinigtes Königreich / im Übrigen",
+   "ganz": 52,
+   "halb": 35
+  },
+  {
+   "land": "Vietnam",
+   "ganz": 36,
+   "halb": 24
+  },
+  {
+   "land": "Weißrussland",
+   "ganz": 21,
+   "halb": 14
+  },
+  {
+   "land": "Zentralafrikanische Republik",
+   "ganz": 53,
+   "halb": 36
+  },
+  {
+   "land": "Zypern",
+   "ganz": 42,
+   "halb": 28
+  },
+  {
+   "land": "Ägypten",
+   "ganz": 50,
+   "halb": 33
+  },
+  {
+   "land": "Äquatorialguinea",
+   "ganz": 42,
+   "halb": 28
+  },
+  {
+   "land": "Äthiopien",
+   "ganz": 44,
+   "halb": 29
+  },
+  {
+   "land": "Österreich",
+   "ganz": 50,
+   "halb": 33
+  }
+ ]
+}
