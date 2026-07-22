@@ -161,6 +161,13 @@ let _snoozedReminders = {};
 // Format je Eintrag: { v: 'Version', date: 'YYYY-MM-DD', changes: ['...','...'] }
 // Änderungen dürfen mit **Fett** Markierung versehen werden.
 const CHANGELOG = [
+  { v: '1.0.21', date: '2026-07-22', changes: [
+    '**Fehler behoben: Farbänderungen wirkten im dunklen Modus nicht.** Die Einstellung wurde zwar gespeichert, aber sofort wieder vom Design überschrieben – jetzt schlagen alle Farben korrekt durch',
+    '**Hintergrundfarbe frei wählbar**: Karten, Seitenleiste, Rahmen und Eingabefelder werden automatisch passend dazu abgestuft',
+    'Die Textfarbe wird automatisch auf den Hintergrund abgestimmt, damit alles lesbar bleibt',
+    'Warnung, wenn ein gewählter Hintergrund zu wenig Kontrast zum Text hat (mittelhelle Grautöne sind hier ungünstig)',
+    'Eigener Hintergrund lässt sich einzeln auf den Standard zurücksetzen',
+  ]},
   { v: '1.0.20', date: '2026-07-22', changes: [
     '**Farben frei anpassbar**: In den Einstellungen unter „Darstellung" lassen sich Akzentfarbe, Zweitfarbe sowie die Farben für positive und negative Beträge einstellen',
     '**Zehn fertige Farbwelten** (Türkis, Blau, Indigo, Violett, Beere, Rot, Bernstein, Grün, Oliv, Grafit) für die schnelle Auswahl – oder ein freier Farbwähler für jeden beliebigen Ton',
@@ -4520,8 +4527,33 @@ function einstellungen() {
               feld('red','Negative Betr&auml;ge','Ausgaben, Verluste') +
             '</div>' + warnung +
 
+            '<p style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin:18px 0 2px">Hintergrund</p>' +
+            '<div style="border:1px solid var(--border);border-radius:10px;padding:10px 12px;background:var(--surface-2)">' +
+              '<div style="display:flex;align-items:center;gap:10px">' +
+                '<input type="color" value="' + (s.bg || (m==='dark' ? (FARB_GRUNDTOENE.find(g=>g.id===c.grundton)||FARB_GRUNDTOENE[0]).bg : '#f0f4f2')) + '"' +
+                  ' oninput="farbeVorschau(&quot;bg&quot;,this.value)"' +
+                  ' onchange="farbeSetzen(&quot;bg&quot;,this.value)"' +
+                  ' style="width:46px;height:32px;padding:2px;border:1px solid var(--border);border-radius:8px;background:var(--input-bg);cursor:pointer" />' +
+                '<div style="flex:1;min-width:0">' +
+                  '<div style="font-size:13px;font-weight:500">Eigener Hintergrund</div>' +
+                  '<div style="font-size:11px;color:var(--muted)">Karten, Seitenleiste und Rahmen werden automatisch passend abgestuft</div>' +
+                '</div>' +
+                (s.bg ? '<button class="btn btn-ghost btn-sm" onclick="hintergrundZuruecksetzen()">Standard</button>'
+                      : '<span style="font-size:11px;color:var(--muted)">Standard aktiv</span>') +
+              '</div>' +
+              (() => {
+                if (!s.bg) return '';
+                const kTxt = kontrast(s.bg, lesbareSchrift(s.bg));
+                if (kTxt >= 4.5) return '';
+                return '<div style="margin-top:9px;padding:9px 12px;border-radius:8px;background:var(--red-bg);color:var(--red);font-size:12px">'
+                  + 'Dieser Hintergrund erreicht nur ' + kTxt.toFixed(1) + ':1 Textkontrast (empfohlen: 4,5:1). '
+                  + 'Mittelhelle T&ouml;ne sind hier ung&uuml;nstig &ndash; w&auml;hle einen deutlich helleren oder dunkleren Ton.</div>';
+              })() +
+            '</div>' +
+
             (m === 'dark' ?
-              '<p style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin:18px 0 8px">Grundton (nur dunkler Modus)</p>' +
+              '<p style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin:18px 0 8px">Grundton (nur dunkler Modus)' +
+                (s.bg ? ' <span style="font-weight:500;text-transform:none;letter-spacing:0">&ndash; wird vom eigenen Hintergrund &uuml;berschrieben</span>' : '') + '</p>' +
               '<div style="display:flex;flex-wrap:wrap;gap:8px">' +
                 FARB_GRUNDTOENE.map(g =>
                   '<button onclick="grundtonSetzen(&quot;' + g.id + '&quot;)" style="display:flex;align-items:center;gap:8px;padding:8px 12px;cursor:pointer;border-radius:9px;font-family:inherit;font-size:12px;font-weight:600;background:var(--surface-2);color:var(--text);border:1.5px solid ' + (c.grundton===g.id ? 'var(--accent)' : 'var(--border)') + '">' +
@@ -4902,8 +4934,9 @@ const FARB_GRUNDTOENE = [
 ];
 
 const FARB_STANDARD = {
-  light: { accent:'#0f766e', accent2:'#14b8a6', green:'#16a34a', red:'#dc2626' },
-  dark:  { accent:'#0EA5E9', accent2:'#22D3EE', green:'#22C55E', red:'#EF4444' },
+  // bg:'' bedeutet: kein eigener Hintergrund → Grundton bzw. CSS-Standard gilt
+  light: { accent:'#0f766e', accent2:'#14b8a6', green:'#16a34a', red:'#dc2626', bg:'' },
+  dark:  { accent:'#0EA5E9', accent2:'#22D3EE', green:'#22C55E', red:'#EF4444', bg:'' },
   grundton: 'slate',
 };
 
@@ -4921,6 +4954,9 @@ function farbCfg() {
     ['accent','accent2','green','red'].forEach(k => {
       if (!/^#[0-9a-fA-F]{6}$/.test(c[m][k] || '')) c[m][k] = FARB_STANDARD[m][k];
     });
+    // bg darf leer sein (= Grundton/CSS), sonst muss es ein gültiger Hex sein
+    if (c[m].bg && !/^#[0-9a-fA-F]{6}$/.test(c[m].bg)) c[m].bg = '';
+    if (c[m].bg === undefined) c[m].bg = '';
   });
   if (!FARB_GRUNDTOENE.some(g => g.id === c.grundton)) c.grundton = 'slate';
   return c;
@@ -4961,33 +4997,71 @@ function lesbareSchrift(hex) {
 }
 
 // ── Farben auf die Oberfläche anwenden ─────────────────────────────────────
+// WICHTIG: Die Klasse 'theme-dark' liegt auf <html> UND <body>. Ein Inline-Style
+// nur auf <html> wird deshalb von '.theme-dark' auf <body> überschrieben
+// (Klasse am näheren Element gewinnt). Darum werden die Variablen auf BEIDE
+// Elemente gesetzt.
 function farbenAnwenden() {
-  const root = document.documentElement;
+  const ziele = [document.documentElement, document.body].filter(Boolean);
   const c = farbCfg();
   const m = farbModus();
   const s = c[m];
 
-  root.style.setProperty('--accent',        s.accent);
-  root.style.setProperty('--accent2',       s.accent2);
-  root.style.setProperty('--accent-dark',   ACCENT_DARKS[s.accent] || farbeDunkler(s.accent, 0.18));
-  root.style.setProperty('--accent-hover',  ACCENT_DARKS[s.accent] || farbeDunkler(s.accent, 0.18));
-  root.style.setProperty('--accent-light',  m === 'dark' ? farbeMischen(s.accent,'#000000',0.72) : s.accent + '20');
-  root.style.setProperty('--green', s.green);
-  root.style.setProperty('--red',   s.red);
-  // Button-Schrift automatisch lesbar halten (löst das feste #0F172A im CSS ab)
-  root.style.setProperty('--accent-text', lesbareSchrift(s.accent));
+  const setzen = (name, wert) => ziele.forEach(z => z.style.setProperty(name, wert));
+  const loeschen = (name) => ziele.forEach(z => z.style.removeProperty(name));
 
-  // Grundton nur im Dark-Mode
-  const g = FARB_GRUNDTOENE.find(x => x.id === c.grundton) || FARB_GRUNDTOENE[0];
-  ['--bg','--surface','--surface-2','--sidebar','--border','--input-bg','--input-border'].forEach(v => root.style.removeProperty(v));
-  if (m === 'dark' && g.id !== 'slate') {
-    root.style.setProperty('--bg',        g.bg);
-    root.style.setProperty('--surface',   g.surface);
-    root.style.setProperty('--surface-2', g.surface2);
-    root.style.setProperty('--sidebar',   g.sidebar);
-    root.style.setProperty('--border',    g.border);
-    root.style.setProperty('--input-bg',  g.input);
-    root.style.setProperty('--input-border', g.border);
+  setzen('--accent',       s.accent);
+  setzen('--accent2',      s.accent2);
+  setzen('--accent-dark',  ACCENT_DARKS[s.accent] || farbeDunkler(s.accent, 0.18));
+  setzen('--accent-hover', ACCENT_DARKS[s.accent] || farbeDunkler(s.accent, 0.18));
+  setzen('--accent-light', m === 'dark' ? farbeMischen(s.accent,'#000000',0.72) : s.accent + '20');
+  setzen('--green', s.green);
+  setzen('--red',   s.red);
+  // Button-Schrift automatisch lesbar halten
+  setzen('--accent-text', lesbareSchrift(s.accent));
+
+  // ── Hintergrund ────────────────────────────────────────────────────────
+  const HG_VARS = ['--bg','--surface','--surface-2','--paper','--sidebar','--border','--input-bg','--input-border'];
+  HG_VARS.forEach(loeschen);
+
+  if (s.bg && /^#[0-9a-fA-F]{6}$/.test(s.bg)) {
+    // Eigener Hintergrund: abgestufte Flächen automatisch daraus ableiten,
+    // damit Karten, Sidebar und Rahmen zueinander passen.
+    const dunkel = leuchtdichte(s.bg) < 0.18;
+    const hin    = dunkel ? '#FFFFFF' : '#000000';   // Richtung für Abstufungen
+    setzen('--bg',           s.bg);
+    setzen('--surface',      farbeMischen(s.bg, hin, dunkel ? 0.06 : 0.04));
+    setzen('--paper',        farbeMischen(s.bg, hin, dunkel ? 0.06 : 0.07));
+    setzen('--surface-2',    farbeMischen(s.bg, hin, dunkel ? 0.11 : 0.08));
+    setzen('--sidebar',      farbeMischen(s.bg, dunkel ? '#000000' : '#FFFFFF', 0.35));
+    setzen('--border',       farbeMischen(s.bg, hin, dunkel ? 0.17 : 0.14));
+    setzen('--input-bg',     farbeMischen(s.bg, dunkel ? '#000000' : '#FFFFFF', 0.30));
+    setzen('--input-border', farbeMischen(s.bg, hin, dunkel ? 0.17 : 0.14));
+    // Textfarbe nach tatsächlichem Kontrast wählen. Bei mittleren Tönen
+    // (z.B. #7a7a7a) ist der Kontrast physikalisch begrenzt – dort wird reines
+    // Schwarz/Weiß genommen, um das Maximum herauszuholen. Die Einstellungen
+    // warnen zusätzlich, wenn 4,5:1 nicht erreicht wird.
+    const txt = lesbareSchrift(s.bg);
+    setzen('--text',       txt);
+    setzen('--input-text', txt);
+    setzen('--muted',      farbeMischen(txt, s.bg, 0.38));
+  } else {
+    // Kein eigener Hintergrund → Textfarben aus dem CSS gelten wieder
+    ['--text','--input-text','--muted'].forEach(loeschen);
+    if (m === 'dark') {
+      // Gewählter Grundton (Slate = CSS-Standard, daher keine Inline-Werte)
+      const g = FARB_GRUNDTOENE.find(x => x.id === c.grundton) || FARB_GRUNDTOENE[0];
+      if (g.id !== 'slate') {
+        setzen('--bg',           g.bg);
+        setzen('--surface',      g.surface);
+        setzen('--paper',        g.surface);
+        setzen('--surface-2',    g.surface2);
+        setzen('--sidebar',      g.sidebar);
+        setzen('--border',       g.border);
+        setzen('--input-bg',     g.input);
+        setzen('--input-border', g.border);
+      }
+    }
   }
 }
 
@@ -5012,6 +5086,13 @@ function paletteAnwenden(id) {
   farbenAnwenden();
   saveData(); renderPage();
   showToast('Farbwelt „' + p.name + '" übernommen','info');
+}
+function hintergrundZuruecksetzen() {
+  const c = farbCfg();
+  c[farbModus()].bg = '';
+  farbenAnwenden();
+  saveData(); renderPage();
+  showToast('Hintergrund auf Standard zurückgesetzt','info');
 }
 function grundtonSetzen(id) {
   const c = farbCfg();
@@ -7310,6 +7391,7 @@ window.farbeSetzen       = farbeSetzen;
 window.farbeVorschau     = farbeVorschau;
 window.paletteAnwenden   = paletteAnwenden;
 window.grundtonSetzen    = grundtonSetzen;
+window.hintergrundZuruecksetzen = hintergrundZuruecksetzen;
 window.farbenZuruecksetzen = farbenZuruecksetzen;
 window.farbenAnwenden    = farbenAnwenden;
 window.farbCfg           = farbCfg;
