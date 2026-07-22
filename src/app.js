@@ -161,6 +161,11 @@ let _snoozedReminders = {};
 // Format je Eintrag: { v: 'Version', date: 'YYYY-MM-DD', changes: ['...','...'] }
 // Änderungen dürfen mit **Fett** Markierung versehen werden.
 const CHANGELOG = [
+  { v: '1.0.23', date: '2026-07-22', changes: [
+    '**Fehler behoben: Beim Klick auf das Kreisdiagramm blieb das Dashboard leer.** Eine intern fehlende Hilfsfunktion brach den Seitenaufbau ab – das Aufklappen der Einzelposten funktioniert jetzt wie vorgesehen',
+    'Sonderzeichen in Beschreibungen (etwa „&" oder spitze Klammern) werden jetzt korrekt dargestellt statt das Layout zu zerlegen',
+    'Zusätzlich abgesichert: Ein Problem im Diagramm kann das Dashboard nicht mehr unbenutzbar machen',
+  ]},
   { v: '1.0.22', date: '2026-07-22', changes: [
     '**Diagramm auf dem Dashboard ist jetzt anklickbar**: Ein Klick auf ein Tortenstück, einen Balken oder einen Eintrag in der Legende klappt darunter alle einzelnen Buchungen dieser Kategorie auf – mit Datum, Beschreibung, Betrag und Gesamtsumme',
     '**Fünf Diagramme statt einem**, umschaltbar über Pfeile links und rechts: Ausgaben nach Kategorie, nach Konto, im Jahresverlauf, Einnahmen gegen Ausgaben sowie die größten Einzelposten',
@@ -2244,6 +2249,13 @@ function dashDaten(chartId) {
   return { labels, data: labels.map(l => summe(grp[l])), posten: grp };
 }
 function summe(liste) { return (liste||[]).reduce((s,p) => s + (+p.v||0), 0); }
+// HTML-Escaping für Freitext aus Buchungen (Beschreibungen, Kategorienamen).
+// Ohne das würde ein '<' in einer Beschreibung das Markup zerlegen.
+function escapeHtml(s) {
+  return String(s == null ? '' : s)
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+    .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
 
 // Farbpalette – nutzt die eingestellte Akzentfarbe als Ausgangspunkt
 function dashFarben(n) {
@@ -2262,32 +2274,38 @@ function dashFarben(n) {
 
 // ── Aufklappbare Einzelposten unter dem Diagramm ───────────────────────────
 function dashDrilldownHtml() {
-  const sel = (state.config || {}).dashDrill;
-  if (!sel) return '';
-  const chart = DASH_CHARTS[dashChartIdx()];
-  const { posten } = dashDaten(chart.id);
-  const liste = (posten && posten[sel]) || [];
-  if (!liste.length) return '';
-  const ges = summe(liste);
-  const zeilen = liste.slice().sort((a,b) => b.v - a.v).map(p => `
-    <tr>
-      <td class="muted" style="white-space:nowrap">${p.date || '—'}</td>
-      <td>${escapeHtml(p.desc)}</td>
-      <td class="amount negative" style="text-align:right;white-space:nowrap">${fmtEur(p.v)}</td>
-    </tr>`).join('');
-  return `
-    <div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border)">
-      <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
-        <strong style="font-size:13px">${escapeHtml(sel)}</strong>
-        <span class="badge badge-muted">${liste.length} ${liste.length===1?'Posten':'Posten'}</span>
-        <span style="flex:1"></span>
-        <strong style="font-size:13px">${fmtEur(ges)}</strong>
-        <button class="btn-icon" onclick="dashDrillSchliessen()" title="Schließen">×</button>
-      </div>
-      <div class="table-wrap" style="max-height:230px;overflow-y:auto">
-        <table><tbody>${zeilen}</tbody></table>
-      </div>
-    </div>`;
+  try {
+    const sel = (state.config || {}).dashDrill;
+    if (!sel) return '';
+    const chart = DASH_CHARTS[dashChartIdx()];
+    const { posten } = dashDaten(chart.id);
+    const liste = (posten && posten[sel]) || [];
+    if (!liste.length) return '';
+    const ges = summe(liste);
+    const zeilen = liste.slice().sort((a,b) => b.v - a.v).map(p => `
+      <tr>
+        <td class="muted" style="white-space:nowrap">${escapeHtml(p.date) || '—'}</td>
+        <td>${escapeHtml(p.desc)}</td>
+        <td class="amount negative" style="text-align:right;white-space:nowrap">${fmtEur(p.v)}</td>
+      </tr>`).join('');
+    return `
+      <div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border)">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+          <strong style="font-size:13px">${escapeHtml(sel)}</strong>
+          <span class="badge badge-muted">${liste.length} Posten</span>
+          <span style="flex:1"></span>
+          <strong style="font-size:13px">${fmtEur(ges)}</strong>
+          <button class="btn-icon" onclick="dashDrillSchliessen()" title="Schließen">×</button>
+        </div>
+        <div class="table-wrap" style="max-height:230px;overflow-y:auto">
+          <table><tbody>${zeilen}</tbody></table>
+        </div>
+      </div>`;
+  } catch (e) {
+    // Ein Fehler hier darf niemals das gesamte Dashboard leer lassen.
+    console.error('Drilldown:', e);
+    return '';
+  }
 }
 function dashDrillOeffnen(label) {
   if (!state.config) state.config = {};
@@ -2301,6 +2319,13 @@ function dashDrillSchliessen() {
 }
 
 function renderCharts() {
+  try {
+    renderDashChart();
+  } catch (e) {
+    console.error('Dashboard-Diagramm:', e);
+  }
+}
+function renderDashChart() {
   const ctx = el('catChart');
   if (!ctx || typeof Chart === 'undefined') return;
   const chart = DASH_CHARTS[dashChartIdx()];
