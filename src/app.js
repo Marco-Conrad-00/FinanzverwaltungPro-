@@ -161,6 +161,14 @@ let _snoozedReminders = {};
 // Format je Eintrag: { v: 'Version', date: 'YYYY-MM-DD', changes: ['...','...'] }
 // Änderungen dürfen mit **Fett** Markierung versehen werden.
 const CHANGELOG = [
+  { v: '1.0.19', date: '2026-07-22', changes: [
+    '**Einstellungen komplett neu gegliedert**: statt einer langen Seite gibt es jetzt sechs Reiter – Profil, Konten & Jahre, Darstellung, Funktionen, Daten & Sicherheit, Über',
+    'Zusammengehöriges steht endlich beisammen: „Jahr archivieren" sitzt jetzt bei der Jahres-Verwaltung statt unter „System", und „Backup vor Update" direkt neben den Update-Einstellungen',
+    'Alle aktivierbaren Funktionen (Sparziel, ETF-Live-Daten, PV-Anlage, Erinnerungen, Kategorien) liegen gebündelt unter „Funktionen"',
+    'Der zuletzt geöffnete Reiter wird gemerkt',
+    '**Gefahrenzone sachlicher gestaltet**: ohne Symbole, mit klarem Hinweis auf ein Backup vor unwiderruflichen Aktionen',
+    'Sämtliche Einstellungen und Schaltflächen sind unverändert erhalten – nur die Anordnung ist neu',
+  ]},
   { v: '1.0.18', date: '2026-07-22', changes: [
     '**Neuer Bereich „PV-Anlage"** (optional): erfasst je Monat Produktion, Verbrauch, Netzbezug und Einspeisung',
     '**Autarkie** wird automatisch berechnet ((Verbrauch − Bezug) ÷ Verbrauch) und farblich bewertet – ab 80 % grün, ab 50 % gelb, darunter rot',
@@ -4255,16 +4263,42 @@ function setKontoIstStand(kontoId) {
   });
 }
 
+// ── Einstellungen: Tab-Verwaltung ───────────────────────────────────────────
+// Der zuletzt geöffnete Tab wird in config.settingsTab gemerkt.
+const SETTINGS_TABS = ['profil','konten','design','funktionen','daten','ueber'];
+function settingsTab() {
+  const t = (state.config || {}).settingsTab;
+  return SETTINGS_TABS.includes(t) ? t : 'profil';
+}
+function setSettingsTab(tab) {
+  if (!SETTINGS_TABS.includes(tab)) return;
+  if (!state.config) state.config = {};
+  state.config.settingsTab = tab;
+  saveData();
+  renderPage();
+  const pc = el('pageContent');
+  if (pc) pc.scrollTop = 0;
+}
+
 function einstellungen() {
   const meta = state.meta || {};
   const cfg  = state.config || {};
   const isDev = !!(window.EA && window.location && window.location.href.includes('localhost'));
+  const _setTab = settingsTab();
 
   return `<div>
 
-    <!-- ── PROFIL ──────────────────────────────────────────────────────── -->
-    <div class="settings-section">
-      <div class="settings-section-header">👤 Profil & Konto</div>
+    <div class="settings-tabs">
+        <button class="set-tab ${_setTab==='profil'?'set-tab-active':''}" onclick="setSettingsTab('profil')">👤 Profil</button>
+        <button class="set-tab ${_setTab==='konten'?'set-tab-active':''}" onclick="setSettingsTab('konten')">🏦 Konten &amp; Jahre</button>
+        <button class="set-tab ${_setTab==='design'?'set-tab-active':''}" onclick="setSettingsTab('design')">🎨 Darstellung</button>
+        <button class="set-tab ${_setTab==='funktionen'?'set-tab-active':''}" onclick="setSettingsTab('funktionen')">⚙️ Funktionen</button>
+        <button class="set-tab ${_setTab==='daten'?'set-tab-active':''}" onclick="setSettingsTab('daten')">💾 Daten &amp; Sicherheit</button>
+        <button class="set-tab ${_setTab==='ueber'?'set-tab-active':''}" onclick="setSettingsTab('ueber')">ℹ️ Über</button>
+    </div>
+
+      <div class="settings-section" style="display:${_setTab==='profil'?'block':'none'}">
+      <div class="settings-section-header">👤 Profil</div>
       <div class="card mb-2">
         <div class="form-grid form-grid-2">
           <label class="field">Name
@@ -4273,76 +4307,10 @@ function einstellungen() {
           <label class="field">Startjahr
             <input type="number" value="${meta.year || new Date().getFullYear()}" min="2020" max="2040" onchange="updateSetting('year',+this.value)"/>
           </label>
-          <label class="field">Startguthaben gesamt (${currencySymbol()})
-            <input type="number" value="${(+(meta.startgeld)||0).toFixed(2)}" step="0.01" onchange="updateSetting('startgeld',+this.value)"/>
-            <span style="font-size:11px;color:var(--muted)">Summe aller Konten-Startwerte. Aufteilung unten bei „Konten".</span>
-          </label>
           <label class="field">Währung
             <select onchange="updateSetting('waehrung',this.value)">
               ${['EUR','USD','CHF','GBP','JPY'].map(c=>'<option value="'+c+'"'+(( meta.waehrung||'EUR')===c?' selected':'')+'>'+c+'</option>').join('')}
-            </select>          </label>
-          <div class="field" style="grid-column:1/-1">
-            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
-              <strong>Konten</strong>
-              <button class="btn btn-sm btn-primary" onclick="addKonto()">+ Konto</button>
-            </div>
-            <div style="font-size:12px;color:var(--muted);margin-bottom:10px">
-              Lege deine Konten an (z.B. Girokonto, Trade). Häkchen „Cashflow" = Buchungen
-              dieses Kontos zählen zum Monats-Cashflow. Konten ohne Häkchen (z.B. Reserve/Trade)
-              laufen separat und beeinflussen den Cashflow nicht.
-            </div>
-            ${getKonten().map(k => `
-              <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px;flex-wrap:wrap">
-                <input type="text" value="${(k.name||'').replace(/"/g,'&quot;')}" onchange="updateKonto('${k.id}','name',this.value)" placeholder="Kontoname" style="flex:1;min-width:120px" />
-                <input type="number" value="${(+k.start||0).toFixed(2)}" step="0.01" onchange="updateKonto('${k.id}','start',+this.value)" style="width:110px;text-align:right" title="Startwert" /> ${currencySymbol()}
-                <label style="display:flex;align-items:center;gap:5px;font-size:13px;white-space:nowrap;cursor:pointer">
-                  <input type="checkbox" ${k.cashflow?'checked':''} onchange="updateKonto('${k.id}','cashflow',this.checked)" /> Cashflow
-                </label>
-                <span style="font-size:12px;color:var(--muted);white-space:nowrap">Saldo: ${fmtEur(kontoSaldo(k.id))}</span>
-                <button class="btn-icon" onclick="setKontoIstStand('${k.id}')" title="Aktuellen Kontostand setzen – legt eine Korrektur-Buchung an, damit der Saldo deinem echten Stand entspricht" style="width:auto;min-width:0;padding:0 8px;font-size:12px;white-space:nowrap;gap:4px">🎯 Stand setzen</button>
-                <button class="btn-icon" onclick="zeigeSaldoDiagnose('${k.id}')" title="Zeigt, woraus sich der Saldo zusammensetzt" style="width:auto;min-width:0;padding:0 8px;font-size:12px;white-space:nowrap;gap:4px">🔍 Diagnose</button>
-                <button class="btn-icon" onclick="resetKontoKorrekturen('${k.id}')" title="Entfernt alle alten Kontostand-Korrekturen dieses Kontos (danach neu „Stand setzen“)" style="width:auto;min-width:0;padding:0 8px;font-size:12px;white-space:nowrap;gap:4px">🧹 Korrekturen</button>
-                ${getKonten().length>1 ? `<button class="btn-icon danger" onclick="deleteKonto('${k.id}')" title="${deletePinIsSet()?'Konto löschen (PIN erforderlich)':'Konto löschen'}">${deletePinIsSet()?'🔒':'×'}</button>` : ''}
-              </div>`).join('')}
-            <div style="margin-top:14px;padding:12px 14px;border:1px solid var(--border);border-radius:10px;background:var(--surface-2)">
-              <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
-                <span style="font-size:16px">${deletePinIsSet()?'🔒':'🔓'}</span>
-                <strong style="font-size:13px">Konto-Löschschutz</strong>
-                <span style="font-size:12px;color:${deletePinIsSet()?'var(--green)':'var(--muted)'}">
-                  ${deletePinIsSet()?'aktiv – Löschen erfordert PIN':'nicht aktiv'}
-                </span>
-                <span style="flex:1"></span>
-                ${deletePinIsSet()
-                  ? `<button class="btn btn-sm btn-ghost" onclick="changeDeletePin()">PIN ändern</button>
-                     <button class="btn btn-sm btn-ghost" onclick="removeDeletePin()">Schutz entfernen</button>`
-                  : `<button class="btn btn-sm btn-primary" onclick="setDeletePin()">PIN festlegen</button>`}
-              </div>
-              <div style="font-size:12px;color:var(--muted);margin-top:8px">
-                Schützt das Löschen von Konten mit einer PIN. Die PIN wird nur als Prüfsumme
-                gespeichert, nicht im Klartext. Vergisst du sie, lässt sie sich nur mit der
-                aktuellen PIN ändern – notiere sie dir sicher.
-              </div>
-            </div>
-            <div style="margin-top:12px;padding:12px 14px;border:1px solid var(--border);border-radius:10px;background:var(--surface-2)">
-              <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
-                <span style="font-size:16px">☀️</span>
-                <strong style="font-size:13px">PV-Anlage</strong>
-                <span style="font-size:12px;color:${pvAktiv()?'var(--green)':'var(--muted)'}">
-                  ${pvAktiv()?'aktiv – Menüpunkt sichtbar':'nicht aktiv'}
-                </span>
-                <span style="flex:1"></span>
-                ${pvAktiv()
-                  ? `<button class="btn btn-sm btn-ghost" onclick="navigate('pv')">Öffnen</button>
-                     <button class="btn btn-sm btn-ghost" onclick="pvDeaktivieren()">Ausblenden</button>`
-                  : `<button class="btn btn-sm btn-primary" onclick="pvAktivieren()">Aktivieren</button>`}
-              </div>
-              <div style="font-size:12px;color:var(--muted);margin-top:8px">
-                Eigener Bereich für Photovoltaik: Produktion, Verbrauch, Netzbezug und
-                Einspeisung pro Monat – mit Autarkie, Eigenverbrauchsquote und
-                Jahresvergleich. Beim Ausblenden bleiben alle Daten erhalten.
-              </div>
-            </div>
-          </div>
+            </select>
           </label>
           <label class="field">Startseite
             <select onchange="updateConfig('startPage',this.value)">
@@ -4355,299 +4323,72 @@ function einstellungen() {
             </select>
           </label>
         </div>
-        <div style="margin-top:14px;padding-top:14px;border-top:1px solid var(--border);display:flex;align-items:center;gap:12px">
+        <div style="display:flex;align-items:center;gap:12px;margin-top:14px;padding-top:14px;border-top:1px solid var(--border)">
           <div class="div-switch ${(cfg.showStartupModal !== false) ? 'div-switch-on' : ''}" onclick="toggleConfig('showStartupModal')" style="cursor:pointer">
             <div class="div-switch-thumb"></div>
           </div>
-          <div style="flex:1">
+          <div>
             <div style="font-size:13px;font-weight:500">Schnellerfassung beim App-Start öffnen</div>
             <div style="font-size:11px;color:var(--muted);margin-top:2px">Modal für neue Einkäufe/Ausgaben/Einnahmen erscheint automatisch nach dem Start</div>
           </div>
         </div>
-        <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap">
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:14px;padding-top:14px;border-top:1px solid var(--border)">
           <button class="btn btn-ghost btn-sm" onclick="restartSetup()">🔄 Willkommensassistent erneut starten</button>
           <button class="btn btn-ghost btn-sm" onclick="startTour()">🧭 App-Tour erneut ansehen</button>
           <button class="btn btn-ghost btn-sm" onclick="showTermsModal(null, true)">📋 Nutzungsbedingungen anzeigen</button>
           <button class="btn btn-ghost btn-sm" onclick="showWhatsNewModal()">📝 Änderungsverlauf</button>
         </div>
-        <div style="margin-top:10px;display:flex;align-items:center;gap:8px;font-size:12px;color:var(--muted-text)">
-          ${termsAcceptedCurrent()
-            ? `<span style="color:var(--accent);font-weight:700">✓ Nutzungsbedingungen bestätigt</span>${state.meta?.termsAcceptedAt ? ' <span style="color:var(--muted-text)">· am ' + new Date(state.meta.termsAcceptedAt).toLocaleDateString('de-DE') + '</span>' : ''}`
-            : '<span style="color:var(--amber)">⚠ Nutzungsbedingungen noch nicht bestätigt</span>'}
-        </div>
       </div>
-    </div>
-
-    <!-- ── AUSSEHEN ─────────────────────────────────────────────────────── -->
-    <div class="settings-section">
-      <div class="settings-section-header">🎨 Aussehen & Design</div>
+      </div>
+      <div class="settings-section" style="display:${_setTab==='konten'?'block':'none'}">
+      <div class="settings-section-header">🏦 Konten</div>
       <div class="card mb-2">
-        <div class="form-grid form-grid-2">
-          <label class="field">Theme
-            <select onchange="applyTheme(this.value)">
-              ${[['light','☀️ Hell'],['dark','🌙 Dunkel'],['system','💻 System']].map(([v,l])=>'<option value="'+v+'"'+((cfg.theme||'light')===v?' selected':'')+'>'+l+'</option>').join('')}
-            </select>
-          </label>
-
+        <label class="field" style="max-width:320px">Startguthaben gesamt (${currencySymbol()})
+          <input type="number" step="0.01" value="${(getYearData().startBalance ?? meta.startgeld ?? 0)}" onchange="updateSetting('startgeld',+this.value)"/>
+          <span style="font-size:11px;color:var(--muted)">Summe aller Konten-Startwerte. Aufteilung unten bei „Konten".</span>
+        </label>
+        <div style="display:flex;justify-content:space-between;align-items:center;margin:16px 0 8px;padding-top:14px;border-top:1px solid var(--border)">
+          <strong>Konten</strong>
+          <button class="btn btn-sm btn-primary" onclick="addKonto()">+ Konto</button>
         </div>
-        <div style="display:flex;align-items:center;gap:12px;margin-top:10px">
-          <div class="div-switch ${cfg.compactMode?'div-switch-on':''}" onclick="toggleConfig('compactMode');document.body.classList.toggle('compact',(state.config||{}).compactMode)" style="cursor:pointer">
-            <div class="div-switch-thumb"></div>
-          </div>
-          <span style="font-size:13px">Kompaktmodus (weniger Abstände)</span>
+        <div style="font-size:12px;color:var(--muted);margin-bottom:10px">
+          Lege deine Konten an (z.B. Girokonto, Trade). Häkchen „Cashflow" = Buchungen
+          dieses Kontos zählen zum Monats-Cashflow. Konten ohne Häkchen (z.B. Reserve/Trade)
+          laufen separat und beeinflussen den Cashflow nicht.
         </div>
-      </div>
-    </div>
-
-    <!-- ── SPARZIEL ────────────────────────────────────────────────────── -->
-    <div class="settings-section">
-      <div class="settings-section-header">🎯 Sparziel</div>
-      <div class="card mb-2">
-        <div style="display:flex;align-items:center;gap:12px">
-          <div class="div-switch ${cfg.sparzielAktiv?'div-switch-on':''}" onclick="toggleConfig('sparzielAktiv')" style="cursor:pointer">
-            <div class="div-switch-thumb"></div>
+        ${getKonten().map(k => `
+          <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px;flex-wrap:wrap">
+            <input type="text" value="${(k.name||'').replace(/"/g,'&quot;')}" onchange="updateKonto('${k.id}','name',this.value)" placeholder="Kontoname" style="flex:1;min-width:120px" />
+            <input type="number" value="${(+k.start||0).toFixed(2)}" step="0.01" onchange="updateKonto('${k.id}','start',+this.value)" style="width:110px;text-align:right" title="Startwert" /> ${currencySymbol()}
+            <label style="display:flex;align-items:center;gap:5px;font-size:13px;white-space:nowrap;cursor:pointer">
+              <input type="checkbox" ${k.cashflow?'checked':''} onchange="updateKonto('${k.id}','cashflow',this.checked)" /> Cashflow
+            </label>
+            <span style="font-size:12px;color:var(--muted);white-space:nowrap">Saldo: ${fmtEur(kontoSaldo(k.id))}</span>
+            <button class="btn-icon" onclick="setKontoIstStand('${k.id}')" title="Aktuellen Kontostand setzen – legt eine Korrektur-Buchung an, damit der Saldo deinem echten Stand entspricht" style="width:auto;min-width:0;padding:0 8px;font-size:12px;white-space:nowrap;gap:4px">🎯 Stand setzen</button>
+            <button class="btn-icon" onclick="zeigeSaldoDiagnose('${k.id}')" title="Zeigt, woraus sich der Saldo zusammensetzt" style="width:auto;min-width:0;padding:0 8px;font-size:12px;white-space:nowrap;gap:4px">🔍 Diagnose</button>
+            <button class="btn-icon" onclick="resetKontoKorrekturen('${k.id}')" title="Entfernt alle alten Kontostand-Korrekturen dieses Kontos (danach neu „Stand setzen“)" style="width:auto;min-width:0;padding:0 8px;font-size:12px;white-space:nowrap;gap:4px">🧹 Korrekturen</button>
+            ${getKonten().length>1 ? `<button class="btn-icon danger" onclick="deleteKonto('${k.id}')" title="${deletePinIsSet()?'Konto löschen (PIN erforderlich)':'Konto löschen'}">${deletePinIsSet()?'🔒':'×'}</button>` : ''}
+          </div>`).join('')}
+        <div style="margin-top:14px;padding:12px 14px;border:1px solid var(--border);border-radius:10px;background:var(--surface-2)">
+          <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+            <span style="font-size:16px">${deletePinIsSet()?'🔒':'🔓'}</span>
+            <strong style="font-size:13px">Konto-Löschschutz</strong>
+            <span style="font-size:12px;color:${deletePinIsSet()?'var(--green)':'var(--muted)'}">
+              ${deletePinIsSet()?'aktiv – Löschen erfordert PIN':'nicht aktiv'}
+            </span>
+            <span style="flex:1"></span>
+            ${deletePinIsSet()
+              ? `<button class="btn btn-sm btn-ghost" onclick="changeDeletePin()">PIN ändern</button>
+                 <button class="btn btn-sm btn-ghost" onclick="removeDeletePin()">Schutz entfernen</button>`
+              : `<button class="btn btn-sm btn-primary" onclick="setDeletePin()">PIN festlegen</button>`}
           </div>
-          <span style="font-size:13px">Sparziel aktivieren (zeigt einen Fortschrittsbalken im Dashboard)</span>
-        </div>
-        ${cfg.sparzielAktiv ? `<div class="form-grid form-grid-2" style="margin-top:14px">
-          <label class="field">Zielsumme (€ pro Jahr)
-            <input type="number" step="100" min="0" value="${+cfg.sparzielSumme||0}" onchange="updateSparzielSumme(+this.value)" placeholder="z.B. 5000" />
-          </label>
-          <div class="field" style="justify-content:flex-end">
-            <div style="font-size:12px;color:var(--muted);line-height:1.5">Der Fortschritt zählt das im laufenden Jahr Gesparte bis zum aktuellen Monat — z.B. im Mai 5× deine monatliche Sparrate.</div>
-          </div>
-        </div>` : ''}
-      </div>
-    </div>
-
-    <!-- ── ERINNERUNGEN ────────────────────────────────────────────────── -->
-    <div class="settings-section">
-      <div class="settings-section-header">🔔 Erinnerungen</div>
-      <div class="card mb-2">
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px">
-          <span style="font-size:13px;color:var(--muted-text)">Erinnere dich an wiederkehrende Aufgaben (z.B. Zählerstände erfassen). Fällige Erinnerungen erscheinen als Banner in der App.</span>
-          <button class="btn btn-primary btn-sm" onclick="addReminder()">+ Erinnerung</button>
-        </div>
-        ${getReminders().length ? `<div class="table-wrap"><table>
-          <thead><tr><th>Bezeichnung</th><th>Zeitpunkt</th><th>Tag</th><th>Wiederholung</th><th>System-Hinweis</th><th>Aktiv</th><th></th></tr></thead>
-          <tbody>${getReminders().map(r => `<tr>
-            <td><input type="text" value="${(r.title||'').replace(/"/g,'&quot;')}" onchange="updateReminder('${r.id}','title',this.value)" style="background:transparent;border:none;color:var(--text);width:100%;font-size:13px" /></td>
-            <td><select onchange="updateReminder('${r.id}','when',this.value)">
-              <option value="monthEnd" ${r.when==='monthEnd'?'selected':''}>Monatsende</option>
-              <option value="monthStart" ${r.when==='monthStart'?'selected':''}>Monatsanfang</option>
-              <option value="day" ${r.when==='day'?'selected':''}>Bestimmter Tag</option>
-            </select></td>
-            <td>${r.when==='day' ? `<input type="number" min="1" max="31" value="${+r.day||1}" onchange="updateReminder('${r.id}','day',this.value)" style="width:56px" />` : '<span class="muted">–</span>'}</td>
-            <td><select onchange="updateReminder('${r.id}','repeatMonths',this.value)">
-              ${[[1,'monatlich'],[2,'alle 2 Monate'],[3,'alle 3 Monate'],[6,'alle 6 Monate'],[12,'jährlich']].map(([v,l])=>`<option value="${v}" ${(+r.repeatMonths||1)===v?'selected':''}>${l}</option>`).join('')}
-            </select></td>
-            <td><div class="div-switch ${r.notify?'div-switch-on':''}" onclick="updateReminder('${r.id}','notify',${r.notify?'false':'true'})" style="cursor:pointer;transform:scale(.85)"><div class="div-switch-thumb"></div></div></td>
-            <td><div class="div-switch ${r.active?'div-switch-on':''}" onclick="updateReminder('${r.id}','active',${r.active?'false':'true'})" style="cursor:pointer;transform:scale(.85)"><div class="div-switch-thumb"></div></div></td>
-            <td><button class="btn btn-ghost btn-sm" onclick="deleteReminder('${r.id}')" title="Löschen">✕</button></td>
-          </tr>`).join('')}</tbody>
-        </table></div>
-        <p style="font-size:11px;color:var(--muted-text);margin-top:10px;line-height:1.5">„System-Hinweis" zeigt zusätzlich eine Windows-Benachrichtigung (funktioniert in der installierten App). Der In-App-Banner erscheint immer, wenn eine Erinnerung fällig ist.</p>` : '<div class="empty-state" style="padding:20px"><div class="empty-icon">🔔</div><p>Noch keine Erinnerungen. Lege eine an, um an wiederkehrende Aufgaben erinnert zu werden.</p></div>'}
-      </div>
-    </div>
-
-    <!-- ── DATEN & BACKUP ──────────────────────────────────────────────── -->
-    <div class="settings-section">
-      <div class="settings-section-header">💾 Daten & Backup</div>
-      <div class="card mb-2">
-        <div style="display:flex;flex-direction:column;gap:12px">
-          <div style="background:var(--surface);border-radius:8px;padding:12px 14px">
-            <p style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;margin-bottom:4px">Speicherort</p>
-            <code style="font-size:12px;color:var(--ink)">%APPDATA%\finanzverwaltung-pro\data.json</code>
-            <div style="margin-top:8px;display:flex;gap:8px">
-              <button class="btn btn-ghost btn-sm" onclick="openDataFolder()">📂 Ordner öffnen</button>
-            </div>
-          </div>
-          <div style="display:flex;gap:10px;flex-wrap:wrap">
-            <button class="btn btn-ghost btn-sm" onclick="exportBackup()">⬇️ Backup exportieren</button>
-            <button class="btn btn-ghost btn-sm" onclick="importBackup()">⬆️ Backup importieren</button>
-            <button class="btn btn-ghost btn-sm" onclick="exportCSV()">📊 Als CSV exportieren</button>
-            <button class="btn btn-ghost btn-sm" onclick="exportJSON()">📄 Als JSON exportieren</button>
-          </div>
-          <div style="display:flex;flex-direction:column;gap:12px">
-            <div style="display:flex;align-items:center;gap:12px">
-              <div class="div-switch ${cfg.autoBackup?'div-switch-on':''}" onclick="onToggleAutoBackup()" style="cursor:pointer">
-                <div class="div-switch-thumb"></div>
-              </div>
-              <span style="font-size:13px">Automatische Backups</span>
-              ${cfg.lastBackup ? '<span style="font-size:11px;color:var(--muted);margin-left:auto">Letztes Backup: '+cfg.lastBackup+'</span>' : '<span style="font-size:11px;color:var(--muted);margin-left:auto">Noch kein Backup erstellt</span>'}
-            </div>
-            ${cfg.autoBackup ? `<div style="background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:12px 14px;display:grid;grid-template-columns:1fr 1fr;gap:14px;font-size:12px">
-              <div>
-                <div style="font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px">Backup-Ordner</div>
-                <div style="font-family:monospace;font-size:11px;word-break:break-all;margin-bottom:8px;color:var(--text)">${cfg.backupPath || '<span style="color:var(--red)">⚠ Kein Pfad gewählt</span>'}</div>
-                <div style="display:flex;gap:6px;flex-wrap:wrap">
-                  <button class="btn btn-ghost btn-sm" onclick="selectBackupPath()">📁 Ordner ändern</button>
-                  ${cfg.backupPath ? '<button class="btn btn-ghost btn-sm" onclick="openBackupFolder()">↗ Öffnen</button>' : ''}
-                </div>
-              </div>
-              <div>
-                <div style="font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px">Intervall</div>
-                <select onchange="updateConfig('backupInterval',this.value)" style="width:100%">
-                  <option value="">– Bitte wählen –</option>
-                  <option value="daily" ${cfg.backupInterval==='daily'?'selected':''}>Täglich</option>
-                  <option value="weekly" ${cfg.backupInterval==='weekly'?'selected':''}>Wöchentlich</option>
-                  <option value="monthly" ${cfg.backupInterval==='monthly'?'selected':''}>Monatlich</option>
-                </select>
-                ${cfg.nextBackupAt ? '<div style="font-size:10px;color:var(--muted);margin-top:6px">Nächste Sicherung: ' + new Date(cfg.nextBackupAt).toLocaleDateString('de-DE') + '</div>' : ''}
-              </div>
-            </div>` : ''}
+          <div style="font-size:12px;color:var(--muted);margin-top:8px">
+            Schützt das Löschen von Konten mit einer PIN. Die PIN wird nur als Prüfsumme
+            gespeichert, nicht im Klartext. Vergisst du sie, lässt sie sich nur mit der
+            aktuellen PIN ändern – notiere sie dir sicher.
           </div>
         </div>
       </div>
-    </div>
-
-    <!-- ── KATEGORIEN ─────────────────────────────────────────────────── -->
-    <div class="settings-section">
-      <div class="settings-section-header">🏷️ Kategorien verwalten</div>
-      ${['ausgabe','einnahme','einkauf'].map(group => {
-        const labels = { ausgabe: ['💸 Ausgaben-Kategorien', 'Standardkategorien wie „Essen", „Auto" + eigene'],
-                         einnahme: ['💰 Einnahmen-Typen', 'Standardtypen wie „Gehalt", „Verkauf" + eigene (gilt auch für wiederkehrende Einnahmen)'],
-                         einkauf: ['🛒 Einkaufs-Kategorien', 'Standardkategorien wie „Supermarkt", „Drogerie" + eigene'] };
-        const list = getCustomCats(group);
-        const isOpen = (window._catOpen = window._catOpen || {})[group];
-        return '<details class="card mb-2" style="padding:0;overflow:hidden"' + (isOpen ? ' open' : '') + ' ontoggle="window._catOpen[\'' + group + '\']=this.open">' +
-          '<summary style="cursor:pointer;padding:14px 16px;display:flex;align-items:center;justify-content:space-between;gap:10px;list-style:none;user-select:none">' +
-            '<span style="font-size:13px;font-weight:700">' + labels[group][0] + '</span>' +
-            '<span class="badge badge-muted" style="font-size:10px">' + list.length + ' eigene</span>' +
-          '</summary>' +
-          '<div style="padding:0 16px 14px">' +
-          '<p style="font-size:11px;color:var(--muted);margin-bottom:10px">' + labels[group][1] + '</p>' +
-          (list.length > 0
-            ? '<div class="table-wrap" style="margin-bottom:10px"><table><tbody>' + list.map((c,i) =>
-                '<tr><td style="padding:8px 12px;font-size:13px">' + c + '</td>' +
-                '<td style="padding:4px 8px;width:48px"><button class="btn-icon danger" onclick="removeCustomCatByGroup(&quot;' + group + '&quot;,' + i + ')">×</button></td></tr>'
-              ).join('') + '</tbody></table></div>'
-            : '<p style="font-size:11px;color:var(--muted);margin-bottom:10px">Noch keine eigenen Einträge in diesem Bereich.</p>') +
-          '<div style="display:flex;gap:8px">' +
-            '<input type="text" id="new_cat_' + group + '" placeholder="Neuer Eintrag…" style="flex:1" />' +
-            '<button class="btn btn-primary btn-sm" onclick="addCustomCatByGroup(&quot;' + group + '&quot;)">+ Hinzufügen</button>' +
-          '</div></div></details>';
-      }).join('')}
-    </div>
-
-    <!-- ── ETF EINSTELLUNGEN ──────────────────────────────────────────── -->
-    <div class="settings-section">
-      <div class="settings-section-header">📈 ETF & Depot</div>
-      <div class="card mb-2">
-        <div style="display:flex;flex-direction:column;gap:12px">
-          <div style="display:flex;align-items:center;gap:12px">
-            <div class="div-switch ${cfg.etfLiveDaten?'div-switch-on':''}" onclick="toggleConfig('etfLiveDaten')" style="cursor:pointer">
-              <div class="div-switch-thumb"></div>
-            </div>
-            <span style="font-size:13px">ETF Live-Daten aktivieren</span>
-          </div>
-          <div style="display:flex;align-items:center;gap:12px">
-            <div class="div-switch ${cfg.etfAutoRefresh?'div-switch-on':''}" onclick="toggleConfig('etfAutoRefresh')" style="cursor:pointer">
-              <div class="div-switch-thumb"></div>
-            </div>
-            <span style="font-size:13px">Automatisch beim Start aktualisieren</span>
-          </div>
-          <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
-            <span style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase">Intervall:</span>
-            <select style="width:140px" onchange="updateConfig('etfInterval',+this.value)">
-              ${[[0,'Manuell'],[15,'Alle 15 min'],[30,'Alle 30 min'],[60,'Jede Stunde']].map(([v,l])=>'<option value="'+v+'"'+((cfg.etfInterval||0)===v?' selected':'')+'>'+l+'</option>').join('')}
-            </select>
-            <span class="badge ${cfg.etfLiveDaten?'badge-green':'badge-muted'}">${cfg.etfLiveDaten?'✓ Live-Daten aktiv':'Live-Daten inaktiv'}</span>
-          </div>
-        </div>
-        <div style="margin-top:10px;background:var(--surface);border-radius:8px;padding:10px 12px">
-          <p style="font-size:11px;color:var(--muted)">Datenquelle: Yahoo Finance (kein API-Key erforderlich) · Ticker z.B. EUNL.DE für MSCI World</p>
-        </div>
-      </div>
-    </div>
-
-    <!-- ── FEEDBACK ───────────────────────────────────────────────────── -->
-    <div class="settings-section">
-      <div class="settings-section-header">💬 Feedback &amp; Ideen</div>
-      <div class="card mb-2">
-        <p style="font-size:13px;color:var(--muted-text);line-height:1.6;margin-bottom:14px">Hast du einen Fehler entdeckt, einen Wunsch oder eine Idee für eine neue Funktion? Ich freue mich über deine Rückmeldung! Ein Klick öffnet dein E-Mail-Programm mit einer vorbereiteten Nachricht.</p>
-        <div style="display:flex;flex-wrap:wrap;gap:8px">
-          <button class="btn btn-primary btn-sm" onclick="sendFeedback('bug')">🐞 Fehler melden</button>
-          <button class="btn btn-ghost btn-sm" onclick="sendFeedback('wunsch')">💡 Wunsch / Idee</button>
-          <button class="btn btn-ghost btn-sm" onclick="sendFeedback('erweiterung')">✨ Erweiterung vorschlagen</button>
-        </div>
-        <div style="display:flex;align-items:center;gap:8px;margin-top:12px;font-size:12px;color:var(--muted-text)">
-          <span>Senden über:</span>
-          <select onchange="updateConfig('feedbackVia',this.value);renderPage()" style="font-size:12px;padding:4px 8px">
-            <option value="mailto" ${(state.config?.feedbackVia||'mailto')==='mailto'?'selected':''}>✉️ Standard-Mailprogramm</option>
-            <option value="gmail" ${state.config?.feedbackVia==='gmail'?'selected':''}>🌐 Gmail im Browser</option>
-          </select>
-        </div>
-        <div style="margin-top:14px;background:var(--surface-2);border-radius:8px;padding:10px 14px;display:flex;align-items:center;justify-content:space-between;gap:10px">
-          <div>
-            <p style="font-size:10px;font-weight:700;color:var(--muted-text);text-transform:uppercase;letter-spacing:.06em;margin-bottom:2px">E-Mail</p>
-            <p style="font-size:13px;font-weight:600;color:var(--accent)">Marco.Conrad00@gmail.com</p>
-          </div>
-          <button class="btn btn-ghost btn-sm" onclick="navigator.clipboard.writeText('Marco.Conrad00@gmail.com').then(()=>showToast('E-Mail kopiert!'))">📋 Kopieren</button>
-        </div>
-        <p style="font-size:11px;color:var(--muted-text);margin-top:10px">Deine App-Version wird automatisch mitgesendet – das hilft mir bei der Zuordnung.</p>
-      </div>
-    </div>
-
-    <!-- ── ENTWICKLUNG UNTERSTÜTZEN ───────────────────────────────────── -->
-    <div class="settings-section">
-      <div class="settings-section-header">💖 Entwicklung unterstützen</div>      <div class="card mb-2" style="background:linear-gradient(135deg,color-mix(in srgb,var(--accent) 8%,var(--paper)),var(--paper));border-color:color-mix(in srgb,var(--accent) 30%,var(--border))">
-        <div style="display:flex;align-items:flex-start;gap:16px;flex-wrap:wrap">
-          <div style="flex:1;min-width:200px">
-            <p style="font-size:14px;font-weight:700;margin-bottom:6px">Finanzverwaltung Pro</p>
-            <p style="font-size:12px;color:var(--muted-text);margin-bottom:12px;line-height:1.6">Diese App wird privat entwickelt und kostenlos zur Verfügung gestellt. Wenn dir die App gefällt und du die Weiterentwicklung unterstützen möchtest, freue ich mich über eine kleine freiwillige Spende.</p>
-            <div style="background:var(--surface-2);border-radius:8px;padding:10px 14px;display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:8px">
-              <div>
-                <p style="font-size:10px;font-weight:700;color:var(--muted-text);text-transform:uppercase;letter-spacing:.06em;margin-bottom:2px">PayPal</p>
-                <p style="font-size:13px;font-weight:600;color:var(--accent)">Marco.Conrad00@gmail.com</p>
-              </div>
-              <button class="btn btn-ghost btn-sm" onclick="navigator.clipboard.writeText('Marco.Conrad00@gmail.com').then(()=>showToast('E-Mail kopiert!'))">📋 Kopieren</button>
-            </div>
-            <p style="font-size:11px;color:var(--muted-text)">Jede Unterstützung wird wertgeschätzt 🙏</p>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <!-- ── SYSTEM ─────────────────────────────────────────────────────── -->
-    <div class="settings-section">
-      <div class="settings-section-header">🖥️ System</div>
-      <div class="card mb-2">
-        <div style="display:flex;flex-direction:column;gap:10px">
-          <div style="display:flex;gap:8px;flex-wrap:wrap">
-            <button class="btn btn-ghost btn-sm" onclick="createDesktopShortcut()">🖥 Desktop-Verknüpfung erstellen</button>
-            <button class="btn btn-ghost btn-sm" onclick="archiveYear()">📦 Jahr archivieren & PDF</button>
-          </div>
-          <div style="font-size:11px;color:var(--muted)">
-            <span id="creditsVersion">v1.01</span> · Finanzverwaltung Pro · <a href="mailto:marco.conrad00@gmail.com" style="color:var(--accent)">marco.conrad00@gmail.com</a>
-          </div>
-          <div style="background:var(--amber-bg);border-radius:6px;padding:8px 12px">
-            <p style="font-size:11px;color:var(--amber);font-weight:600">⚠️ Diese App kann Bugs enthalten. Keine Haftung für fehlerhafte Berechnungen.</p>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <!-- ── UPDATES ───────────────────────────────────────────────────── -->
-    <div class="settings-section">
-      <div class="settings-section-header">🔄 Updates</div>
-      <div class="card mb-2">
-        <div style="display:flex;align-items:center;gap:12px;margin-bottom:14px">
-          <div class="div-switch ${cfg.autoBackupBeforeUpdate?'div-switch-on':''}" onclick="toggleConfig('autoBackupBeforeUpdate')" style="cursor:pointer">
-            <div class="div-switch-thumb"></div>
-          </div>
-          <span style="font-size:13px">Automatisches Backup vor jedem Update erstellen</span>
-        </div>
-        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
-          <button class="btn btn-primary btn-sm" onclick="openUpdateManager()">🔄 Nach Updates suchen</button>
-          <span style="font-size:12px;color:var(--muted)">Aktuelle Version: <span id="creditsVersion2">v1.01</span></span>
-        </div>
-        <p style="font-size:11px;color:var(--muted);margin-top:10px;line-height:1.5">Prüft, ob eine neuere Version verfügbar ist. Ist das Auto-Backup aktiviert, wird vor dem Einspielen automatisch eine Sicherung deiner Daten angelegt.</p>
-      </div>
-    </div>
-
-    <!-- ── JAHRES-VERWALTUNG ─────────────────────────────────────────── -->
-    <div class="settings-section">
       <div class="settings-section-header">📅 Jahres-Verwaltung</div>
       <div class="card mb-2">
         ${(() => {
@@ -4701,10 +4442,232 @@ function einstellungen() {
           return html;
         })()}
       </div>
-    </div>
+      <div class="card mb-2">
+        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+          <button class="btn btn-ghost btn-sm" onclick="archiveYear()">📦 Jahr archivieren &amp; PDF</button>
+          <span style="font-size:12px;color:var(--muted)">Erstellt PDF-Bericht und Backup, danach folgt der Neues-Jahr-Dialog.</span>
+        </div>
+      </div>
+      </div>
+      <div class="settings-section" style="display:${_setTab==='design'?'block':'none'}">
+      <div class="settings-section-header">🎨 Aussehen & Design</div>
+      <div class="card mb-2">
+        <div class="form-grid form-grid-2">
+          <label class="field">Theme
+            <select onchange="applyTheme(this.value)">
+              ${[['light','☀️ Hell'],['dark','🌙 Dunkel'],['system','💻 System']].map(([v,l])=>'<option value="'+v+'"'+((cfg.theme||'light')===v?' selected':'')+'>'+l+'</option>').join('')}
+            </select>
+          </label>
 
-    <!-- ── PAPIERKORB ───────────────────────────────────────────────── -->
-    <div class="settings-section">
+        </div>
+        <div style="display:flex;align-items:center;gap:12px;margin-top:10px">
+          <div class="div-switch ${cfg.compactMode?'div-switch-on':''}" onclick="toggleConfig('compactMode');document.body.classList.toggle('compact',(state.config||{}).compactMode)" style="cursor:pointer">
+            <div class="div-switch-thumb"></div>
+          </div>
+          <span style="font-size:13px">Kompaktmodus (weniger Abstände)</span>
+        </div>
+      </div>
+      </div>
+      <div class="settings-section" style="display:${_setTab==='funktionen'?'block':'none'}">
+      <div class="settings-section-header">🎯 Sparziel</div>
+      <div class="card mb-2">
+        <div style="display:flex;align-items:center;gap:12px">
+          <div class="div-switch ${cfg.sparzielAktiv?'div-switch-on':''}" onclick="toggleConfig('sparzielAktiv')" style="cursor:pointer">
+            <div class="div-switch-thumb"></div>
+          </div>
+          <span style="font-size:13px">Sparziel aktivieren (zeigt einen Fortschrittsbalken im Dashboard)</span>
+        </div>
+        ${cfg.sparzielAktiv ? `<div class="form-grid form-grid-2" style="margin-top:14px">
+          <label class="field">Zielsumme (€ pro Jahr)
+            <input type="number" step="100" min="0" value="${+cfg.sparzielSumme||0}" onchange="updateSparzielSumme(+this.value)" placeholder="z.B. 5000" />
+          </label>
+          <div class="field" style="justify-content:flex-end">
+            <div style="font-size:12px;color:var(--muted);line-height:1.5">Der Fortschritt zählt das im laufenden Jahr Gesparte bis zum aktuellen Monat — z.B. im Mai 5× deine monatliche Sparrate.</div>
+          </div>
+        </div>` : ''}
+      </div>
+
+      <div class="settings-section-header">📈 ETF & Depot</div>
+      <div class="card mb-2">
+        <div style="display:flex;flex-direction:column;gap:12px">
+          <div style="display:flex;align-items:center;gap:12px">
+            <div class="div-switch ${cfg.etfLiveDaten?'div-switch-on':''}" onclick="toggleConfig('etfLiveDaten')" style="cursor:pointer">
+              <div class="div-switch-thumb"></div>
+            </div>
+            <span style="font-size:13px">ETF Live-Daten aktivieren</span>
+          </div>
+          <div style="display:flex;align-items:center;gap:12px">
+            <div class="div-switch ${cfg.etfAutoRefresh?'div-switch-on':''}" onclick="toggleConfig('etfAutoRefresh')" style="cursor:pointer">
+              <div class="div-switch-thumb"></div>
+            </div>
+            <span style="font-size:13px">Automatisch beim Start aktualisieren</span>
+          </div>
+          <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+            <span style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase">Intervall:</span>
+            <select style="width:140px" onchange="updateConfig('etfInterval',+this.value)">
+              ${[[0,'Manuell'],[15,'Alle 15 min'],[30,'Alle 30 min'],[60,'Jede Stunde']].map(([v,l])=>'<option value="'+v+'"'+((cfg.etfInterval||0)===v?' selected':'')+'>'+l+'</option>').join('')}
+            </select>
+            <span class="badge ${cfg.etfLiveDaten?'badge-green':'badge-muted'}">${cfg.etfLiveDaten?'✓ Live-Daten aktiv':'Live-Daten inaktiv'}</span>
+          </div>
+        </div>
+        <div style="margin-top:10px;background:var(--surface);border-radius:8px;padding:10px 12px">
+          <p style="font-size:11px;color:var(--muted)">Datenquelle: Yahoo Finance (kein API-Key erforderlich) · Ticker z.B. EUNL.DE für MSCI World</p>
+        </div>
+      </div>
+
+      <div class="settings-section-header">☀️ PV-Anlage</div>
+      <div class="card mb-2">
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+          <span style="font-size:16px">${pvAktiv()?'☀️':'🌥️'}</span>
+          <strong style="font-size:13px">PV-Anlage</strong>
+          <span style="font-size:12px;color:${pvAktiv()?'var(--green)':'var(--muted)'}">
+            ${pvAktiv()?'aktiv – Menüpunkt sichtbar':'nicht aktiv'}
+          </span>
+          <span style="flex:1"></span>
+          ${pvAktiv()
+            ? `<button class="btn btn-sm btn-ghost" onclick="navigate('pv')">Öffnen</button>
+               <button class="btn btn-sm btn-ghost" onclick="pvDeaktivieren()">Ausblenden</button>`
+            : `<button class="btn btn-sm btn-primary" onclick="pvAktivieren()">Aktivieren</button>`}
+        </div>
+        <div style="font-size:12px;color:var(--muted);margin-top:8px">
+          Eigener Bereich für Photovoltaik: Produktion, Verbrauch, Netzbezug und
+          Einspeisung pro Monat – mit Autarkie, Eigenverbrauchsquote und
+          Jahresvergleich. Beim Ausblenden bleiben alle Daten erhalten.
+        </div>
+      </div>
+
+      <div class="settings-section-header">🔔 Erinnerungen</div>
+      <div class="card mb-2">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px">
+          <span style="font-size:13px;color:var(--muted-text)">Erinnere dich an wiederkehrende Aufgaben (z.B. Zählerstände erfassen). Fällige Erinnerungen erscheinen als Banner in der App.</span>
+          <button class="btn btn-primary btn-sm" onclick="addReminder()">+ Erinnerung</button>
+        </div>
+        ${getReminders().length ? `<div class="table-wrap"><table>
+          <thead><tr><th>Bezeichnung</th><th>Zeitpunkt</th><th>Tag</th><th>Wiederholung</th><th>System-Hinweis</th><th>Aktiv</th><th></th></tr></thead>
+          <tbody>${getReminders().map(r => `<tr>
+            <td><input type="text" value="${(r.title||'').replace(/"/g,'&quot;')}" onchange="updateReminder('${r.id}','title',this.value)" style="background:transparent;border:none;color:var(--text);width:100%;font-size:13px" /></td>
+            <td><select onchange="updateReminder('${r.id}','when',this.value)">
+              <option value="monthEnd" ${r.when==='monthEnd'?'selected':''}>Monatsende</option>
+              <option value="monthStart" ${r.when==='monthStart'?'selected':''}>Monatsanfang</option>
+              <option value="day" ${r.when==='day'?'selected':''}>Bestimmter Tag</option>
+            </select></td>
+            <td>${r.when==='day' ? `<input type="number" min="1" max="31" value="${+r.day||1}" onchange="updateReminder('${r.id}','day',this.value)" style="width:56px" />` : '<span class="muted">–</span>'}</td>
+            <td><select onchange="updateReminder('${r.id}','repeatMonths',this.value)">
+              ${[[1,'monatlich'],[2,'alle 2 Monate'],[3,'alle 3 Monate'],[6,'alle 6 Monate'],[12,'jährlich']].map(([v,l])=>`<option value="${v}" ${(+r.repeatMonths||1)===v?'selected':''}>${l}</option>`).join('')}
+            </select></td>
+            <td><div class="div-switch ${r.notify?'div-switch-on':''}" onclick="updateReminder('${r.id}','notify',${r.notify?'false':'true'})" style="cursor:pointer;transform:scale(.85)"><div class="div-switch-thumb"></div></div></td>
+            <td><div class="div-switch ${r.active?'div-switch-on':''}" onclick="updateReminder('${r.id}','active',${r.active?'false':'true'})" style="cursor:pointer;transform:scale(.85)"><div class="div-switch-thumb"></div></div></td>
+            <td><button class="btn btn-ghost btn-sm" onclick="deleteReminder('${r.id}')" title="Löschen">✕</button></td>
+          </tr>`).join('')}</tbody>
+        </table></div>
+        <p style="font-size:11px;color:var(--muted-text);margin-top:10px;line-height:1.5">„System-Hinweis" zeigt zusätzlich eine Windows-Benachrichtigung (funktioniert in der installierten App). Der In-App-Banner erscheint immer, wenn eine Erinnerung fällig ist.</p>` : '<div class="empty-state" style="padding:20px"><div class="empty-icon">🔔</div><p>Noch keine Erinnerungen. Lege eine an, um an wiederkehrende Aufgaben erinnert zu werden.</p></div>'}
+      </div>
+
+      <div class="settings-section-header">🏷️ Kategorien verwalten</div>
+      ${['ausgabe','einnahme','einkauf'].map(group => {
+        const labels = { ausgabe: ['💸 Ausgaben-Kategorien', 'Standardkategorien wie „Essen", „Auto" + eigene'],
+                         einnahme: ['💰 Einnahmen-Typen', 'Standardtypen wie „Gehalt", „Verkauf" + eigene (gilt auch für wiederkehrende Einnahmen)'],
+                         einkauf: ['🛒 Einkaufs-Kategorien', 'Standardkategorien wie „Supermarkt", „Drogerie" + eigene'] };
+        const list = getCustomCats(group);
+        const isOpen = (window._catOpen = window._catOpen || {})[group];
+        return '<details class="card mb-2" style="padding:0;overflow:hidden"' + (isOpen ? ' open' : '') + ' ontoggle="window._catOpen[\'' + group + '\']=this.open">' +
+          '<summary style="cursor:pointer;padding:14px 16px;display:flex;align-items:center;justify-content:space-between;gap:10px;list-style:none;user-select:none">' +
+            '<span style="font-size:13px;font-weight:700">' + labels[group][0] + '</span>' +
+            '<span class="badge badge-muted" style="font-size:10px">' + list.length + ' eigene</span>' +
+          '</summary>' +
+          '<div style="padding:0 16px 14px">' +
+          '<p style="font-size:11px;color:var(--muted);margin-bottom:10px">' + labels[group][1] + '</p>' +
+          (list.length > 0
+            ? '<div class="table-wrap" style="margin-bottom:10px"><table><tbody>' + list.map((c,i) =>
+                '<tr><td style="padding:8px 12px;font-size:13px">' + c + '</td>' +
+                '<td style="padding:4px 8px;width:48px"><button class="btn-icon danger" onclick="removeCustomCatByGroup(&quot;' + group + '&quot;,' + i + ')">×</button></td></tr>'
+              ).join('') + '</tbody></table></div>'
+            : '<p style="font-size:11px;color:var(--muted);margin-bottom:10px">Noch keine eigenen Einträge in diesem Bereich.</p>') +
+          '<div style="display:flex;gap:8px">' +
+            '<input type="text" id="new_cat_' + group + '" placeholder="Neuer Eintrag…" style="flex:1" />' +
+            '<button class="btn btn-primary btn-sm" onclick="addCustomCatByGroup(&quot;' + group + '&quot;)">+ Hinzufügen</button>' +
+          '</div></div></details>';
+      }).join('')}
+      </div>
+      <div class="settings-section" style="display:${_setTab==='daten'?'block':'none'}">
+      <div class="settings-section-header">💾 Daten & Backup</div>
+      <div class="card mb-2">
+        <div style="display:flex;flex-direction:column;gap:12px">
+          <div style="background:var(--surface);border-radius:8px;padding:12px 14px">
+            <p style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;margin-bottom:4px">Speicherort</p>
+            <code style="font-size:12px;color:var(--ink)">%APPDATA%\finanzverwaltung-pro\data.json</code>
+            <div style="margin-top:8px;display:flex;gap:8px">
+              <button class="btn btn-ghost btn-sm" onclick="openDataFolder()">📂 Ordner öffnen</button>
+            </div>
+          </div>
+          <div style="display:flex;gap:10px;flex-wrap:wrap">
+            <button class="btn btn-ghost btn-sm" onclick="exportBackup()">⬇️ Backup exportieren</button>
+            <button class="btn btn-ghost btn-sm" onclick="importBackup()">⬆️ Backup importieren</button>
+            <button class="btn btn-ghost btn-sm" onclick="exportCSV()">📊 Als CSV exportieren</button>
+            <button class="btn btn-ghost btn-sm" onclick="exportJSON()">📄 Als JSON exportieren</button>
+          </div>
+          <div style="display:flex;flex-direction:column;gap:12px">
+            <div style="display:flex;align-items:center;gap:12px">
+              <div class="div-switch ${cfg.autoBackup?'div-switch-on':''}" onclick="onToggleAutoBackup()" style="cursor:pointer">
+                <div class="div-switch-thumb"></div>
+              </div>
+              <span style="font-size:13px">Automatische Backups</span>
+              ${cfg.lastBackup ? '<span style="font-size:11px;color:var(--muted);margin-left:auto">Letztes Backup: '+cfg.lastBackup+'</span>' : '<span style="font-size:11px;color:var(--muted);margin-left:auto">Noch kein Backup erstellt</span>'}
+            </div>
+            ${cfg.autoBackup ? `<div style="background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:12px 14px;display:grid;grid-template-columns:1fr 1fr;gap:14px;font-size:12px">
+              <div>
+                <div style="font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px">Backup-Ordner</div>
+                <div style="font-family:monospace;font-size:11px;word-break:break-all;margin-bottom:8px;color:var(--text)">${cfg.backupPath || '<span style="color:var(--red)">⚠ Kein Pfad gewählt</span>'}</div>
+                <div style="display:flex;gap:6px;flex-wrap:wrap">
+                  <button class="btn btn-ghost btn-sm" onclick="selectBackupPath()">📁 Ordner ändern</button>
+                  ${cfg.backupPath ? '<button class="btn btn-ghost btn-sm" onclick="openBackupFolder()">↗ Öffnen</button>' : ''}
+                </div>
+              </div>
+              <div>
+                <div style="font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px">Intervall</div>
+                <select onchange="updateConfig('backupInterval',this.value)" style="width:100%">
+                  <option value="">– Bitte wählen –</option>
+                  <option value="daily" ${cfg.backupInterval==='daily'?'selected':''}>Täglich</option>
+                  <option value="weekly" ${cfg.backupInterval==='weekly'?'selected':''}>Wöchentlich</option>
+                  <option value="monthly" ${cfg.backupInterval==='monthly'?'selected':''}>Monatlich</option>
+                </select>
+                ${cfg.nextBackupAt ? '<div style="font-size:10px;color:var(--muted);margin-top:6px">Nächste Sicherung: ' + new Date(cfg.nextBackupAt).toLocaleDateString('de-DE') + '</div>' : ''}
+              </div>
+            </div>` : ''}
+          </div>
+        </div>
+      </div>
+
+      <div class="settings-section-header">🔄 Updates</div>
+      <div class="card mb-2">
+        <div style="display:flex;align-items:center;gap:12px;margin-bottom:14px">
+          <div class="div-switch ${cfg.autoBackupBeforeUpdate?'div-switch-on':''}" onclick="toggleConfig('autoBackupBeforeUpdate')" style="cursor:pointer">
+            <div class="div-switch-thumb"></div>
+          </div>
+          <span style="font-size:13px">Automatisches Backup vor jedem Update erstellen</span>
+        </div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+          <button class="btn btn-primary btn-sm" onclick="openUpdateManager()">🔄 Nach Updates suchen</button>
+          <span style="font-size:12px;color:var(--muted)">Aktuelle Version: <span id="creditsVersion2">v1.01</span></span>
+        </div>
+        <p style="font-size:11px;color:var(--muted);margin-top:10px;line-height:1.5">Prüft, ob eine neuere Version verfügbar ist. Ist das Auto-Backup aktiviert, wird vor dem Einspielen automatisch eine Sicherung deiner Daten angelegt.</p>
+      </div>
+
+      <div class="settings-section-header">🖥️ System</div>
+      <div class="card mb-2">
+        <div style="display:flex;flex-direction:column;gap:10px">
+          <div style="display:flex;gap:8px;flex-wrap:wrap">
+            <button class="btn btn-ghost btn-sm" onclick="createDesktopShortcut()">🖥 Desktop-Verknüpfung erstellen</button>
+          </div>
+          <div style="font-size:11px;color:var(--muted)">
+            <span id="creditsVersion">v1.01</span> · Finanzverwaltung Pro · <a href="mailto:marco.conrad00@gmail.com" style="color:var(--accent)">marco.conrad00@gmail.com</a>
+          </div>
+          <div style="background:var(--amber-bg);border-radius:6px;padding:8px 12px">
+            <p style="font-size:11px;color:var(--amber);font-weight:600">⚠️ Diese App kann Bugs enthalten. Keine Haftung für fehlerhafte Berechnungen.</p>
+          </div>
+        </div>
+      </div>
+
       <div class="settings-section-header">🗑️ Papierkorb</div>
       <div class="card mb-2">
         <p style="font-size:12px;color:var(--muted);margin-bottom:12px">Gelöschte Einträge bleiben 30 Tage wiederherstellbar.</p>
@@ -4727,25 +4690,70 @@ function einstellungen() {
           <button class="btn btn-danger btn-sm" onclick="emptyTrash()">🗑 Papierkorb leeren</button>`
         : '<p style="font-size:12px;color:var(--muted)">Papierkorb ist leer.</p>'}
       </div>
-    </div>
 
-    <!-- ── GEFAHRENZONE ──────────────────────────────────────────────── -->
-    <div class="settings-section">
-      <div class="settings-section-header" style="opacity:.85">⚠️ Gefahrenzone</div>
-      <div class="card">
-        <p style="font-size:12px;color:var(--muted);margin-bottom:14px">Diese Aktionen können nicht rückgängig gemacht werden.</p>
-        <div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px;margin-bottom:14px">
-          ${[['einkaeufe','🛒 Einkäufe'],['ausgaben','💸 Ausgaben'],['einnahmen','💰 Einnahmen'],
-             ['spesen','✈️ Spesen'],['sparen','🏦 Sparen'],['zaehler','⚡ Zähler']].map(([k,l])=>{
-            return '<button class="btn-danger-outline" onclick="clearSingle(&quot;'+k+'&quot;)">🗑 '+l+'</button>';
+      <div class="settings-section-header">Gefahrenzone</div>
+      <div class="card" style="border-color:color-mix(in srgb,var(--red) 35%,var(--border))">
+        <p style="font-size:13px;color:var(--text);margin-bottom:4px;font-weight:600">Unwiderrufliche Aktionen</p>
+        <p style="font-size:12px;color:var(--muted);margin-bottom:14px;line-height:1.5">
+          Die folgenden Aktionen löschen Daten dauerhaft und können nicht rückgängig
+          gemacht werden. Lege vorher ein Backup an.
+        </p>
+        <p style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px">Einzelne Bereiche leeren (${getSelectedYear()})</p>
+        <div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px;margin-bottom:16px">
+          ${[['einkaeufe','Einkäufe'],['ausgaben','Ausgaben'],['einnahmen','Einnahmen'],
+             ['spesen','Spesen'],['sparen','Sparen'],['zaehler','Zähler']].map(([k,l])=>{
+            return '<button class="btn-danger-outline" onclick="clearSingle(&quot;'+k+'&quot;)">'+l+'</button>';
           }).join('')}
         </div>
-        <div style="border-top:1px solid var(--border);padding-top:12px;display:flex;gap:8px;flex-wrap:wrap">
-          <button class="btn-danger-solid" onclick="clearAllData()">🗑 Alle Einträge löschen</button>
-          <button class="btn-danger-solid" onclick="resetApp()">💀 App komplett zurücksetzen</button>
+        <div style="border-top:1px solid var(--border);padding-top:14px;display:flex;gap:8px;flex-wrap:wrap">
+          <button class="btn-danger-solid" onclick="clearAllData()">Alle Einträge löschen</button>
+          <button class="btn-danger-solid" onclick="resetApp()">App komplett zurücksetzen</button>
         </div>
       </div>
-    </div>
+      </div>
+      <div class="settings-section" style="display:${_setTab==='ueber'?'block':'none'}">
+      <div class="settings-section-header">💬 Feedback &amp; Ideen</div>
+      <div class="card mb-2">
+        <p style="font-size:13px;color:var(--muted-text);line-height:1.6;margin-bottom:14px">Hast du einen Fehler entdeckt, einen Wunsch oder eine Idee für eine neue Funktion? Ich freue mich über deine Rückmeldung! Ein Klick öffnet dein E-Mail-Programm mit einer vorbereiteten Nachricht.</p>
+        <div style="display:flex;flex-wrap:wrap;gap:8px">
+          <button class="btn btn-primary btn-sm" onclick="sendFeedback('bug')">🐞 Fehler melden</button>
+          <button class="btn btn-ghost btn-sm" onclick="sendFeedback('wunsch')">💡 Wunsch / Idee</button>
+          <button class="btn btn-ghost btn-sm" onclick="sendFeedback('erweiterung')">✨ Erweiterung vorschlagen</button>
+        </div>
+        <div style="display:flex;align-items:center;gap:8px;margin-top:12px;font-size:12px;color:var(--muted-text)">
+          <span>Senden über:</span>
+          <select onchange="updateConfig('feedbackVia',this.value);renderPage()" style="font-size:12px;padding:4px 8px">
+            <option value="mailto" ${(state.config?.feedbackVia||'mailto')==='mailto'?'selected':''}>✉️ Standard-Mailprogramm</option>
+            <option value="gmail" ${state.config?.feedbackVia==='gmail'?'selected':''}>🌐 Gmail im Browser</option>
+          </select>
+        </div>
+        <div style="margin-top:14px;background:var(--surface-2);border-radius:8px;padding:10px 14px;display:flex;align-items:center;justify-content:space-between;gap:10px">
+          <div>
+            <p style="font-size:10px;font-weight:700;color:var(--muted-text);text-transform:uppercase;letter-spacing:.06em;margin-bottom:2px">E-Mail</p>
+            <p style="font-size:13px;font-weight:600;color:var(--accent)">Marco.Conrad00@gmail.com</p>
+          </div>
+          <button class="btn btn-ghost btn-sm" onclick="navigator.clipboard.writeText('Marco.Conrad00@gmail.com').then(()=>showToast('E-Mail kopiert!'))">📋 Kopieren</button>
+        </div>
+        <p style="font-size:11px;color:var(--muted-text);margin-top:10px">Deine App-Version wird automatisch mitgesendet – das hilft mir bei der Zuordnung.</p>
+      </div>
+
+      <div class="settings-section-header">💖 Entwicklung unterstützen</div>      <div class="card mb-2" style="background:linear-gradient(135deg,color-mix(in srgb,var(--accent) 8%,var(--paper)),var(--paper));border-color:color-mix(in srgb,var(--accent) 30%,var(--border))">
+        <div style="display:flex;align-items:flex-start;gap:16px;flex-wrap:wrap">
+          <div style="flex:1;min-width:200px">
+            <p style="font-size:14px;font-weight:700;margin-bottom:6px">Finanzverwaltung Pro</p>
+            <p style="font-size:12px;color:var(--muted-text);margin-bottom:12px;line-height:1.6">Diese App wird privat entwickelt und kostenlos zur Verfügung gestellt. Wenn dir die App gefällt und du die Weiterentwicklung unterstützen möchtest, freue ich mich über eine kleine freiwillige Spende.</p>
+            <div style="background:var(--surface-2);border-radius:8px;padding:10px 14px;display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:8px">
+              <div>
+                <p style="font-size:10px;font-weight:700;color:var(--muted-text);text-transform:uppercase;letter-spacing:.06em;margin-bottom:2px">PayPal</p>
+                <p style="font-size:13px;font-weight:600;color:var(--accent)">Marco.Conrad00@gmail.com</p>
+              </div>
+              <button class="btn btn-ghost btn-sm" onclick="navigator.clipboard.writeText('Marco.Conrad00@gmail.com').then(()=>showToast('E-Mail kopiert!'))">📋 Kopieren</button>
+            </div>
+            <p style="font-size:11px;color:var(--muted-text)">Jede Unterstützung wird wertgeschätzt 🙏</p>
+          </div>
+        </div>
+      </div>
+      </div>
 
   </div>`;
 }
@@ -7076,6 +7084,8 @@ window.pvToggleChartJahr = pvToggleChartJahr;
 window.pvToggleVergleich = pvToggleVergleich;
 window.pvNavSichtbarkeit = pvNavSichtbarkeit;
 window.pvAktiv           = pvAktiv;
+window.setSettingsTab    = setSettingsTab;
+window.settingsTab       = settingsTab;
 window.setDeletePin      = setDeletePin;
 window.changeDeletePin   = changeDeletePin;
 window.removeDeletePin   = removeDeletePin;

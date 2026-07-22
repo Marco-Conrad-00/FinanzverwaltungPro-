@@ -544,3 +544,28 @@ button:disabled {
 .calc-btn.calc-fn{ color:var(--muted-text); font-size:15px; }
 .calc-btn.calc-eq{ background:var(--accent); color:#fff; font-weight:700; }
 .calc-btn.calc-eq:hover{ background:var(--accent); filter:brightness(1.1); }
+
+/* ── Einstellungen: Tab-Navigation ─────────────────────────────────────── */
+.settings-tabs{
+  display:flex; flex-wrap:wrap; gap:4px; margin-bottom:22px;
+  padding:5px; background:var(--surface); border:1px solid var(--border);
+  border-radius:12px; position:sticky; top:0; z-index:20;
+}
+.set-tab{
+  flex:1 1 auto; min-width:104px;
+  padding:9px 14px; border:1px solid transparent; border-radius:8px;
+  background:transparent; color:var(--muted);
+  font-size:13px; font-weight:600; font-family:inherit;
+  cursor:pointer; white-space:nowrap; text-align:center;
+  transition:background .15s ease, color .15s ease, border-color .15s ease;
+}
+.set-tab:hover{ background:var(--surface-2); color:var(--text); }
+.set-tab-active{
+  background:color-mix(in srgb, var(--accent) 14%, transparent);
+  border-color:color-mix(in srgb, var(--accent) 38%, transparent);
+  color:var(--accent);
+}
+.theme-dark .set-tab-active{ color:var(--accent2); }
+@media (max-width:760px){
+  .set-tab{ min-width:0; flex:1 1 30%; font-size:12px; padding:8px 6px; }
+}
