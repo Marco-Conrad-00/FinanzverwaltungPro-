@@ -161,6 +161,15 @@ let _snoozedReminders = {};
 // Format je Eintrag: { v: 'Version', date: 'YYYY-MM-DD', changes: ['...','...'] }
 // Änderungen dürfen mit **Fett** Markierung versehen werden.
 const CHANGELOG = [
+  { v: '1.0.20', date: '2026-07-22', changes: [
+    '**Farben frei anpassbar**: In den Einstellungen unter „Darstellung" lassen sich Akzentfarbe, Zweitfarbe sowie die Farben für positive und negative Beträge einstellen',
+    '**Zehn fertige Farbwelten** (Türkis, Blau, Indigo, Violett, Beere, Rot, Bernstein, Grün, Oliv, Grafit) für die schnelle Auswahl – oder ein freier Farbwähler für jeden beliebigen Ton',
+    '**Heller und dunkler Modus getrennt einstellbar**: dieselbe Farbe wirkt auf hellem und dunklem Grund unterschiedlich, daher merkt sich die App für beide Modi eigene Werte',
+    '**Farbanpassung im dunklen Modus jetzt überhaupt erst möglich** – bisher war die Akzentfarbe dort fest vorgegeben',
+    '**Vier Grundtöne** für den dunklen Modus: Slate, Neutralgrau, Marineblau und Anthrazit',
+    '**Automatische Lesbarkeitsprüfung**: Die Schriftfarbe auf Buttons wird passend zur gewählten Farbe auf Schwarz oder Weiß gesetzt; bei zu geringem Kontrast erscheint ein Hinweis',
+    'Live-Vorschau beim Ziehen im Farbwähler, Vorschau-Leiste mit Beispiel-Elementen und ein Knopf zum Zurücksetzen auf die Standardfarben',
+  ]},
   { v: '1.0.19', date: '2026-07-22', changes: [
     '**Einstellungen komplett neu gegliedert**: statt einer langen Seite gibt es jetzt sechs Reiter – Profil, Konten & Jahre, Darstellung, Funktionen, Daten & Sicherheit, Über',
     'Zusammengehöriges steht endlich beisammen: „Jahr archivieren" sitzt jetzt bei der Jahres-Verwaltung statt unter „System", und „Backup vor Update" direkt neben den Update-Einstellungen',
@@ -4467,6 +4476,72 @@ function einstellungen() {
           <span style="font-size:13px">Kompaktmodus (weniger Abstände)</span>
         </div>
       </div>
+
+      <div class="settings-section-header">🌈 Farben</div>
+      <div class="card mb-2">
+        ${(() => {
+          const c = farbCfg(), m = farbModus(), s = c[m];
+          const modusName = m === 'dark' ? 'dunklen' : 'hellen';
+          const aktiv = aktivePaletteId();
+          const kBtn = kontrast(s.accent, lesbareSchrift(s.accent));
+          const warnung = kBtn < 4.5
+            ? '<div style="margin-top:10px;padding:9px 12px;border-radius:8px;background:var(--amber-bg);color:var(--amber);font-size:12px">Hinweis: Diese Akzentfarbe hat wenig Kontrast zur Schrift auf Buttons (' + kBtn.toFixed(1) + ':1). Empfohlen sind mindestens 4,5:1 &ndash; w&auml;hle einen kr&auml;ftigeren oder dunkleren Ton.</div>'
+            : '';
+          const feld = (k, label, hinweis) =>
+            '<div style="display:flex;align-items:center;gap:10px;padding:9px 0">' +
+              '<input type="color" value="' + s[k] + '"' +
+                ' oninput="farbeVorschau(&quot;' + k + '&quot;,this.value)"' +
+                ' onchange="farbeSetzen(&quot;' + k + '&quot;,this.value)"' +
+                ' style="width:46px;height:32px;padding:2px;border:1px solid var(--border);border-radius:8px;background:var(--input-bg);cursor:pointer" />' +
+              '<div style="flex:1;min-width:0">' +
+                '<div style="font-size:13px;font-weight:500">' + label + '</div>' +
+                '<div style="font-size:11px;color:var(--muted)">' + hinweis + '</div>' +
+              '</div>' +
+              '<code style="font-size:11px;color:var(--muted)">' + s[k].toUpperCase() + '</code>' +
+            '</div>';
+          const trenner = '<div style="height:1px;background:var(--border)"></div>';
+
+          return '<p style="font-size:12px;color:var(--muted);margin-bottom:12px;line-height:1.5">Du bearbeitest gerade die Farben f&uuml;r den <strong>' + modusName + ' Modus</strong>. Heller und dunkler Modus werden getrennt gespeichert &ndash; wechsle oben das Theme, um den jeweils anderen anzupassen.</p>' +
+
+            '<p style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px">Farbwelten</p>' +
+            '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(112px,1fr));gap:8px;margin-bottom:18px">' +
+              FARB_PALETTEN.map(pal =>
+                '<button onclick="paletteAnwenden(&quot;' + pal.id + '&quot;)" style="display:flex;align-items:center;gap:8px;padding:8px 10px;cursor:pointer;border-radius:9px;font-family:inherit;font-size:12px;font-weight:600;text-align:left;background:var(--surface-2);color:var(--text);border:1.5px solid ' + (aktiv===pal.id ? pal[m].accent : 'var(--border)') + '">' +
+                  '<span style="width:15px;height:15px;border-radius:50%;flex:0 0 auto;background:linear-gradient(135deg,' + pal[m].accent + ' 50%,' + pal[m].accent2 + ' 50%)"></span>' +
+                  '<span style="overflow:hidden;text-overflow:ellipsis">' + pal.name + '</span>' +
+                '</button>').join('') +
+            '</div>' +
+
+            '<p style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:2px">Eigene Farben</p>' +
+            '<div style="border:1px solid var(--border);border-radius:10px;padding:4px 12px;background:var(--surface-2)">' +
+              feld('accent','Akzentfarbe','Buttons, aktiver Men&uuml;punkt, Links') + trenner +
+              feld('accent2','Zweitfarbe','Highlights, aktive Reiter, Diagramme') + trenner +
+              feld('green','Positive Betr&auml;ge','Einnahmen, Gewinne, Guthaben') + trenner +
+              feld('red','Negative Betr&auml;ge','Ausgaben, Verluste') +
+            '</div>' + warnung +
+
+            (m === 'dark' ?
+              '<p style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin:18px 0 8px">Grundton (nur dunkler Modus)</p>' +
+              '<div style="display:flex;flex-wrap:wrap;gap:8px">' +
+                FARB_GRUNDTOENE.map(g =>
+                  '<button onclick="grundtonSetzen(&quot;' + g.id + '&quot;)" style="display:flex;align-items:center;gap:8px;padding:8px 12px;cursor:pointer;border-radius:9px;font-family:inherit;font-size:12px;font-weight:600;background:var(--surface-2);color:var(--text);border:1.5px solid ' + (c.grundton===g.id ? 'var(--accent)' : 'var(--border)') + '">' +
+                    '<span style="width:15px;height:15px;border-radius:4px;flex:0 0 auto;border:1px solid var(--border);background:' + g.bg + '"></span>' + g.name +
+                  '</button>').join('') +
+              '</div>' : '') +
+
+            '<div style="margin-top:18px;padding-top:14px;border-top:1px solid var(--border)">' +
+              '<p style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px">Vorschau</p>' +
+              '<div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:14px">' +
+                '<button class="btn btn-primary btn-sm">Prim&auml;r</button>' +
+                '<button class="btn btn-ghost btn-sm">Sekund&auml;r</button>' +
+                '<span class="badge badge-muted">Kennzeichen</span>' +
+                '<span style="color:var(--green);font-weight:700;font-size:13px">+1.250,00 ' + currencySymbol() + '</span>' +
+                '<span style="color:var(--red);font-weight:700;font-size:13px">&minus;480,50 ' + currencySymbol() + '</span>' +
+              '</div>' +
+              '<button class="btn btn-ghost btn-sm" onclick="farbenZuruecksetzen()">Auf Standard zur&uuml;cksetzen</button>' +
+            '</div>';
+        })()}
+      </div>
       </div>
       <div class="settings-section" style="display:${_setTab==='funktionen'?'block':'none'}">
       <div class="settings-section-header">🎯 Sparziel</div>
@@ -4793,10 +4868,177 @@ function updateConfig(key, val) {
   }
 }
 
+// ════════════════════════════════════════════════════════════════════════════
+// FARB-SYSTEM (modular, pro Theme getrennt einstellbar)
+// ════════════════════════════════════════════════════════════════════════════
+// Gespeichert in state.config.farben = {
+//   light: { accent, accent2, green, red }, dark: { … }, grundton: 'slate'|…
+// }  – 'config' steht bereits in der loadData-Allowlist.
 const ACCENT_DARKS = {
   '#0f766e':'#0d6560','#2563eb':'#1d4ed8','#7c3aed':'#6d28d9',
   '#dc2626':'#b91c1c','#ea580c':'#c2410c','#16a34a':'#15803d',
 };
+
+// Fertige Paletten – je Theme abgestimmt (Akzent + heller Zweitakzent).
+const FARB_PALETTEN = [
+  { id:'tuerkis', name:'Türkis',    light:{accent:'#0f766e',accent2:'#14b8a6'}, dark:{accent:'#0EA5E9',accent2:'#22D3EE'} },
+  { id:'blau',    name:'Blau',      light:{accent:'#2563eb',accent2:'#3b82f6'}, dark:{accent:'#3B82F6',accent2:'#60A5FA'} },
+  { id:'indigo',  name:'Indigo',    light:{accent:'#4f46e5',accent2:'#6366f1'}, dark:{accent:'#6366F1',accent2:'#A5B4FC'} },
+  { id:'violett', name:'Violett',   light:{accent:'#7c3aed',accent2:'#8b5cf6'}, dark:{accent:'#8B5CF6',accent2:'#C4B5FD'} },
+  { id:'pink',    name:'Beere',     light:{accent:'#be185d',accent2:'#db2777'}, dark:{accent:'#EC4899',accent2:'#F9A8D4'} },
+  { id:'rot',     name:'Rot',       light:{accent:'#dc2626',accent2:'#ef4444'}, dark:{accent:'#F87171',accent2:'#FCA5A5'} },
+  { id:'bernstein',name:'Bernstein',light:{accent:'#d97706',accent2:'#f59e0b'}, dark:{accent:'#F59E0B',accent2:'#FCD34D'} },
+  { id:'gruen',   name:'Grün',      light:{accent:'#16a34a',accent2:'#22c55e'}, dark:{accent:'#22C55E',accent2:'#86EFAC'} },
+  { id:'oliv',    name:'Oliv',      light:{accent:'#4d7c0f',accent2:'#65a30d'}, dark:{accent:'#84CC16',accent2:'#BEF264'} },
+  { id:'grafit',  name:'Grafit',    light:{accent:'#475569',accent2:'#64748b'}, dark:{accent:'#94A3B8',accent2:'#CBD5E1'} },
+];
+
+// Grundtöne = Hintergrundwelt im Dark-Mode (Kontraste bleiben geprüft erhalten).
+const FARB_GRUNDTOENE = [
+  { id:'slate',  name:'Slate (Standard)', bg:'#0F172A', surface:'#1E293B', surface2:'#273449', sidebar:'#111827', border:'#334155', input:'#172033' },
+  { id:'neutral',name:'Neutralgrau',      bg:'#141414', surface:'#1F1F1F', surface2:'#2A2A2A', sidebar:'#0D0D0D', border:'#3A3A3A', input:'#1A1A1A' },
+  { id:'marine', name:'Marineblau',       bg:'#0B1220', surface:'#152238', surface2:'#1E2E48', sidebar:'#080E19', border:'#2A3B57', input:'#101B2E' },
+  { id:'kohle',  name:'Anthrazit',        bg:'#12151A', surface:'#1C2027', surface2:'#262B34', sidebar:'#0C0F13', border:'#333A45', input:'#171B22' },
+];
+
+const FARB_STANDARD = {
+  light: { accent:'#0f766e', accent2:'#14b8a6', green:'#16a34a', red:'#dc2626' },
+  dark:  { accent:'#0EA5E9', accent2:'#22D3EE', green:'#22C55E', red:'#EF4444' },
+  grundton: 'slate',
+};
+
+function farbCfg() {
+  if (!state.config) state.config = {};
+  const f = state.config.farben;
+  if (!f || typeof f !== 'object') {
+    state.config.farben = JSON.parse(JSON.stringify(FARB_STANDARD));
+    // Alte Einzel-Einstellung übernehmen, damit nichts verloren geht
+    if (state.config.accent) state.config.farben.light.accent = state.config.accent;
+  }
+  const c = state.config.farben;
+  ['light','dark'].forEach(m => {
+    if (!c[m] || typeof c[m] !== 'object') c[m] = { ...FARB_STANDARD[m] };
+    ['accent','accent2','green','red'].forEach(k => {
+      if (!/^#[0-9a-fA-F]{6}$/.test(c[m][k] || '')) c[m][k] = FARB_STANDARD[m][k];
+    });
+  });
+  if (!FARB_GRUNDTOENE.some(g => g.id === c.grundton)) c.grundton = 'slate';
+  return c;
+}
+function istDarkAktiv() { return document.documentElement.classList.contains('theme-dark'); }
+function farbModus() { return istDarkAktiv() ? 'dark' : 'light'; }
+
+// ── Farb-Hilfen: Aufhellen/Abdunkeln und Kontrastprüfung ───────────────────
+function hexToRgb(hex) {
+  const h = String(hex||'').replace('#','');
+  if (h.length !== 6) return null;
+  return { r:parseInt(h.slice(0,2),16), g:parseInt(h.slice(2,4),16), b:parseInt(h.slice(4,6),16) };
+}
+function rgbToHex(r,g,b) {
+  const c = v => Math.max(0,Math.min(255,Math.round(v))).toString(16).padStart(2,'0');
+  return '#' + c(r) + c(g) + c(b);
+}
+function farbeMischen(hex, ziel, anteil) {
+  const a = hexToRgb(hex), b = hexToRgb(ziel);
+  if (!a || !b) return hex;
+  return rgbToHex(a.r+(b.r-a.r)*anteil, a.g+(b.g-a.g)*anteil, a.b+(b.b-a.b)*anteil);
+}
+function farbeDunkler(hex, anteil) { return farbeMischen(hex, '#000000', anteil); }
+// Relative Leuchtdichte nach WCAG
+function leuchtdichte(hex) {
+  const c = hexToRgb(hex); if (!c) return 0;
+  const f = v => { v/=255; return v<=0.03928 ? v/12.92 : Math.pow((v+0.055)/1.055,2.4); };
+  return 0.2126*f(c.r) + 0.7152*f(c.g) + 0.0722*f(c.b);
+}
+function kontrast(hex1, hex2) {
+  const a = leuchtdichte(hex1), b = leuchtdichte(hex2);
+  const hell = Math.max(a,b), dunkel = Math.min(a,b);
+  return (hell + 0.05) / (dunkel + 0.05);
+}
+// Liefert Schwarz oder Weiß – je nachdem, was auf der Farbe besser lesbar ist.
+function lesbareSchrift(hex) {
+  return kontrast(hex, '#FFFFFF') >= kontrast(hex, '#0F172A') ? '#FFFFFF' : '#0F172A';
+}
+
+// ── Farben auf die Oberfläche anwenden ─────────────────────────────────────
+function farbenAnwenden() {
+  const root = document.documentElement;
+  const c = farbCfg();
+  const m = farbModus();
+  const s = c[m];
+
+  root.style.setProperty('--accent',        s.accent);
+  root.style.setProperty('--accent2',       s.accent2);
+  root.style.setProperty('--accent-dark',   ACCENT_DARKS[s.accent] || farbeDunkler(s.accent, 0.18));
+  root.style.setProperty('--accent-hover',  ACCENT_DARKS[s.accent] || farbeDunkler(s.accent, 0.18));
+  root.style.setProperty('--accent-light',  m === 'dark' ? farbeMischen(s.accent,'#000000',0.72) : s.accent + '20');
+  root.style.setProperty('--green', s.green);
+  root.style.setProperty('--red',   s.red);
+  // Button-Schrift automatisch lesbar halten (löst das feste #0F172A im CSS ab)
+  root.style.setProperty('--accent-text', lesbareSchrift(s.accent));
+
+  // Grundton nur im Dark-Mode
+  const g = FARB_GRUNDTOENE.find(x => x.id === c.grundton) || FARB_GRUNDTOENE[0];
+  ['--bg','--surface','--surface-2','--sidebar','--border','--input-bg','--input-border'].forEach(v => root.style.removeProperty(v));
+  if (m === 'dark' && g.id !== 'slate') {
+    root.style.setProperty('--bg',        g.bg);
+    root.style.setProperty('--surface',   g.surface);
+    root.style.setProperty('--surface-2', g.surface2);
+    root.style.setProperty('--sidebar',   g.sidebar);
+    root.style.setProperty('--border',    g.border);
+    root.style.setProperty('--input-bg',  g.input);
+    root.style.setProperty('--input-border', g.border);
+  }
+}
+
+// ── Bedienung aus den Einstellungen ────────────────────────────────────────
+function farbeSetzen(schluessel, wert, sofortSpeichern) {
+  const c = farbCfg();
+  const m = farbModus();
+  if (!/^#[0-9a-fA-F]{6}$/.test(wert)) return;
+  c[m][schluessel] = wert.toLowerCase();
+  farbenAnwenden();
+  if (sofortSpeichern !== false) { saveData(); renderPage(); }
+}
+// Live-Vorschau während des Ziehens im Farbwähler (ohne Speichern/Neu-Rendern)
+function farbeVorschau(schluessel, wert) { farbeSetzen(schluessel, wert, false); }
+function paletteAnwenden(id) {
+  const p = FARB_PALETTEN.find(x => x.id === id);
+  if (!p) return;
+  const c = farbCfg();
+  const m = farbModus();
+  c[m].accent  = p[m].accent;
+  c[m].accent2 = p[m].accent2;
+  farbenAnwenden();
+  saveData(); renderPage();
+  showToast('Farbwelt „' + p.name + '" übernommen','info');
+}
+function grundtonSetzen(id) {
+  const c = farbCfg();
+  c.grundton = id;
+  farbenAnwenden();
+  saveData(); renderPage();
+}
+async function farbenZuruecksetzen() {
+  const ok = await uiConfirm({
+    title: 'Farben zurücksetzen', icon: '🎨',
+    message: 'Alle Farbanpassungen auf die Standardwerte zurücksetzen?',
+    details: ['Betrifft hellen und dunklen Modus sowie den Grundton.'],
+    okLabel: 'Zurücksetzen', cancelLabel: 'Abbrechen',
+  });
+  if (!ok) return;
+  state.config.farben = JSON.parse(JSON.stringify(FARB_STANDARD));
+  farbenAnwenden();
+  saveData(); renderPage();
+  showToast('Farben zurückgesetzt','info');
+}
+// Welche Palette entspricht der aktuellen Einstellung? (für die Markierung)
+function aktivePaletteId() {
+  const c = farbCfg(), m = farbModus();
+  const t = FARB_PALETTEN.find(p => p[m].accent.toLowerCase() === (c[m].accent||'').toLowerCase()
+                                 && p[m].accent2.toLowerCase() === (c[m].accent2||'').toLowerCase());
+  return t ? t.id : null;
+}
 
 function applyTheme(theme) {
   updateConfig('theme', theme);
@@ -4816,45 +5058,24 @@ function applyTheme(theme) {
         if ((state.config||{}).theme === 'system') {
           document.documentElement.classList.toggle('theme-dark', e.matches);
           document.body.classList.toggle('theme-dark', e.matches);
+          farbenAnwenden();
         }
       };
     } catch(e) {}
   }
   try { localStorage.setItem('fv_theme', JSON.stringify({ theme })); } catch(e) {}
-  // Akzent an das Theme anpassen: Dark = Bernstein (CSS), Hell = konfigurierte Farbe.
-  const root2 = document.documentElement;
-  const nowDark = root2.classList.contains('theme-dark');
-  if (nowDark) {
-    ['--accent','--accent-dark','--accent-hover','--accent-light'].forEach(v => root2.style.removeProperty(v));
-  } else if ((state.config||{}).accent) {
-    root2.style.setProperty('--accent', state.config.accent);
-    root2.style.setProperty('--accent-dark', (typeof ACCENT_DARKS!=='undefined' && ACCENT_DARKS[state.config.accent]) || state.config.accent);
-    root2.style.setProperty('--accent-light', state.config.accent + '20');
-  }
+  // Farben für das nun aktive Theme setzen (hell und dunkel getrennt gespeichert)
+  farbenAnwenden();
 }
 function applyAccent(color) {
-  updateConfig('accent', color);
-  const root = document.documentElement;
-  root.style.setProperty('--accent', color);
-  root.style.setProperty('--accent-dark', ACCENT_DARKS[color] || color);
-  root.style.setProperty('--accent-hover', ACCENT_DARKS[color] || color);
-  root.style.setProperty('--accent-light', color + '20');
-  renderPage();
+  // Beibehalten für Altaufrufe: setzt den Akzent des aktiven Modus.
+  farbeSetzen('accent', color);
 }
 
 function applySettings() {
   const cfg = state.config || {};
   if (cfg.theme) applyTheme(cfg.theme);
-  // Akzentfarbe: nur im Hell-Modus die konfigurierte Farbe erzwingen.
-  // Im Dark-Mode gilt der Bernstein-Akzent aus dem CSS (nicht überschreiben).
-  const isDark = document.documentElement.classList.contains('theme-dark');
-  if (isDark) {
-    // evtl. zuvor gesetzte Inline-Akzente entfernen, damit CSS (Bernstein) greift
-    const root = document.documentElement;
-    ['--accent','--accent-dark','--accent-hover','--accent-light'].forEach(v => root.style.removeProperty(v));
-  } else if (cfg.accent) {
-    applyAccent(cfg.accent);
-  }
+  else farbenAnwenden();
   document.body.classList.toggle('compact', !!cfg.compactMode);
   try { localStorage.setItem('fv_theme', JSON.stringify({ theme: cfg.theme||'light' })); } catch(e) {}
 }
@@ -7085,6 +7306,17 @@ window.pvToggleVergleich = pvToggleVergleich;
 window.pvNavSichtbarkeit = pvNavSichtbarkeit;
 window.pvAktiv           = pvAktiv;
 window.setSettingsTab    = setSettingsTab;
+window.farbeSetzen       = farbeSetzen;
+window.farbeVorschau     = farbeVorschau;
+window.paletteAnwenden   = paletteAnwenden;
+window.grundtonSetzen    = grundtonSetzen;
+window.farbenZuruecksetzen = farbenZuruecksetzen;
+window.farbenAnwenden    = farbenAnwenden;
+window.farbCfg           = farbCfg;
+window.farbModus         = farbModus;
+window.aktivePaletteId   = aktivePaletteId;
+window.kontrast          = kontrast;
+window.lesbareSchrift    = lesbareSchrift;
 window.settingsTab       = settingsTab;
 window.setDeletePin      = setDeletePin;
 window.changeDeletePin   = changeDeletePin;

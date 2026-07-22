@@ -284,7 +284,7 @@ input[type="checkbox"]:disabled { opacity: .4; cursor: not-allowed; }
 .btn-primary { background: var(--accent); color: #fff; }
 .btn-primary:hover { background: var(--accent-dark); }
 /* Dark-Mode: dunkler Text auf hellem Blau = besser lesbar, moderner Look */
-.theme-dark .btn-primary { color: #0F172A; font-weight: 700; }
+.theme-dark .btn-primary { color: var(--accent-text, #0F172A); font-weight: 700; }
 .btn-secondary { background: var(--text); color: var(--bg); }
 .btn-ghost { background: var(--surface-2); color: var(--accent); border: 1px solid var(--border); }
 .btn-ghost:hover { background: var(--accent-light); }
