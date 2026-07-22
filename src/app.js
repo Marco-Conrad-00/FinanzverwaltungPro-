@@ -161,6 +161,25 @@ let _snoozedReminders = {};
 // Format je Eintrag: { v: 'Version', date: 'YYYY-MM-DD', changes: ['...','...'] }
 // Änderungen dürfen mit **Fett** Markierung versehen werden.
 const CHANGELOG = [
+  { v: '1.0.25', date: '2026-07-22', changes: [
+    '**Fehler behoben: Die ETF-Automatik hat nie funktioniert.** „Automatisch beim Start aktualisieren" und das Intervall wurden zwar gespeichert und als aktiv angezeigt, aber nirgends ausgewertet – Kurse kamen ausschließlich per Knopfdruck. Beides läuft jetzt tatsächlich',
+    'Die Aktualisierung im Hintergrund stört nicht mehr beim Arbeiten: Neu gezeichnet wird nur, wenn die Depot-Seite gerade offen ist',
+    'Nach einem Neustart wird nicht erneut geladen, wenn die letzte Aktualisierung keine 10 Minuten her ist',
+    'In den Einstellungen stehen jetzt der Zeitpunkt der letzten Aktualisierung und der laufende Timer',
+    '**Spesensätze lassen sich nachladen**: In den Einstellungen unter „Spesensätze" prüft die App auf neue Pauschbeträge, sobald das Bundesfinanzministerium sie veröffentlicht',
+    'Vor der Übernahme siehst du eine Übersicht aller Änderungen – übernommen wird nichts ohne deine Bestätigung',
+    'Auf Wunsch sieht die App wöchentlich im Hintergrund nach und meldet sich nur, wenn es wirklich etwas Neues gibt',
+    'Geladene Sätze lassen sich jederzeit wieder auf die mitgelieferten zurücksetzen',
+  ]},
+  { v: '1.0.24', date: '2026-07-22', changes: [
+    '**Spesensätze auf den aktuellen Stand gebracht**: alle Länder nach dem BMF-Schreiben vom 5. Dezember 2025, gültig ab 1. Januar 2026',
+    'Von den bisherigen Sätzen haben sich 187 geändert – darunter Belgien (42→59 €), Dänemark (58→75 €), Schweden (50→66 €), die Niederlande (47→58 €) und die Schweiz (64→70 €). Deutschland und Österreich bleiben unverändert',
+    'Neu aufgenommen: unter anderem Bern, Ankara, Osaka, Bhutan und Liberia',
+    'Für Länder, die im BMF-Schreiben nicht aufgeführt sind, gilt jetzt automatisch der Satz für Luxemburg – so wie es das Schreiben vorsieht',
+    'Auf der Spesen-Seite steht nun, welcher Rechtsstand verwendet wird',
+    '**Wiederkehrende Einnahmen**: Die Spalte für den Tag des Geldeingangs hat endlich eine eigene Überschrift',
+    '**Eigene Tabellen lassen sich jetzt aus- und einblenden** – wie schon die PV-Anlage. Zu finden in den Einstellungen unter „Funktionen"; vorhandene Tabellen bleiben beim Ausblenden erhalten',
+  ]},
   { v: '1.0.23', date: '2026-07-22', changes: [
     '**Fehler behoben: Beim Klick auf das Kreisdiagramm blieb das Dashboard leer.** Eine intern fehlende Hilfsfunktion brach den Seitenaufbau ab – das Aufklappen der Einzelposten funktioniert jetzt wie vorgesehen',
     'Sonderzeichen in Beschreibungen (etwa „&" oder spitze Klammern) werden jetzt korrekt dargestellt statt das Layout zu zerlegen',
@@ -963,7 +982,7 @@ async function loadData() {
   // ── Merge into state (preserves proxy properties) ───────────────────────
   const fields = ['meta','config','customCats','trash','imports','etfKurse','transactions',
                    'years','dataVersion','currentYear','selectedYear','backupHistory','yearEditUnlocked','reminders',
-                   'pv','pvConfig'];
+                   'pv','pvConfig','spesenSaetze'];
   fields.forEach(f => { if (saved[f] !== undefined) state[f] = saved[f]; });
   if (!Array.isArray(state.reminders)) state.reminders = [];
 
@@ -1044,7 +1063,14 @@ Object.defineProperty(globalThis, 'EXPENSE_CATS', { get: () => getExpenseCats() 
 Object.defineProperty(globalThis, 'INCOME_TYPES', { get: () => getIncomeTypes() });
 Object.defineProperty(globalThis, 'EINKAUF_CATS', { get: () => getEinkaufCats() });
 
-const SPESEN_LAENDER = [{"land": "Afghanistan", "halb": 20.0, "ganz": 30.0}, {"land": "Ägypten", "halb": 28.0, "ganz": 41.0}, {"land": "Äthiopien", "halb": 26.0, "ganz": 30.0}, {"land": "Äquatorialguinea", "halb": 24.0, "ganz": 36.0}, {"land": "Albanien", "halb": 20.0, "ganz": 30.0}, {"land": "Algerien", "halb": 34.0, "ganz": 51.0}, {"land": "Andorra", "halb": 28.0, "ganz": 41.0}, {"land": "Angola", "halb": 35.0, "ganz": 52.0}, {"land": "Antigua und Barbuda", "halb": 30.0, "ganz": 45.0}, {"land": "Argentinien", "halb": 24.0, "ganz": 35.0}, {"land": "Armenien", "halb": 16.0, "ganz": 24.0}, {"land": "Aserbaidschan", "halb": 20.0, "ganz": 30.0}, {"land": "Australien / Canberra", "halb": 34.0, "ganz": 51.0}, {"land": "Australien / Sydney", "halb": 45.0, "ganz": 68.0}, {"land": "Australien / im Übrigen", "halb": 34.0, "ganz": 51.0}, {"land": "Bahrain", "halb": 30.0, "ganz": 45.0}, {"land": "Bangladesch", "halb": 33.0, "ganz": 50.0}, {"land": "Barbados", "halb": 35.0, "ganz": 52.0}, {"land": "Belgien", "halb": 28.0, "ganz": 42.0}, {"land": "Benin", "halb": 35.0, "ganz": 52.0}, {"land": "Bolivien", "halb": 20.0, "ganz": 30.0}, {"land": "Bosnien und Herzegowina", "halb": 16.0, "ganz": 23.0}, {"land": "Botsuana", "halb": 31.0, "ganz": 46.0}, {"land": "Brasilien / Brasilia", "halb": 38.0, "ganz": 57.0}, {"land": "Brasilien / Rio de Janeiro", "halb": 38.0, "ganz": 57.0}, {"land": "Brasilien / Sao Paulo", "halb": 36.0, "ganz": 53.0}, {"land": "Brasilien / im Übrigen", "halb": 34.0, "ganz": 51.0}, {"land": "Brunei", "halb": 35.0, "ganz": 52.0}, {"land": "Bulgarien", "halb": 15.0, "ganz": 22.0}, {"land": "Burkina Faso", "halb": 25.0, "ganz": 38.0}, {"land": "Burundi", "halb": 24.0, "ganz": 36.0}, {"land": "Chile", "halb": 29.0, "ganz": 44.0}, {"land": "China / Chengdu", "halb": 28.0, "ganz": 41.0}, {"land": "China / Hongkong", "halb": 49.0, "ganz": 74.0}, {"land": "China / Kanton", "halb": 24.0, "ganz": 36.0}, {"land": "China / Peking", "halb": 20.0, "ganz": 30.0}, {"land": "China / Shanghai", "halb": 39.0, "ganz": 58.0}, {"land": "China / im Übrigen", "halb": 32.0, "ganz": 48.0}, {"land": "Costa Rica", "halb": 32.0, "ganz": 47.0}, {"land": "Cote d Ivoire", "halb": 40.0, "ganz": 59.0}, {"land": "Deutschland", "halb": 14.0, "ganz": 28.0}, {"land": "Dänemark", "halb": 39.0, "ganz": 58.0}, {"land": "Dominica", "halb": 30.0, "ganz": 45.0}, {"land": "Dominikanische Republik", "halb": 30.0, "ganz": 45.0}, {"land": "Dschibuti", "halb": 44.0, "ganz": 65.0}, {"land": "Ecuador", "halb": 29.0, "ganz": 44.0}, {"land": "El Salvador", "halb": 29.0, "ganz": 44.0}, {"land": "Eritrea", "halb": 33.0, "ganz": 50.0}, {"land": "Estland", "halb": 20.0, "ganz": 29.0}, {"land": "Fidschi", "halb": 23.0, "ganz": 34.0}, {"land": "Finnland", "halb": 33.0, "ganz": 50.0}, {"land": "Frankreich / Lyon", "halb": 36.0, "ganz": 53.0}, {"land": "Frankreich / Marseille", "halb": 31.0, "ganz": 46.0}, {"land": "Frankreich / Paris", "halb": 39.0, "ganz": 58.0}, {"land": "Frankreich / Straßburg", "halb": 34.0, "ganz": 51.0}, {"land": "Frankreich / im Übrigen", "halb": 29.0, "ganz": 44.0}, {"land": "Gabun", "halb": 35.0, "ganz": 52.0}, {"land": "Gambia", "halb": 20.0, "ganz": 30.0}, {"land": "Georgien", "halb": 24.0, "ganz": 35.0}, {"land": "Ghana", "halb": 31.0, "ganz": 46.0}, {"land": "Grenada", "halb": 30.0, "ganz": 45.0}, {"land": "Griechenland / Athen", "halb": 31.0, "ganz": 46.0}, {"land": "Griechenland / Im Übrigen", "halb": 24.0, "ganz": 36.0}, {"land": "Guatemala", "halb": 23.0, "ganz": 34.0}, {"land": "Guinea", "halb": 31.0, "ganz": 46.0}, {"land": "Guinea-Bissau", "halb": 16.0, "ganz": 24.0}, {"land": "Guyana", "halb": 30.0, "ganz": 45.0}, {"land": "Haiti", "halb": 39.0, "ganz": 58.0}, {"land": "Honduras", "halb": 32.0, "ganz": 48.0}, {"land": "Indien / Bangalore", "halb": 28.0, "ganz": 42.0}, {"land": "Indien / Chennai", "halb": 21.0, "ganz": 32.0}, {"land": "Indien / Kalkutta", "halb": 24.0, "ganz": 35.0}, {"land": "Indien / Mumbai", "halb": 33.0, "ganz": 50.0}, {"land": "Indien / Neu Delhi", "halb": 25.0, "ganz": 38.0}, {"land": "Indien / im Übrigen", "halb": 21.0, "ganz": 32.0}, {"land": "Indonesien", "halb": 24.0, "ganz": 36.0}, {"land": "Iran", "halb": 22.0, "ganz": 33.0}, {"land": "Irland", "halb": 39.0, "ganz": 58.0}, {"land": "Island", "halb": 32.0, "ganz": 47.0}, {"land": "Israel", "halb": 44.0, "ganz": 66.0}, {"land": "Italien / Mailand", "halb": 30.0, "ganz": 45.0}, {"land": "Italien / Rom", "halb": 27.0, "ganz": 40.0}, {"land": "Italien / im Übrigen", "halb": 27.0, "ganz": 40.0}, {"land": "Jamaika", "halb": 38.0, "ganz": 57.0}, {"land": "Japan / Tokio", "halb": 44.0, "ganz": 66.0}, {"land": "Japan / im Übrigen", "halb": 25.0, "ganz": 52.0}, {"land": "Jemen", "halb": 16.0, "ganz": 24.0}, {"land": "Jordanien", "halb": 31.0, "ganz": 46.0}, {"land": "Kambodscha", "halb": 25.0, "ganz": 38.0}, {"land": "Kamerun", "halb": 33.0, "ganz": 50.0}, {"land": "Kanada / Ottawa", "halb": 32.0, "ganz": 47.0}, {"land": "Kanada / Toronto", "halb": 34.0, "ganz": 51.0}, {"land": "Kanada / Vancouver", "halb": 33.0, "ganz": 50.0}, {"land": "Kanada / im Übrigen", "halb": 32.0, "ganz": 47.0}, {"land": "Kap Verde", "halb": 20.0, "ganz": 30.0}, {"land": "Kasachstan", "halb": 30.0, "ganz": 45.0}, {"land": "Katar", "halb": 37.0, "ganz": 56.0}, {"land": "Kenia", "halb": 34.0, "ganz": 51.0}, {"land": "Kirgisistan", "halb": 18.0, "ganz": 27.0}, {"land": "Kolumbien", "halb": 31.0, "ganz": 46.0}, {"land": "Kongo / Republik", "halb": 41.0, "ganz": 62.0}, {"land": "Kongo / Demokratische Republik", "halb": 47.0, "ganz": 70.0}, {"land": "Korea / Demokratische Volksrepublik", "halb": 19.0, "ganz": 28.0}, {"land": "Korea / Republik", "halb": 32.0, "ganz": 48.0}, {"land": "Kosovo", "halb": 16.0, "ganz": 23.0}, {"land": "Kroatien", "halb": 24.0, "ganz": 35.0}, {"land": "Kuba", "halb": 31.0, "ganz": 46.0}, {"land": "Kuwait", "halb": 37.0, "ganz": 56.0}, {"land": "Laos", "halb": 22.0, "ganz": 33.0}, {"land": "Lesotho", "halb": 16.0, "ganz": 24.0}, {"land": "Lettland", "halb": 24.0, "ganz": 35.0}, {"land": "Libanon", "halb": 40.0, "ganz": 59.0}, {"land": "Libyen", "halb": 42.0, "ganz": 63.0}, {"land": "Liechtenstein", "halb": 37.0, "ganz": 56.0}, {"land": "Litauen", "halb": 17.0, "ganz": 26.0}, {"land": "Luxemburg", "halb": 32.0, "ganz": 47.0}, {"land": "Madagaskar", "halb": 23.0, "ganz": 34.0}, {"land": "Malawi", "halb": 32.0, "ganz": 47.0}, {"land": "Malaysia", "halb": 23.0, "ganz": 34.0}, {"land": "Malediven", "halb": 35.0, "ganz": 52.0}, {"land": "Mali", "halb": 25.0, "ganz": 38.0}, {"land": "Malta", "halb": 31.0, "ganz": 46.0}, {"land": "Marokko", "halb": 28.0, "ganz": 42.0}, {"land": "Marshall Inseln", "halb": 42.0, "ganz": 63.0}, {"land": "Mauretanien", "halb": 26.0, "ganz": 39.0}, {"land": "Mauritius", "halb": 36.0, "ganz": 54.0}, {"land": "Mazedonien", "halb": 20.0, "ganz": 29.0}, {"land": "Mexiko", "halb": 32.0, "ganz": 48.0}, {"land": "Mikronesien", "halb": 22.0, "ganz": 33.0}, {"land": "Moldau / Republik", "halb": 16.0, "ganz": 24.0}, {"land": "Monaco", "halb": 28.0, "ganz": 42.0}, {"land": "Mongolei", "halb": 18.0, "ganz": 27.0}, {"land": "Montenegro", "halb": 20.0, "ganz": 29.0}, {"land": "Mosambik", "halb": 25.0, "ganz": 38.0}, {"land": "Myanmar", "halb": 24.0, "ganz": 35.0}, {"land": "Namibia", "halb": 20.0, "ganz": 30.0}, {"land": "Nepal", "halb": 24.0, "ganz": 36.0}, {"land": "Neuseeland", "halb": 37.0, "ganz": 56.0}, {"land": "Nicaragua", "halb": 24.0, "ganz": 36.0}, {"land": "Niederlande", "halb": 32.0, "ganz": 47.0}, {"land": "Niger", "halb": 28.0, "ganz": 42.0}, {"land": "Nigeria", "halb": 31.0, "ganz": 46.0}, {"land": "Norwegen", "halb": 53.0, "ganz": 80.0}, {"land": "Österreich", "halb": 33.0, "ganz": 50.0}, {"land": "Oman", "halb": 40.0, "ganz": 60.0}, {"land": "Pakistan / Islamabad", "halb": 16.0, "ganz": 23.0}, {"land": "Pakistan / im Übrigen", "halb": 23.0, "ganz": 34.0}, {"land": "Palau", "halb": 34.0, "ganz": 51.0}, {"land": "Panama", "halb": 26.0, "ganz": 39.0}, {"land": "Papua-Neuguinea", "halb": 40.0, "ganz": 60.0}, {"land": "Paraguay", "halb": 25.0, "ganz": 38.0}, {"land": "Peru", "halb": 23.0, "ganz": 34.0}, {"land": "Philippinen", "halb": 22.0, "ganz": 33.0}, {"land": "Polen / Breslau", "halb": 22.0, "ganz": 33.0}, {"land": "Polen / Danzig", "halb": 20.0, "ganz": 30.0}, {"land": "Polen / Krakau", "halb": 18.0, "ganz": 27.0}, {"land": "Polen / Warschau", "halb": 20.0, "ganz": 29.0}, {"land": "Polen / im Übrigen", "halb": 20.0, "ganz": 29.0}, {"land": "Portugal", "halb": 24.0, "ganz": 36.0}, {"land": "Ruanda", "halb": 31.0, "ganz": 46.0}, {"land": "Rumänien / Bukarest", "halb": 21.0, "ganz": 32.0}, {"land": "Rumänien / Im Übrigen", "halb": 18.0, "ganz": 27.0}, {"land": "Russische Föderation / Jekatarinenburg", "halb": 19.0, "ganz": 28.0}, {"land": "Russische Föderation / Moskau", "halb": 20.0, "ganz": 30.0}, {"land": "Russische Föderation / St. Petersburg", "halb": 17.0, "ganz": 26.0}, {"land": "Russische Föderation / Im Übrigen", "halb": 16.0, "ganz": 24.0}, {"land": "Sambia", "halb": 24.0, "ganz": 36.0}, {"land": "Samoa", "halb": 20.0, "ganz": 29.0}, {"land": "San Marino", "halb": 23.0, "ganz": 34.0}, {"land": "Sao Tome / Principe", "halb": 32.0, "ganz": 47.0}, {"land": "Saudi-Arabien / Djiddah", "halb": 25.0, "ganz": 38.0}, {"land": "Saudi-Arabien / Riad", "halb": 32.0, "ganz": 48.0}, {"land": "Saudi-Arabien / im Übrigen", "halb": 32.0, "ganz": 48.0}, {"land": "Schweden", "halb": 33.0, "ganz": 50.0}, {"land": "Schweiz / Genf", "halb": 44.0, "ganz": 66.0}, {"land": "Schweiz / im Übrigen", "halb": 43.0, "ganz": 64.0}, {"land": "Senegal", "halb": 28.0, "ganz": 42.0}, {"land": "Serbien", "halb": 13.0, "ganz": 20.0}, {"land": "Sierra Leone", "halb": 32.0, "ganz": 48.0}, {"land": "Simbabwe", "halb": 30.0, "ganz": 45.0}, {"land": "Singapur", "halb": 36.0, "ganz": 54.0}, {"land": "Slowakische Republik", "halb": 16.0, "ganz": 24.0}, {"land": "Slowenien", "halb": 22.0, "ganz": 33.0}, {"land": "Spanien / Barcelona", "halb": 23.0, "ganz": 34.0}, {"land": "Spanien / Kanarische Inseln", "halb": 27.0, "ganz": 40.0}, {"land": "Spanien / Palma de Mallorca", "halb": 24.0, "ganz": 35.0}, {"land": "Spanien / Madrid", "halb": 27.0, "ganz": 40.0}, {"land": "Spanien / im Übrigen", "halb": 23.0, "ganz": 34.0}, {"land": "Sri Lanka", "halb": 28.0, "ganz": 42.0}, {"land": "St. Kitts und Nevis", "halb": 30.0, "ganz": 45.0}, {"land": "St. Lucia", "halb": 30.0, "ganz": 45.0}, {"land": "St. Vincent und Grenadinen", "halb": 30.0, "ganz": 45.0}, {"land": "Sudan", "halb": 22.0, "ganz": 33.0}, {"land": "Südafrika / Kapstadt", "halb": 18.0, "ganz": 27.0}, {"land": "Südafrika / Johannisburg", "halb": 20.0, "ganz": 29.0}, {"land": "Südafrika / im Übrigen", "halb": 15.0, "ganz": 22.0}, {"land": "Süd-Sudan", "halb": 23.0, "ganz": 34.0}, {"land": "Suriname", "halb": 30.0, "ganz": 45.0}, {"land": "Syrien", "halb": 25.0, "ganz": 38.0}, {"land": "Tadschikistan", "halb": 18.0, "ganz": 27.0}, {"land": "Taiwan", "halb": 31.0, "ganz": 46.0}, {"land": "Tansania", "halb": 32.0, "ganz": 47.0}, {"land": "Thailand", "halb": 25.0, "ganz": 38.0}, {"land": "Togo", "halb": 26.0, "ganz": 39.0}, {"land": "Tonga", "halb": 26.0, "ganz": 39.0}, {"land": "Tobago und Trinidad", "halb": 30.0, "ganz": 45.0}, {"land": "Tschad", "halb": 43.0, "ganz": 64.0}, {"land": "Tschechische Republik", "halb": 21.0, "ganz": 35.0}, {"land": "Türkei / Istanbul", "halb": 17.0, "ganz": 26.0}, {"land": "Türkei / Izmir", "halb": 20.0, "ganz": 29.0}, {"land": "Türkei / im Übrigen", "halb": 12.0, "ganz": 17.0}, {"land": "Tunesien", "halb": 27.0, "ganz": 40.0}, {"land": "Turkmenistan", "halb": 22.0, "ganz": 33.0}, {"land": "Uganda", "halb": 28.0, "ganz": 41.0}, {"land": "Ukraine", "halb": 17.0, "ganz": 26.0}, {"land": "Ungarn", "halb": 15.0, "ganz": 22.0}, {"land": "Uruguay", "halb": 32.0, "ganz": 48.0}, {"land": "USA / Atlanta", "halb": 41.0, "ganz": 62.0}, {"land": "USA / Boston", "halb": 39.0, "ganz": 58.0}, {"land": "USA / Chicago", "halb": 36.0, "ganz": 54.0}, {"land": "USA / Houston", "halb": 42.0, "ganz": 63.0}, {"land": "USA / Los Angeles", "halb": 37.0, "ganz": 56.0}, {"land": "USA / Miami", "halb": 43.0, "ganz": 64.0}, {"land": "USA / New York City", "halb": 39.0, "ganz": 58.0}, {"land": "USA / San Francisco", "halb": 34.0, "ganz": 51.0}, {"land": "USA / Washington D.C.", "halb": 41.0, "ganz": 62.0}, {"land": "USA / Im Übrigen", "halb": 34.0, "ganz": 51.0}, {"land": "Usbekistan", "halb": 23.0, "ganz": 34.0}, {"land": "Vatikanstaat", "halb": 35.0, "ganz": 52.0}, {"land": "Venezuela", "halb": 30.0, "ganz": 45.0}, {"land": "Vereinigte Arabische Emirate", "halb": 44.0, "ganz": 65.0}, {"land": "Vereinigtes Königreich von Großbritannien und Nordirland / London", "halb": 41.0, "ganz": 62.0}, {"land": "Vereinigtes Königreich von Großbritannien und Nordirland / im Übrigen", "halb": 30.0, "ganz": 45.0}, {"land": "Vietnam", "halb": 28.0, "ganz": 41.0}, {"land": "Weißrussland", "halb": 13.0, "ganz": 20.0}, {"land": "Zentral-Afrikanische Republik", "halb": 31.0, "ganz": 46.0}, {"land": "Zypern", "halb": 30.0, "ganz": 45.0}];
+// ── Spesensätze (Verpflegungsmehraufwand) ───────────────────────────────────
+// Stand: BMF-Schreiben vom 5. Dezember 2025 (IV C 5 - S 2353/00094/007/012),
+// gültig ab 1. Januar 2026. 'ganz' = ab 24 Std. Abwesenheit je Kalendertag,
+// 'halb' = An-/Abreisetag bzw. mehr als 8 Std. Deutschland nach § 9 Abs. 4a EStG.
+// Für nicht gelistete Länder gilt laut BMF der Pauschbetrag für Luxemburg.
+const SPESEN_STAND = 'BMF-Schreiben vom 05.12.2025, gültig ab 01.01.2026';
+const SPESEN_VERSION = '2026-01-01';
+const SPESEN_LAENDER = [{"land": "Albanien", "ganz": 33, "halb": 22}, {"land": "Algerien", "ganz": 47, "halb": 32}, {"land": "Andorra", "ganz": 45, "halb": 30}, {"land": "Angola", "ganz": 40, "halb": 27}, {"land": "Argentinien", "ganz": 42, "halb": 28}, {"land": "Armenien", "ganz": 29, "halb": 20}, {"land": "Aserbaidschan", "ganz": 44, "halb": 29}, {"land": "Australien / Canberra", "ganz": 74, "halb": 49}, {"land": "Australien / Sydney", "ganz": 57, "halb": 38}, {"land": "Australien / im Übrigen", "ganz": 57, "halb": 38}, {"land": "Bahrain", "ganz": 48, "halb": 32}, {"land": "Bangladesch", "ganz": 46, "halb": 31}, {"land": "Barbados", "ganz": 54, "halb": 36}, {"land": "Belgien", "ganz": 59, "halb": 40}, {"land": "Benin", "ganz": 40, "halb": 27}, {"land": "Bhutan", "ganz": 27, "halb": 18}, {"land": "Bolivien", "ganz": 46, "halb": 31}, {"land": "Bosnien und Herzegowina", "ganz": 32, "halb": 21}, {"land": "Botsuana", "ganz": 40, "halb": 27}, {"land": "Brasilien / Brasilia", "ganz": 51, "halb": 34}, {"land": "Brasilien / Rio de Janeiro", "ganz": 69, "halb": 46}, {"land": "Brasilien / Sao Paulo", "ganz": 46, "halb": 31}, {"land": "Brasilien / im Übrigen", "ganz": 46, "halb": 31}, {"land": "Brunei", "ganz": 45, "halb": 30}, {"land": "Bulgarien", "ganz": 38, "halb": 25}, {"land": "Burkina Faso", "ganz": 39, "halb": 26}, {"land": "Burundi", "ganz": 58, "halb": 39}, {"land": "Chile", "ganz": 44, "halb": 29}, {"land": "China / Hongkong", "ganz": 83, "halb": 56}, {"land": "China / Peking", "ganz": 57, "halb": 38}, {"land": "China / Shanghai", "ganz": 48, "halb": 32}, {"land": "China / im Übrigen", "ganz": 48, "halb": 32}, {"land": "Costa Rica", "ganz": 60, "halb": 40}, {"land": "Côte d’Ivoire", "ganz": 60, "halb": 40}, {"land": "Departments 77, 78, 91 bis / im Übrigen", "ganz": 53, "halb": 36}, {"land": "Deutschland", "ganz": 28, "halb": 14}, {"land": "Dominikanische Republik", "ganz": 50, "halb": 33}, {"land": "Dschibuti", "ganz": 77, "halb": 52}, {"land": "Dänemark", "ganz": 75, "halb": 50}, {"land": "Ecuador", "ganz": 27, "halb": 18}, {"land": "El Salvador", "ganz": 65, "halb": 44}, {"land": "Eritrea", "ganz": 46, "halb": 31}, {"land": "Estland", "ganz": 39, "halb": 26}, {"land": "Fidschi", "ganz": 32, "halb": 21}, {"land": "Finnland", "ganz": 54, "halb": 36}, {"land": "Frankreich / Paris (inkl. Dept. 77, 78, 91–95)", "ganz": 58, "halb": 39}, {"land": "Frankreich / im Übrigen", "ganz": 53, "halb": 36}, {"land": "Gabun", "ganz": 64, "halb": 43}, {"land": "Gambia", "ganz": 40, "halb": 27}, {"land": "Georgien", "ganz": 45, "halb": 30}, {"land": "Ghana", "ganz": 46, "halb": 31}, {"land": "Griechenland / Athen", "ganz": 40, "halb": 27}, {"land": "Griechenland / im Übrigen", "ganz": 36, "halb": 24}, {"land": "Guatemala", "ganz": 46, "halb": 31}, {"land": "Guinea", "ganz": 59, "halb": 40}, {"land": "Guinea-Bissau", "ganz": 32, "halb": 21}, {"land": "Honduras", "ganz": 57, "halb": 38}, {"land": "Indien / Bangalore", "ganz": 42, "halb": 28}, {"land": "Indien / Chennai", "ganz": 22, "halb": 15}, {"land": "Indien / Kalkutta", "ganz": 32, "halb": 21}, {"land": "Indien / Mumbai", "ganz": 53, "halb": 36}, {"land": "Indien / Neu Delhi", "ganz": 46, "halb": 31}, {"land": "Indien / im Übrigen", "ganz": 22, "halb": 15}, {"land": "Indonesien", "ganz": 45, "halb": 30}, {"land": "Iran", "ganz": 33, "halb": 22}, {"land": "Irland", "ganz": 64, "halb": 43}, {"land": "Island", "ganz": 62, "halb": 41}, {"land": "Israel", "ganz": 59, "halb": 40}, {"land": "Italien / Mailand", "ganz": 42, "halb": 28}, {"land": "Italien / Rom", "ganz": 48, "halb": 32}, {"land": "Italien / im Übrigen", "ganz": 42, "halb": 28}, {"land": "Jamaika", "ganz": 39, "halb": 26}, {"land": "Japan / Osaka", "ganz": 33, "halb": 22}, {"land": "Japan / Tokio", "ganz": 50, "halb": 33}, {"land": "Japan / im Übrigen", "ganz": 33, "halb": 22}, {"land": "Jordanien", "ganz": 57, "halb": 38}, {"land": "Kambodscha", "ganz": 42, "halb": 28}, {"land": "Kamerun", "ganz": 56, "halb": 37}, {"land": "Kanada / Ottawa", "ganz": 62, "halb": 41}, {"land": "Kanada / Toronto", "ganz": 54, "halb": 36}, {"land": "Kanada / Vancouver", "ganz": 63, "halb": 42}, {"land": "Kanada / im Übrigen", "ganz": 54, "halb": 36}, {"land": "Kap Verde", "ganz": 38, "halb": 25}, {"land": "Kasachstan", "ganz": 33, "halb": 22}, {"land": "Katar", "ganz": 81, "halb": 54}, {"land": "Kenia", "ganz": 48, "halb": 32}, {"land": "Kirgisistan", "ganz": 35, "halb": 24}, {"land": "Kolumbien", "ganz": 34, "halb": 23}, {"land": "Kongo, Demokratische Republik", "ganz": 65, "halb": 44}, {"land": "Kongo, Republik", "ganz": 53, "halb": 36}, {"land": "Korea, Republik", "ganz": 39, "halb": 26}, {"land": "Kosovo", "ganz": 24, "halb": 16}, {"land": "Kroatien", "ganz": 46, "halb": 31}, {"land": "Kuba", "ganz": 51, "halb": 34}, {"land": "Kuwait", "ganz": 63, "halb": 42}, {"land": "Laos", "ganz": 35, "halb": 24}, {"land": "Lesotho", "ganz": 28, "halb": 19}, {"land": "Lettland", "ganz": 46, "halb": 31}, {"land": "Libanon", "ganz": 69, "halb": 46}, {"land": "Liberia", "ganz": 65, "halb": 44}, {"land": "Liechtenstein", "ganz": 57, "halb": 38}, {"land": "Litauen", "ganz": 48, "halb": 32}, {"land": "Luxemburg", "ganz": 63, "halb": 42}, {"land": "Madagaskar", "ganz": 33, "halb": 22}, {"land": "Malawi", "ganz": 41, "halb": 28}, {"land": "Malaysia", "ganz": 36, "halb": 24}, {"land": "Malediven", "ganz": 70, "halb": 47}, {"land": "Mali", "ganz": 42, "halb": 28}, {"land": "Malta", "ganz": 59, "halb": 40}, {"land": "Marokko", "ganz": 41, "halb": 28}, {"land": "Marshall Inseln", "ganz": 45, "halb": 30}, {"land": "Mauretanien", "ganz": 35, "halb": 24}, {"land": "Mauritius", "ganz": 44, "halb": 29}, {"land": "Mexiko", "ganz": 40, "halb": 27}, {"land": "Moldau, Republik", "ganz": 26, "halb": 17}, {"land": "Monaco", "ganz": 52, "halb": 35}, {"land": "Mongolei", "ganz": 23, "halb": 16}, {"land": "Montenegro", "ganz": 32, "halb": 21}, {"land": "Mosambik", "ganz": 51, "halb": 34}, {"land": "Myanmar", "ganz": 23, "halb": 16}, {"land": "Namibia", "ganz": 28, "halb": 19}, {"land": "Nepal", "ganz": 33, "halb": 22}, {"land": "Neuseeland", "ganz": 58, "halb": 39}, {"land": "Nicaragua", "ganz": 46, "halb": 31}, {"land": "Niederlande", "ganz": 58, "halb": 39}, {"land": "Niger", "ganz": 42, "halb": 28}, {"land": "Nigeria", "ganz": 52, "halb": 35}, {"land": "Nordmazedonien", "ganz": 27, "halb": 18}, {"land": "Norwegen", "ganz": 75, "halb": 50}, {"land": "Oman", "ganz": 64, "halb": 43}, {"land": "Pakistan", "ganz": 41, "halb": 28}, {"land": "Palau", "ganz": 51, "halb": 34}, {"land": "Panama", "ganz": 41, "halb": 28}, {"land": "Papua-Neuguinea", "ganz": 59, "halb": 40}, {"land": "Paraguay", "ganz": 39, "halb": 26}, {"land": "Peru", "ganz": 52, "halb": 35}, {"land": "Philippinen", "ganz": 41, "halb": 28}, {"land": "Polen / Breslau", "ganz": 34, "halb": 23}, {"land": "Polen / Warschau", "ganz": 40, "halb": 27}, {"land": "Polen / im Übrigen", "ganz": 34, "halb": 23}, {"land": "Portugal", "ganz": 32, "halb": 21}, {"land": "Ruanda", "ganz": 44, "halb": 29}, {"land": "Rumänien", "ganz": 38, "halb": 25}, {"land": "Russische Föderation / Moskau", "ganz": 30, "halb": 20}, {"land": "Russische Föderation / St. Petersburg", "ganz": 28, "halb": 19}, {"land": "Russische Föderation / im Übrigen", "ganz": 28, "halb": 19}, {"land": "Sambia", "ganz": 38, "halb": 25}, {"land": "Samoa", "ganz": 39, "halb": 26}, {"land": "San Marino", "ganz": 34, "halb": 23}, {"land": "Saudi-Arabien / Djidda", "ganz": 57, "halb": 38}, {"land": "Saudi-Arabien / Riad", "ganz": 56, "halb": 37}, {"land": "Saudi-Arabien / im Übrigen", "ganz": 56, "halb": 37}, {"land": "Schweden", "ganz": 66, "halb": 44}, {"land": "Schweiz / Bern", "ganz": 82, "halb": 55}, {"land": "Schweiz / Genf", "ganz": 70, "halb": 47}, {"land": "Schweiz / im Übrigen", "ganz": 70, "halb": 47}, {"land": "Senegal", "ganz": 48, "halb": 32}, {"land": "Serbien", "ganz": 27, "halb": 18}, {"land": "Sierra Leone", "ganz": 57, "halb": 38}, {"land": "Simbabwe", "ganz": 63, "halb": 42}, {"land": "Singapur", "ganz": 71, "halb": 48}, {"land": "Slowakische Republik", "ganz": 33, "halb": 22}, {"land": "Slowenien", "ganz": 38, "halb": 25}, {"land": "Spanien / Barcelona", "ganz": 34, "halb": 23}, {"land": "Spanien / Kanarische Inseln", "ganz": 36, "halb": 24}, {"land": "Spanien / Madrid", "ganz": 42, "halb": 28}, {"land": "Spanien / Palma de Mallorca", "ganz": 44, "halb": 29}, {"land": "Spanien / im Übrigen", "ganz": 34, "halb": 23}, {"land": "Sri Lanka", "ganz": 36, "halb": 24}, {"land": "São Tomé – Príncipe", "ganz": 36, "halb": 24}, {"land": "Südafrika / Johannesburg", "ganz": 36, "halb": 24}, {"land": "Südafrika / Kapstadt", "ganz": 33, "halb": 22}, {"land": "Südafrika / im Übrigen", "ganz": 29, "halb": 20}, {"land": "Südsudan", "ganz": 51, "halb": 34}, {"land": "Tadschikistan", "ganz": 27, "halb": 18}, {"land": "Taiwan", "ganz": 51, "halb": 34}, {"land": "Tansania", "ganz": 44, "halb": 29}, {"land": "Thailand", "ganz": 36, "halb": 24}, {"land": "Togo", "ganz": 36, "halb": 24}, {"land": "Tonga", "ganz": 29, "halb": 20}, {"land": "Trinidad und Tobago", "ganz": 66, "halb": 44}, {"land": "Tschad", "ganz": 42, "halb": 28}, {"land": "Tschechische Republik", "ganz": 32, "halb": 21}, {"land": "Tunesien", "ganz": 40, "halb": 27}, {"land": "Turkmenistan", "ganz": 28, "halb": 19}, {"land": "Türkei / Ankara", "ganz": 32, "halb": 21}, {"land": "Türkei / Izmir", "ganz": 44, "halb": 29}, {"land": "Türkei / im Übrigen", "ganz": 24, "halb": 16}, {"land": "USA / Atlanta", "ganz": 77, "halb": 52}, {"land": "USA / Boston", "ganz": 63, "halb": 42}, {"land": "USA / Chicago", "ganz": 65, "halb": 44}, {"land": "USA / Houston", "ganz": 62, "halb": 41}, {"land": "USA / Los Angeles", "ganz": 64, "halb": 43}, {"land": "USA / Miami", "ganz": 65, "halb": 44}, {"land": "USA / New York City", "ganz": 66, "halb": 44}, {"land": "USA / San Francisco", "ganz": 59, "halb": 40}, {"land": "USA / Washington, D. C.", "ganz": 66, "halb": 44}, {"land": "USA / im Übrigen", "ganz": 59, "halb": 40}, {"land": "Uganda", "ganz": 45, "halb": 30}, {"land": "Ukraine", "ganz": 33, "halb": 22}, {"land": "Ungarn", "ganz": 32, "halb": 21}, {"land": "Uruguay", "ganz": 40, "halb": 27}, {"land": "Usbekistan", "ganz": 32, "halb": 21}, {"land": "Vatikanstaat", "ganz": 48, "halb": 32}, {"land": "Venezuela", "ganz": 51, "halb": 34}, {"land": "Vereinigte Arabische Emirate", "ganz": 81, "halb": 54}, {"land": "Vereinigtes Königreich / London", "ganz": 66, "halb": 44}, {"land": "Vereinigtes Königreich / im Übrigen", "ganz": 52, "halb": 35}, {"land": "Vietnam", "ganz": 36, "halb": 24}, {"land": "Weißrussland", "ganz": 21, "halb": 14}, {"land": "Zentralafrikanische Republik", "ganz": 53, "halb": 36}, {"land": "Zypern", "ganz": 42, "halb": 28}, {"land": "Ägypten", "ganz": 50, "halb": 33}, {"land": "Äquatorialguinea", "ganz": 42, "halb": 28}, {"land": "Äthiopien", "ganz": 44, "halb": 29}, {"land": "Österreich", "ganz": 50, "halb": 33}];
 const INCOME_TYPES_DEFAULT = ['Gehalt','Nebenjob','Verkauf','Steuerrückerstattung','Geschenk','Blutspende','Sonstiges'];
 const EINKAUF_CATS_DEFAULT = ['Supermarkt','Drogerie','Bäcker/Metzger','Online'];
 
@@ -1472,7 +1498,7 @@ function askKontoWahl(opts) {
       '</button>'
     ).join('');
     overlay.innerHTML =
-      '<div style="background:var(--surface);color:var(--text);border:1px solid var(--border);border-radius:12px;padding:0;max-width:480px;width:100%;box-shadow:0 20px 60px rgba(0,0,0,.5);animation:fadeIn .15s ease-out">' +
+      '<div style="background:var(--surface);color:var(--text);border:1px solid var(--border);border-radius:12px;padding:0;max-width:' + (extraHtml ? '620px' : '480px') + ';width:100%;box-shadow:0 20px 60px rgba(0,0,0,.5);animation:fadeIn .15s ease-out">' +
         '<div style="padding:18px 22px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:12px">' +
           '<div style="font-size:28px;line-height:1">' + (o.icon||'🏦') + '</div>' +
           '<h3 style="margin:0;font-size:16px;font-weight:600;color:var(--text)">' + (o.title||'Welches Konto?') + '</h3>' +
@@ -2775,7 +2801,8 @@ function regelEinnahmeRow(r) {
   return '<tr>' +
     '<td><input type="text" value="' + (r.source||'').replace(/"/g,'&quot;') + '" onchange="updateRegelEinnahme(\'' + r.id + '\',\'source\',this.value)" /></td>' +
     '<td><select onchange="updateRegelEinnahme(\'' + r.id + '\',\'type\',this.value)">' + typeOpts + '</select></td>' +
-    '<td style="white-space:nowrap"><input type="month" value="' + (r.startMonth||'') + '" onchange="updateRegelEinnahme(\'' + r.id + '\',\'startMonth\',this.value)" style="width:145px"/> <input type="number" min="1" max="31" value="' + (+r.startTag||1) + '" onchange="updateRegelEinnahme(\'' + r.id + '\',\'startTag\',+this.value)" title="Tag des Geldeingangs – zählt im laufenden Monat erst ab diesem Tag in den Saldo" style="width:52px;text-align:center"/></td>' +
+    '<td style="white-space:nowrap"><input type="month" value="' + (r.startMonth||'') + '" onchange="updateRegelEinnahme(\'' + r.id + '\',\'startMonth\',this.value)" style="width:145px"/></td>' +
+    '<td><input type="number" min="1" max="31" value="' + (+r.startTag||1) + '" onchange="updateRegelEinnahme(\'' + r.id + '\',\'startTag\',+this.value)" title="Tag des Geldeingangs – zählt im laufenden Monat erst ab diesem Tag in den Saldo" style="width:56px;text-align:center"/></td>' +
     '<td><input type="month" value="' + (r.endMonth||'') + '" onchange="updateRegelEinnahme(\'' + r.id + '\',\'endMonth\',this.value)" style="width:145px" placeholder="Kein Ende"/></td>' +
     '<td><input type="text" value="' + (r.note||'').replace(/"/g,'&quot;') + '" onchange="updateRegelEinnahme(\'' + r.id + '\',\'note\',this.value)" placeholder="Notiz…"/></td>' +
     '<td style="white-space:nowrap"><input type="number" value="' + (+r.amount||0).toFixed(2) + '" step="0.01" onchange="updateRegelEinnahme(\'' + r.id + '\',\'amount\',+this.value)" style="width:90px;text-align:right"/> ' + currencySymbol() + '</td>' +
@@ -2798,7 +2825,7 @@ function einnahmen() {
   const totalRegel = regel.reduce((s,r) => s+r.amount, 0); // only active in currentMonth
   // Show all entries in management table, but mark inactive ones
   const regelTableHtml = allRegel.length
-    ? '<div class="table-wrap"><table><thead><tr><th>Quelle</th><th>Typ</th><th>Von</th><th>Bis</th><th>Notiz</th><th style="text-align:right">Betrag/Monat</th><th>Konto</th><th></th></tr></thead><tbody>' +
+    ? '<div class="table-wrap"><table><thead><tr><th>Quelle</th><th>Typ</th><th>Von</th><th title="Tag des Geldeingangs im Monat">Tag</th><th>Bis</th><th>Notiz</th><th style="text-align:right">Betrag/Monat</th><th>Konto</th><th></th></tr></thead><tbody>' +
       allRegel.map(r => regelEinnahmeRow(r, currentMonth)).join('') + '</tbody></table></div>'
     : '<div class="empty-state" style="padding:20px"><div class="empty-icon">🔁</div><p>Noch keine wiederkehrenden Einnahmen.<br>Über „+ Wiederkehrend" oder Quick-Add hinzufügen.</p></div>';
 
@@ -3063,7 +3090,10 @@ function spesen() {
       <div class="kpi"><div class="kpi-label">Spesen gesamt</div><div class="kpi-value positive">${fmtEur(totalSpesen)}</div></div>
       <div class="kpi"><div class="kpi-label">Ausgaben gesamt</div><div class="kpi-value negative">${fmtEur(totalAusgaben)}</div></div>
       <div class="kpi"><div class="kpi-label">Auslagen gesamt</div><div class="kpi-value neutral">${fmtEur(totalAuslagen)}</div></div>
-      <div class="kpi"><div class="kpi-label">Zu überweisen</div><div class="kpi-value ${totalNetto>=0?'positive':'negative'}">${fmtEur(totalNetto)}</div></div>
+    </div>
+
+    <div style="font-size:11px;color:var(--muted);margin:-8px 0 14px">
+      Pauschbeträge nach ${aktiverSpesenStand()}. Für nicht aufgeführte Länder gilt laut BMF der Satz für Luxemburg.
     </div>
 
     <div class="table-wrap"><table>
@@ -3149,7 +3179,8 @@ function speseRow(s) {
   const vorOrtTage = Math.max(0, totalDays - 2);
   const saldo    = (s.allowance||0) - (+s.ausgaben||0);
   const zuUeberweisen = (s.allowance||0) + (s.auslagen||0);
-  const countryOpts = SPESEN_LAENDER.map(l => `<option value="${l.land}" ${l.land===s.country?'selected':''}>${l.land} (${l.halb}€/${l.ganz}€)</option>`).join('');
+  const countryOpts = aktiveSpesenSaetze().filter(l => l.land !== 'Deutschland')
+    .map(l => `<option value="${l.land}" ${l.land===s.country?'selected':''}>${l.land} (${l.halb}€/${l.ganz}€)</option>`).join('');
   const deutschlandOpt = `<option value="Deutschland" ${'Deutschland'===s.country?'selected':''}>Deutschland (14€/28€)</option>`;
   return `<tr id="spese_${s.id}">
     <td><input type="date" value="${from}" onchange="updateSpeseDate('${s.id}','dateFrom',this.value)" style="width:145px"/></td>
@@ -3182,7 +3213,7 @@ function updateSpeseCountry(id, land) {
   s.country = land;
   if (land === 'Deutschland') { s.rateHalf = 14; s.ratePerDay = 28; }
   else {
-    const l = SPESEN_LAENDER.find(x=>x.land===land);
+    const l = spesenSatzFuer(land);
     if (l) { s.rateHalf = l.halb; s.ratePerDay = l.ganz; }
   }
   calcSpesen(s);
@@ -4199,6 +4230,11 @@ function deleteSpar(id){
 
 // ── PAGE: ZÄHLERSTÄNDE ────────────────────────────────────────────────────
 function tabellen() {
+  if (!tabellenAktiv()) {
+    return '<div class="empty-state"><div class="empty-icon">📝</div>' +
+      '<p>Der Bereich „Eigene Tabellen" ist nicht aktiviert.</p>' +
+      '<button class="btn btn-primary" onclick="tabellenAktivieren()" style="margin-top:10px">Eigene Tabellen aktivieren</button></div>';
+  }
   const tabs = state.tabellen || [];
   const tabsHtml = tabs.map((t,ti) => `
     <div class="card" style="margin-bottom:20px">
@@ -4818,7 +4854,7 @@ function einstellungen() {
       <div class="card mb-2">
         <div style="display:flex;flex-direction:column;gap:12px">
           <div style="display:flex;align-items:center;gap:12px">
-            <div class="div-switch ${cfg.etfLiveDaten?'div-switch-on':''}" onclick="toggleConfig('etfLiveDaten')" style="cursor:pointer">
+            <div class="div-switch ${cfg.etfLiveDaten?'div-switch-on':''}" onclick="toggleConfig('etfLiveDaten');etfAutoRefreshEinrichten()" style="cursor:pointer">
               <div class="div-switch-thumb"></div>
             </div>
             <span style="font-size:13px">ETF Live-Daten aktivieren</span>
@@ -4831,14 +4867,50 @@ function einstellungen() {
           </div>
           <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
             <span style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase">Intervall:</span>
-            <select style="width:140px" onchange="updateConfig('etfInterval',+this.value)">
+            <select style="width:140px" onchange="updateConfig('etfInterval',+this.value);etfAutoRefreshEinrichten()">
               ${[[0,'Manuell'],[15,'Alle 15 min'],[30,'Alle 30 min'],[60,'Jede Stunde']].map(([v,l])=>'<option value="'+v+'"'+((cfg.etfInterval||0)===v?' selected':'')+'>'+l+'</option>').join('')}
             </select>
             <span class="badge ${cfg.etfLiveDaten?'badge-green':'badge-muted'}">${cfg.etfLiveDaten?'✓ Live-Daten aktiv':'Live-Daten inaktiv'}</span>
+            ${cfg.etfLiveDaten && (+cfg.etfInterval>0)
+              ? `<span class="badge badge-muted">Timer läuft: alle ${+cfg.etfInterval} min</span>` : ''}
           </div>
+          ${etfLetzteAktualisierung()
+            ? `<div style="font-size:11px;color:var(--muted)">Zuletzt aktualisiert: ${etfLetzteAktualisierung()}</div>` : ''}
         </div>
         <div style="margin-top:10px;background:var(--surface);border-radius:8px;padding:10px 12px">
           <p style="font-size:11px;color:var(--muted)">Datenquelle: Yahoo Finance (kein API-Key erforderlich) · Ticker z.B. EUNL.DE für MSCI World</p>
+        </div>
+      </div>
+
+      <div class="settings-section-header">🧳 Spesensätze</div>
+      <div class="card mb-2">
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+          <strong style="font-size:13px">Aktueller Stand</strong>
+          <span style="flex:1"></span>
+          <button class="btn btn-sm btn-primary" id="spesenUpdateBtn" onclick="spesenUpdatePruefen()">Nach Aktualisierung suchen</button>
+          ${state.spesenSaetze
+            ? `<button class="btn btn-sm btn-ghost" onclick="spesenSaetzeZuruecksetzen()">Zurücksetzen</button>` : ''}
+        </div>
+        <div style="font-size:12px;color:var(--muted);margin-top:6px">
+          ${aktiverSpesenStand()} · ${aktiveSpesenSaetze().length} Länder
+          ${state.spesenSaetze ? ' · nachträglich geladen' : ' · mit der App ausgeliefert'}
+        </div>
+        <div style="display:flex;align-items:center;gap:12px;margin-top:12px;padding-top:12px;border-top:1px solid var(--border)">
+          <div class="div-switch ${cfg.spesenAutoUpdate?'div-switch-on':''}" onclick="toggleConfig('spesenAutoUpdate')" style="cursor:pointer">
+            <div class="div-switch-thumb"></div>
+          </div>
+          <div>
+            <div style="font-size:13px">Wöchentlich automatisch nachsehen</div>
+            <div style="font-size:11px;color:var(--muted);margin-top:2px">Meldet sich nur, wenn es tatsächlich neue Sätze gibt – übernommen wird nichts ohne deine Bestätigung</div>
+          </div>
+        </div>
+        <div style="margin-top:10px;background:var(--surface);border-radius:8px;padding:10px 12px">
+          <p style="font-size:11px;color:var(--muted)">
+            Das Bundesfinanzministerium veröffentlicht die Pauschbeträge jährlich im Dezember,
+            allerdings nur als PDF ohne maschinenlesbare Schnittstelle. Die App lädt deshalb eine
+            geprüfte Fassung aus dem Projekt-Repository. Bereits erfasste Reisen behalten immer
+            ihre gespeicherten Sätze.
+          </p>
         </div>
       </div>
 
@@ -4860,6 +4932,26 @@ function einstellungen() {
           Eigener Bereich für Photovoltaik: Produktion, Verbrauch, Netzbezug und
           Einspeisung pro Monat – mit Autarkie, Eigenverbrauchsquote und
           Jahresvergleich. Beim Ausblenden bleiben alle Daten erhalten.
+        </div>
+      </div>
+
+      <div class="settings-section-header">📝 Eigene Tabellen</div>
+      <div class="card mb-2">
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+          <span style="font-size:16px">📝</span>
+          <strong style="font-size:13px">Eigene Tabellen</strong>
+          <span style="font-size:12px;color:${tabellenAktiv()?'var(--green)':'var(--muted)'}">
+            ${tabellenAktiv()?'aktiv – Menüpunkt sichtbar':'nicht aktiv'}
+          </span>
+          <span style="flex:1"></span>
+          ${tabellenAktiv()
+            ? `<button class="btn btn-sm btn-ghost" onclick="navigate('tabellen')">Öffnen</button>
+               <button class="btn btn-sm btn-ghost" onclick="tabellenDeaktivieren()">Ausblenden</button>`
+            : `<button class="btn btn-sm btn-primary" onclick="tabellenAktivieren()">Aktivieren</button>`}
+        </div>
+        <div style="font-size:12px;color:var(--muted);margin-top:8px">
+          Frei gestaltbare Tabellen für eigene Aufstellungen, die nicht in die
+          übrigen Bereiche passen. Beim Ausblenden bleiben alle Tabellen erhalten.
         </div>
       </div>
 
@@ -5842,6 +5934,10 @@ async function pvAktivieren() {
   }
   saveData();
   pvNavSichtbarkeit();
+  tabellenNavSichtbarkeit();
+  etfAutoRefreshEinrichten();
+  etfStartRefresh().catch(e => console.error(e));
+  spesenAutoPruefung().catch(e => console.error(e));
   navigate('pv');
   showToast('PV-Bereich aktiviert','info');
 }
@@ -5919,6 +6015,36 @@ function pvToggleVergleich() {
   const cfg = pvCfg();
   cfg.vergleichAktiv = !cfg.vergleichAktiv;
   saveData(); renderPage();
+}
+
+// ── Eigene Tabellen: optional aktivierbar (wie PV) ─────────────────────────
+function tabellenAktiv() { return !!(state.config && state.config.tabellenAktiv); }
+function tabellenNavSichtbarkeit() {
+  const btn = document.getElementById('navTabellen');
+  if (btn) btn.style.display = tabellenAktiv() ? '' : 'none';
+}
+async function tabellenAktivieren() {
+  if (!state.config) state.config = {};
+  state.config.tabellenAktiv = true;
+  saveData();
+  tabellenNavSichtbarkeit();
+  navigate('tabellen');
+  showToast('Eigene Tabellen aktiviert','info');
+}
+async function tabellenDeaktivieren() {
+  const ok = await uiConfirm({
+    title: 'Eigene Tabellen ausblenden', icon: '📝',
+    message: 'Den Menüpunkt „Eigene Tabellen" ausblenden?',
+    details: ['Deine angelegten Tabellen bleiben vollständig erhalten.',
+              'Du kannst den Bereich jederzeit in den Einstellungen wieder einblenden.'],
+    okLabel: 'Ausblenden', cancelLabel: 'Abbrechen',
+  });
+  if (!ok) return;
+  state.config.tabellenAktiv = false;
+  saveData();
+  tabellenNavSichtbarkeit();
+  navigate('einstellungen');
+  showToast('Eigene Tabellen ausgeblendet – Daten bleiben gespeichert','info');
 }
 
 // ── PV: Seite ──────────────────────────────────────────────────────────────
@@ -6422,6 +6548,7 @@ function uiConfirm(opts) {
     const title    = o.title    || 'Bestätigung';
     const message  = o.message  || '';
     const details  = o.details  || [];  // array of strings to list
+    const extraHtml = o.html   || '';   // optionaler HTML-Block unter der Nachricht
     const okLabel  = o.okLabel  || 'OK';
     const cancelLabel = o.cancelLabel || 'Abbrechen';
     const danger   = !!o.danger;
@@ -6443,7 +6570,7 @@ function uiConfirm(opts) {
           '<h3 style="margin:0;font-size:16px;font-weight:600;color:var(--text)">' + title + '</h3>' +
         '</div>' +
         '<div style="padding:18px 22px;font-size:14px;line-height:1.5;color:var(--text)">' +
-          message + detailsHtml +
+          message + detailsHtml + (extraHtml ? '<div style="margin-top:12px">' + extraHtml + '</div>' : '') +
         '</div>' +
         '<div style="padding:14px 22px;border-top:1px solid var(--border);display:flex;justify-content:flex-end;gap:8px;background:var(--surface-2);border-radius:0 0 12px 12px">' +
           '<button class="btn btn-ghost" data-ui-action="cancel">' + cancelLabel + '</button>' +
@@ -7553,23 +7680,208 @@ async function fetchEtfKurs(ticker) {
   }
 }
 
-async function refreshEtfKurse() {
-  const etfBtn = document.getElementById('etf_refresh_btn');
+async function refreshEtfKurse(still) {
+  const etfBtn = still ? null : document.getElementById('etf_refresh_btn');
   if (etfBtn) { etfBtn.textContent = '⏳ Lädt…'; etfBtn.disabled = true; }
   if (!state.etfKurse) state.etfKurse = {};
   const tickers = [...new Set((state.sparen||[]).filter(s=>s.etf&&s.etf.ticker).map(s=>s.etf.ticker))];
-  if (!tickers.length) { showToast('Kein ETF mit Ticker gefunden', 'info'); if(etfBtn){etfBtn.textContent='🔄 Kurse laden';etfBtn.disabled=false;} return; }
+  if (!tickers.length) {
+    if (!still) showToast('Kein ETF mit Ticker gefunden', 'info');
+    if (etfBtn) { etfBtn.textContent='🔄 Kurse laden'; etfBtn.disabled=false; }
+    return { loaded:0, errors:0, leer:true };
+  }
   let loaded = 0, errors = 0;
   for (const ticker of tickers) {
     const data = await fetchEtfKurs(ticker);
     if (data && !data.fehler) { state.etfKurse[ticker] = data; loaded++; }
     else { state.etfKurse[ticker] = data || { fehler: 'Unbekannter Fehler' }; errors++; }
   }
+  if (!state.config) state.config = {};
+  state.config.etfLastRefresh = new Date().toISOString();
   saveData();
-  renderPage();
+  // Im Hintergrund nur neu zeichnen, wenn die Depot-Seite gerade offen ist –
+  // sonst würde ein Timer die Eingabe auf anderen Seiten stören.
+  if (!still || currentPage === 'sparen') renderPage();
   if (etfBtn) { etfBtn.textContent = '🔄 Kurse laden'; etfBtn.disabled = false; }
-  if (errors === 0) showToast(loaded + ' ETF-Kurs' + (loaded>1?'e':'') + ' geladen');
-  else showToast(loaded + ' geladen, ' + errors + ' Fehler', errors>0&&loaded===0?'error':'info');
+  if (!still) {
+    if (errors === 0) showToast(loaded + ' ETF-Kurs' + (loaded>1?'e':'') + ' geladen');
+    else showToast(loaded + ' geladen, ' + errors + ' Fehler', errors>0&&loaded===0?'error':'info');
+  }
+  return { loaded, errors };
+}
+
+// ── ETF-Kurse automatisch aktualisieren ────────────────────────────────────
+// Hinweis: Bisher wurden 'etfAutoRefresh' und 'etfInterval' zwar gespeichert und
+// angezeigt, aber nirgends ausgewertet – es gab weder Start-Abruf noch Timer.
+let _etfTimer = null;
+function etfAutoRefreshEinrichten() {
+  if (_etfTimer) { clearInterval(_etfTimer); _etfTimer = null; }
+  const cfg = state.config || {};
+  if (!cfg.etfLiveDaten) return;              // Live-Daten komplett aus
+  const min = +cfg.etfInterval || 0;
+  if (min > 0) {
+    _etfTimer = setInterval(() => {
+      // Nur laufen, wenn Live-Daten weiterhin aktiv sind und Ticker existieren
+      const c = state.config || {};
+      if (!c.etfLiveDaten || !(+c.etfInterval > 0)) { etfAutoRefreshEinrichten(); return; }
+      if (!(state.sparen||[]).some(s => s.etf && s.etf.ticker)) return;
+      refreshEtfKurse(true).catch(e => console.error('ETF-Auto-Refresh:', e));
+    }, min * 60 * 1000);
+  }
+}
+// Beim Programmstart einmal aktualisieren (wenn gewünscht und sinnvoll)
+async function etfStartRefresh() {
+  const cfg = state.config || {};
+  if (!cfg.etfLiveDaten || !cfg.etfAutoRefresh) return;
+  if (!(state.sparen||[]).some(s => s.etf && s.etf.ticker)) return;
+  // Nicht öfter als alle 10 Minuten, damit ein Neustart nicht jedes Mal lädt
+  const last = Date.parse(cfg.etfLastRefresh || 0);
+  if (isFinite(last) && (Date.now() - last) < 10*60*1000) return;
+  try { await refreshEtfKurse(true); } catch(e) { console.error('ETF-Start-Refresh:', e); }
+}
+function etfLetzteAktualisierung() {
+  const t = (state.config||{}).etfLastRefresh;
+  if (!t) return null;
+  const d = new Date(t);
+  if (isNaN(d)) return null;
+  const min = Math.round((Date.now() - d.getTime()) / 60000);
+  if (min < 1)  return 'gerade eben';
+  if (min < 60) return 'vor ' + min + ' Min.';
+  const std = Math.round(min/60);
+  if (std < 24) return 'vor ' + std + ' Std.';
+  return d.toLocaleDateString('de-DE') + ' ' + d.toLocaleTimeString('de-DE',{hour:'2-digit',minute:'2-digit'});
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// SPESENSÄTZE AKTUALISIEREN
+// ════════════════════════════════════════════════════════════════════════════
+// Das BMF veröffentlicht die Sätze nur als PDF ohne maschinenlesbare Schnittstelle.
+// Ein PDF-Parser in der App wäre fragil (Ländername und Beträge stehen dort in
+// getrennten Zeilen) – ein stiller Parsing-Fehler bei steuerrelevanten Zahlen
+// wäre schlimmer als eine veraltete Tabelle. Deshalb liest die App eine geprüfte
+// JSON aus dem Projekt-Repository.
+const SPESEN_UPDATE_URL = 'https://raw.githubusercontent.com/Marco-Conrad-00/FinanzverwaltungPro-/main/spesen/index.json';
+
+function aktiveSpesenSaetze() {
+  const e = (state.spesenSaetze && Array.isArray(state.spesenSaetze.laender))
+    ? state.spesenSaetze.laender : null;
+  return (e && e.length) ? e : SPESEN_LAENDER;
+}
+function aktiverSpesenStand() {
+  return (state.spesenSaetze && state.spesenSaetze.stand) || SPESEN_STAND;
+}
+// Nachschlagen mit BMF-Rückfallregel: Für nicht aufgeführte Länder gilt der
+// Pauschbetrag für Luxemburg (BMF-Schreiben vom 05.12.2025, Seite 2).
+function spesenSatzFuer(land) {
+  const liste = aktiveSpesenSaetze();
+  const t = liste.find(x => x.land === land);
+  if (t) return t;
+  return liste.find(x => x.land === 'Luxemburg') || null;
+}
+
+async function spesenUpdatePruefen(still) {
+  if (!window.EA || !window.EA.fetchUrl) {
+    if (!still) await uiAlert({ title:'Nicht verfügbar', icon:'⚠',
+      message:'Die Update-Prüfung benötigt die Desktop-App.' });
+    return;
+  }
+  const btn = document.getElementById('spesenUpdateBtn');
+  if (btn) { btn.textContent = '⏳ Prüfe…'; btn.disabled = true; }
+  const fertig = () => { if (btn) { btn.textContent = 'Nach Aktualisierung suchen'; btn.disabled = false; } };
+  try {
+    const r = await window.EA.fetchUrl(SPESEN_UPDATE_URL + '?t=' + Date.now());
+    if (!r || !r.ok) throw new Error('Serverantwort ' + (r && r.status || '—'));
+    let idx;
+    try { idx = JSON.parse(r.body); }
+    catch { throw new Error('Antwort war kein gültiges JSON'); }
+    if (!idx || !idx.version || !Array.isArray(idx.laender)) {
+      throw new Error('Datei hat ein unerwartetes Format');
+    }
+    // Plausibilität, bevor irgendetwas übernommen wird
+    const ungueltig = idx.laender.filter(l =>
+      !l || typeof l.land !== 'string' || !l.land ||
+      typeof l.ganz !== 'number' || typeof l.halb !== 'number' ||
+      l.ganz <= 0 || l.halb <= 0 || l.halb > l.ganz);
+    if (ungueltig.length) throw new Error(ungueltig.length + ' fehlerhafte Einträge in der Datei');
+    if (idx.laender.length < 100) throw new Error('Datei enthält nur ' + idx.laender.length + ' Länder – vermutlich unvollständig');
+
+    const aktuellVersion = (state.spesenSaetze && state.spesenSaetze.version) || SPESEN_VERSION;
+    if (String(idx.version) === String(aktuellVersion)) {
+      fertig();
+      if (!still) await uiAlert({ title:'Bereits aktuell', icon:'✅',
+        message:'Deine Spesensätze sind auf dem neuesten Stand.<br><br><span style="color:var(--muted)">' + aktiverSpesenStand() + '</span>' });
+      return;
+    }
+    // Änderungen ermitteln
+    const alt = {}; aktiveSpesenSaetze().forEach(l => alt[l.land] = [l.ganz, l.halb]);
+    const geaendert = [], neu = [];
+    idx.laender.forEach(l => {
+      if (!(l.land in alt)) neu.push(l);
+      else if (alt[l.land][0] !== l.ganz || alt[l.land][1] !== l.halb)
+        geaendert.push([l.land, alt[l.land][0], alt[l.land][1], l.ganz, l.halb]);
+    });
+    const entfallen = Object.keys(alt).filter(k => !idx.laender.some(l => l.land === k));
+    fertig();
+    if (still && !geaendert.length && !neu.length) return;
+
+    const bsp = geaendert.slice(0, 12).map(([l,ag,ah,ng,nh]) =>
+      '<tr><td>' + escapeHtml(l) + '</td><td style="text-align:right;color:var(--muted)">' + ag + '/' + ah +
+      '</td><td style="text-align:right;font-weight:600">' + ng + '/' + nh + '</td></tr>').join('');
+
+    const ok = await uiConfirm({
+      title: 'Neue Spesensätze verfügbar', icon: '🧳',
+      message: 'Neuer Stand: <strong>' + escapeHtml(idx.stand || idx.version) + '</strong>',
+      html: '<div style="font-size:12px;color:var(--muted);margin-bottom:10px">' +
+              geaendert.length + ' geänderte Sätze · ' + neu.length + ' neu · ' + entfallen.length + ' entfallen' +
+            '</div>' +
+            (bsp ? '<div class="table-wrap" style="max-height:230px;overflow:auto"><table>' +
+              '<thead><tr><th>Land</th><th style="text-align:right">bisher</th><th style="text-align:right">neu</th></tr></thead>' +
+              '<tbody>' + bsp + '</tbody></table></div>' +
+              (geaendert.length > 12 ? '<div style="font-size:11px;color:var(--muted);margin-top:6px">… und ' + (geaendert.length-12) + ' weitere</div>' : '')
+            : '') +
+            (entfallen.length ? '<div style="font-size:11px;color:var(--muted);margin-top:10px">Für entfallene Länder gilt weiterhin der Satz für Luxemburg.</div>' : '') +
+            '<div style="font-size:11px;color:var(--muted);margin-top:10px">Bereits erfasste Reisen behalten ihre gespeicherten Sätze.</div>',
+      okLabel: 'Übernehmen', cancelLabel: 'Später',
+    });
+    if (!ok) return;
+    state.spesenSaetze = {
+      version: String(idx.version),
+      stand: idx.stand || String(idx.version),
+      quelle: idx.quelle || '',
+      geladenAm: new Date().toISOString(),
+      laender: idx.laender,
+    };
+    saveData(); renderPage();
+    showToast('Spesensätze aktualisiert (' + idx.laender.length + ' Länder)','info');
+  } catch (e) {
+    fertig();
+    console.error('Spesen-Update:', e);
+    if (!still) await uiAlert({ title:'Aktualisierung fehlgeschlagen', icon:'⚠',
+      message:'Die Spesensätze konnten nicht geladen werden.<br><br><span style="color:var(--muted)">' + escapeHtml(e.message) + '</span><br><br>Deine bisherigen Sätze bleiben unverändert.' });
+  }
+}
+async function spesenSaetzeZuruecksetzen() {
+  const ok = await uiConfirm({
+    title: 'Spesensätze zurücksetzen', icon: '↩',
+    message: 'Auf die mit der App ausgelieferten Sätze zurücksetzen?',
+    details: ['Aktiv wird wieder: ' + SPESEN_STAND],
+    okLabel: 'Zurücksetzen', cancelLabel: 'Abbrechen',
+  });
+  if (!ok) return;
+  delete state.spesenSaetze;
+  saveData(); renderPage();
+  showToast('Spesensätze zurückgesetzt','info');
+}
+// Höchstens einmal pro Woche im Hintergrund nachsehen
+async function spesenAutoPruefung() {
+  const cfg = state.config || {};
+  if (!cfg.spesenAutoUpdate) return;
+  const last = Date.parse(cfg.spesenLastCheck || 0);
+  if (isFinite(last) && (Date.now() - last) < 7*24*60*60*1000) return;
+  if (!state.config) state.config = {};
+  state.config.spesenLastCheck = new Date().toISOString();
+  saveData();
+  try { await spesenUpdatePruefen(true); } catch(e) { console.error(e); }
 }
 
 function getEtfKursInfo(s) {
@@ -7605,6 +7917,17 @@ window.pvUpdate          = pvUpdate;
 window.pvToggleChartJahr = pvToggleChartJahr;
 window.pvToggleVergleich = pvToggleVergleich;
 window.pvNavSichtbarkeit = pvNavSichtbarkeit;
+window.tabellenAktiv     = tabellenAktiv;
+window.tabellenAktivieren = tabellenAktivieren;
+window.tabellenDeaktivieren = tabellenDeaktivieren;
+window.tabellenNavSichtbarkeit = tabellenNavSichtbarkeit;
+window.spesenSatzFuer    = spesenSatzFuer;
+window.spesenUpdatePruefen = spesenUpdatePruefen;
+window.spesenSaetzeZuruecksetzen = spesenSaetzeZuruecksetzen;
+window.aktiverSpesenStand = aktiverSpesenStand;
+window.aktiveSpesenSaetze = aktiveSpesenSaetze;
+window.etfAutoRefreshEinrichten = etfAutoRefreshEinrichten;
+window.etfLetzteAktualisierung = etfLetzteAktualisierung;
 window.pvAktiv           = pvAktiv;
 window.setSettingsTab    = setSettingsTab;
 window.farbeSetzen       = farbeSetzen;
