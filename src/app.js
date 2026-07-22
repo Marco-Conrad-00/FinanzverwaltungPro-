@@ -161,6 +161,14 @@ let _snoozedReminders = {};
 // Format je Eintrag: { v: 'Version', date: 'YYYY-MM-DD', changes: ['...','...'] }
 // Änderungen dürfen mit **Fett** Markierung versehen werden.
 const CHANGELOG = [
+  { v: '1.0.22', date: '2026-07-22', changes: [
+    '**Diagramm auf dem Dashboard ist jetzt anklickbar**: Ein Klick auf ein Tortenstück, einen Balken oder einen Eintrag in der Legende klappt darunter alle einzelnen Buchungen dieser Kategorie auf – mit Datum, Beschreibung, Betrag und Gesamtsumme',
+    '**Fünf Diagramme statt einem**, umschaltbar über Pfeile links und rechts: Ausgaben nach Kategorie, nach Konto, im Jahresverlauf, Einnahmen gegen Ausgaben sowie die größten Einzelposten',
+    'Punkte unter dem Diagramm zeigen, wo man sich befindet, und erlauben den direkten Sprung',
+    'Die zuletzt gewählte Ansicht bleibt erhalten',
+    'Das ausgewählte Segment wird hervorgehoben, die übrigen treten zurück',
+    'Die Diagrammfarben richten sich jetzt nach der eingestellten Akzentfarbe; die Beschriftungen sind im dunklen Modus wieder gut lesbar',
+  ]},
   { v: '1.0.21', date: '2026-07-22', changes: [
     '**Fehler behoben: Farbänderungen wirkten im dunklen Modus nicht.** Die Einstellung wurde zwar gespeichert, aber sofort wieder vom Design überschrieben – jetzt schlagen alle Farben korrekt durch',
     '**Hintergrundfarbe frei wählbar**: Karten, Seitenleiste, Rahmen und Eingabefelder werden automatisch passend dazu abgestuft',
@@ -2097,8 +2105,18 @@ function dashboard() {
 
     <div style="display:grid;grid-template-columns:1.2fr 0.8fr;gap:14px">
       <div class="card">
-        <div class="card-header"><h3>Ausgaben nach Kategorie</h3></div>
+        <div class="card-header" style="gap:8px">
+          <button class="btn-icon" onclick="dashChartWechseln(-1)" title="Vorheriges Diagramm">‹</button>
+          <h3 style="flex:1;text-align:center;min-width:0">${DASH_CHARTS[dashChartIdx()].titel}</h3>
+          <button class="btn-icon" onclick="dashChartWechseln(1)" title="Nächstes Diagramm">›</button>
+        </div>
         <div style="position:relative;max-height:260px;max-width:100%"><canvas id="catChart"></canvas></div>
+        <div style="display:flex;justify-content:center;gap:6px;margin-top:8px">
+          ${DASH_CHARTS.map((c,i) => `<button onclick="dashChartSetzen('${i}')" title="${c.titel}"
+            style="width:7px;height:7px;padding:0;border-radius:50%;cursor:pointer;border:none;
+            background:${i===dashChartIdx() ? 'var(--accent)' : 'var(--border)'}"></button>`).join('')}
+        </div>
+        <div id="catDrill">${dashDrilldownHtml()}</div>
       </div>
       <div class="card">
         <div class="card-header"><h3>Kostenkalender ${monthLabel(currentMonth)}</h3></div>
@@ -2140,26 +2158,203 @@ function dashboard() {
     </div>`;
 }
 
+// ════════════════════════════════════════════════════════════════════════════
+// DASHBOARD-DIAGRAMME (umschaltbar per Pfeil, Kategorie anklickbar)
+// ════════════════════════════════════════════════════════════════════════════
+const DASH_CHARTS = [
+  { id:'kategorie', titel:'Ausgaben nach Kategorie', typ:'doughnut' },
+  { id:'konto',     titel:'Ausgaben nach Konto',     typ:'doughnut' },
+  { id:'verlauf',   titel:'Ausgaben im Jahresverlauf', typ:'bar' },
+  { id:'einnahmen', titel:'Einnahmen vs. Ausgaben',  typ:'bar' },
+  { id:'top',       titel:'Größte Einzelposten',     typ:'bar' },
+];
+function dashChartIdx() {
+  const i = (state.config || {}).dashChart;
+  return (Number.isInteger(i) && i >= 0 && i < DASH_CHARTS.length) ? i : 0;
+}
+function dashChartSetzen(i) {
+  const n = parseInt(i, 10);
+  if (!Number.isFinite(n)) return;
+  if (!state.config) state.config = {};
+  state.config.dashChart = ((n % DASH_CHARTS.length) + DASH_CHARTS.length) % DASH_CHARTS.length;
+  state.config.dashDrill = null;   // Aufklappung beim Wechsel schließen
+  saveData(); renderPage();
+}
+function dashChartWechseln(richtung) { dashChartSetzen(dashChartIdx() + richtung); }
+
+// Buchungen des aktuellen Monats, einheitlich aufbereitet
+function dashPosten() {
+  const ausgaben  = (state.ausgaben||[]).filter(a => a.month === currentMonth && !a._korrektur);
+  const einkaeufe = (state.einkaeufe||[]).filter(e => e.month === currentMonth);
+  return [
+    ...ausgaben.map(a  => ({ desc:a.desc||'—', cat:a.category||'Ohne Kategorie',
+                             v:+a.amount||0, date:a.date||'', kontoId:a.kontoId||defaultKontoId() })),
+    ...einkaeufe.map(e => ({ desc:e.desc||e.shop||'Einkauf', cat:'Einkauf Lebensmittel',
+                             v:+e.amount||0, date:e.date||'', kontoId:e.kontoId||defaultKontoId() })),
+  ];
+}
+// Liefert {labels, data, posten} je nach gewähltem Diagramm.
+// 'posten' ordnet jedem Label seine Einzelbuchungen zu (für das Aufklappen).
+function dashDaten(chartId) {
+  const alle = dashPosten();
+  if (chartId === 'konto') {
+    const grp = {};
+    alle.forEach(p => {
+      const k = getKonten().find(x => x.id === p.kontoId);
+      const name = k ? (k.name||'Konto') : 'Unbekanntes Konto';
+      (grp[name] = grp[name] || []).push(p);
+    });
+    const labels = Object.keys(grp).sort((a,b) => summe(grp[b]) - summe(grp[a]));
+    return { labels, data: labels.map(l => summe(grp[l])), posten: grp };
+  }
+  if (chartId === 'verlauf') {
+    const grp = {};
+    allMonths2026.forEach(m => { grp[monthLabel(m)] = []; });
+    const jahr = [
+      ...(state.ausgaben||[]).filter(a => !a._korrektur),
+      ...(state.einkaeufe||[]),
+    ];
+    jahr.forEach(b => {
+      const lbl = monthLabel(b.month);
+      if (grp[lbl]) grp[lbl].push({ desc:b.desc||b.shop||'—', cat:b.category||'Einkauf',
+                                    v:+b.amount||0, date:b.date||'' });
+    });
+    const labels = Object.keys(grp);
+    return { labels, data: labels.map(l => summe(grp[l])), posten: grp };
+  }
+  if (chartId === 'einnahmen') {
+    const f = monthFinancials(currentMonth);
+    return {
+      labels: ['Einnahmen','Ausgaben'],
+      data: [f.totalIncome, f.totalExpenses],
+      posten: { 'Ausgaben': alle, 'Einnahmen': [] },
+      keinDrill: true,
+    };
+  }
+  if (chartId === 'top') {
+    const top = alle.slice().sort((a,b) => b.v - a.v).slice(0, 8);
+    const grp = {};
+    top.forEach(p => { grp[p.desc] = [p]; });
+    return { labels: top.map(p => p.desc), data: top.map(p => p.v), posten: grp };
+  }
+  // Standard: nach Kategorie
+  const grp = {};
+  alle.forEach(p => { (grp[p.cat] = grp[p.cat] || []).push(p); });
+  const labels = Object.keys(grp).sort((a,b) => summe(grp[b]) - summe(grp[a]));
+  return { labels, data: labels.map(l => summe(grp[l])), posten: grp };
+}
+function summe(liste) { return (liste||[]).reduce((s,p) => s + (+p.v||0), 0); }
+
+// Farbpalette – nutzt die eingestellte Akzentfarbe als Ausgangspunkt
+function dashFarben(n) {
+  const css = getComputedStyle(document.documentElement);
+  const a  = (css.getPropertyValue('--accent')  || '#0EA5E9').trim();
+  const a2 = (css.getPropertyValue('--accent2') || '#22D3EE').trim();
+  const basis = [a, a2, '#8B5CF6', '#F59E0B', '#EF4444', '#22C55E', '#EC4899', '#14B8A6', '#F97316', '#6366F1'];
+  const out = [];
+  for (let i = 0; i < n; i++) {
+    const f = basis[i % basis.length];
+    // ab dem zweiten Durchlauf leicht abdunkeln, damit Farben unterscheidbar bleiben
+    out.push(i < basis.length ? f : farbeDunkler(f, 0.22));
+  }
+  return out;
+}
+
+// ── Aufklappbare Einzelposten unter dem Diagramm ───────────────────────────
+function dashDrilldownHtml() {
+  const sel = (state.config || {}).dashDrill;
+  if (!sel) return '';
+  const chart = DASH_CHARTS[dashChartIdx()];
+  const { posten } = dashDaten(chart.id);
+  const liste = (posten && posten[sel]) || [];
+  if (!liste.length) return '';
+  const ges = summe(liste);
+  const zeilen = liste.slice().sort((a,b) => b.v - a.v).map(p => `
+    <tr>
+      <td class="muted" style="white-space:nowrap">${p.date || '—'}</td>
+      <td>${escapeHtml(p.desc)}</td>
+      <td class="amount negative" style="text-align:right;white-space:nowrap">${fmtEur(p.v)}</td>
+    </tr>`).join('');
+  return `
+    <div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border)">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+        <strong style="font-size:13px">${escapeHtml(sel)}</strong>
+        <span class="badge badge-muted">${liste.length} ${liste.length===1?'Posten':'Posten'}</span>
+        <span style="flex:1"></span>
+        <strong style="font-size:13px">${fmtEur(ges)}</strong>
+        <button class="btn-icon" onclick="dashDrillSchliessen()" title="Schließen">×</button>
+      </div>
+      <div class="table-wrap" style="max-height:230px;overflow-y:auto">
+        <table><tbody>${zeilen}</tbody></table>
+      </div>
+    </div>`;
+}
+function dashDrillOeffnen(label) {
+  if (!state.config) state.config = {};
+  state.config.dashDrill = (state.config.dashDrill === label) ? null : label;
+  saveData(); renderPage();
+}
+function dashDrillSchliessen() {
+  if (!state.config) state.config = {};
+  state.config.dashDrill = null;
+  saveData(); renderPage();
+}
+
 function renderCharts() {
-  const ausgaben = state.ausgaben.filter(a => a.month === currentMonth && !a._korrektur);
-  const einkaeufe = state.einkaeufe.filter(e => e.month === currentMonth);
-  const all = [...ausgaben.map(a => ({cat: a.category, v: a.amount})), ...einkaeufe.map(e => ({cat: 'Einkauf Lebensmittel', v: e.amount}))];
-  const bycat = {};
-  all.forEach(({cat, v}) => { bycat[cat] = (bycat[cat]||0) + v; });
-  const labels = Object.keys(bycat);
-  const data = labels.map(k => bycat[k]);
-  const colors = ['#0f766e','#2563eb','#7c3aed','#b45309','#b42318','#11845b','#64716d','#0096c7','#f59f00','#e64980'];
   const ctx = el('catChart');
-  if (ctx && labels.length) {
+  if (!ctx || typeof Chart === 'undefined') return;
+  const chart = DASH_CHARTS[dashChartIdx()];
+  const { labels, data, keinDrill } = dashDaten(chart.id);
+  if (!labels.length) return;
+
+  const css = getComputedStyle(document.documentElement);
+  const textCol = (css.getPropertyValue('--text')    || '#e5e7eb').trim();
+  const gridCol = (css.getPropertyValue('--border')  || '#334155').trim();
+  const flaeche = (css.getPropertyValue('--surface') || '#1E293B').trim();
+  const farben = dashFarben(labels.length);
+  const sel = (state.config || {}).dashDrill;
+
+  // Ausgewähltes Segment hervorheben, übrige leicht zurücknehmen
+  const bg = labels.map((l,i) => (sel && l !== sel) ? farben[i] + '55' : farben[i]);
+
+  const beiKlick = (evt, elems) => {
+    if (keinDrill || !elems || !elems.length) return;
+    dashDrillOeffnen(labels[elems[0].index]);
+  };
+
+  const gemeinsam = {
+    responsive: true,
+    maintainAspectRatio: true,
+    onClick: beiKlick,
+    onHover: (e, els) => { e.native.target.style.cursor = (!keinDrill && els.length) ? 'pointer' : 'default'; },
+  };
+
+  if (chart.typ === 'doughnut') {
     chartInstances.cat = new Chart(ctx, {
       type: 'doughnut',
-      data: { labels, datasets: [{ data, backgroundColor: colors.slice(0,labels.length), borderWidth: 2, borderColor: '#fff' }] },
-      options: {
-        responsive: true,
-        maintainAspectRatio: true,
-        aspectRatio: 1.8,
-        plugins: { legend: { position: 'right', labels: { font: { size: 11, family: 'Inter' }, boxWidth: 12, padding: 10 } } }
-      }
+      data: { labels, datasets: [{ data, backgroundColor: bg, borderWidth: 2, borderColor: flaeche }] },
+      options: { ...gemeinsam, aspectRatio: 1.8,
+        plugins: {
+          legend: { position:'right', onClick: (e, item) => { if (!keinDrill) dashDrillOeffnen(labels[item.index]); },
+                    labels: { color:textCol, font:{size:11,family:'Inter'}, boxWidth:12, padding:10 } },
+          tooltip: { callbacks: { label: (c) => ' ' + fmtEur(c.parsed)
+                     + (keinDrill ? '' : '  (klicken für Details)') } },
+        } },
+    });
+  } else {
+    chartInstances.cat = new Chart(ctx, {
+      type: 'bar',
+      data: { labels, datasets: [{ data, backgroundColor: bg, borderRadius: 5, borderWidth: 0 }] },
+      options: { ...gemeinsam, aspectRatio: 1.9,
+        plugins: {
+          legend: { display: false },
+          tooltip: { callbacks: { label: (c) => ' ' + fmtEur(c.parsed.y)
+                     + (keinDrill ? '' : '  (klicken für Details)') } },
+        },
+        scales: {
+          x: { ticks:{ color:textCol, font:{size:10}, maxRotation:45, minRotation:0 }, grid:{ display:false } },
+          y: { ticks:{ color:textCol, font:{size:10}, callback:(v)=>fmt(v) }, grid:{ color: gridCol + '55' }, beginAtZero:true },
+        } },
     });
   }
 }
@@ -7392,6 +7587,12 @@ window.farbeVorschau     = farbeVorschau;
 window.paletteAnwenden   = paletteAnwenden;
 window.grundtonSetzen    = grundtonSetzen;
 window.hintergrundZuruecksetzen = hintergrundZuruecksetzen;
+window.dashChartSetzen   = dashChartSetzen;
+window.dashChartWechseln = dashChartWechseln;
+window.dashChartIdx      = dashChartIdx;
+window.dashDrillOeffnen  = dashDrillOeffnen;
+window.dashDrillSchliessen = dashDrillSchliessen;
+window.dashDrilldownHtml = dashDrilldownHtml;
 window.farbenZuruecksetzen = farbenZuruecksetzen;
 window.farbenAnwenden    = farbenAnwenden;
 window.farbCfg           = farbCfg;
