@@ -161,6 +161,21 @@ let _snoozedReminders = {};
 // Format je Eintrag: { v: 'Version', date: 'YYYY-MM-DD', changes: ['...','...'] }
 // Änderungen dürfen mit **Fett** Markierung versehen werden.
 const CHANGELOG = [
+  { v: '1.0.29', date: '2026-07-23', changes: [
+    '**Der Jahresbericht ist jetzt ein vollständiger dreiseitiger PDF-Bericht** im Design der App – mit Kennzahlen, Monatsübersicht, Konten, Ausgaben nach Kategorie, Depot, Zählerständen, PV-Anlage und Geschäftsreisen',
+    '**Neue Abfrage vor dem Erstellen**: Du wählst zwischen einem Zwischenstand zum heutigen Tag und dem Jahresabschluss. Der Zwischenstand verändert nichts – er erzeugt nur das PDF',
+    'Bisher enthielt der Bericht ausschließlich eine Monatstabelle; Zählerstände, Konten und Kategorien fehlten vollständig',
+    'Ausgaben nach Kategorie werden mit Anteil und Balken dargestellt, Zählerstände nach Typ getrennt samt Verbrauch zwischen den Ablesungen',
+    'In den Einstellungen unter „Konten & Jahre" gibt es jetzt beide Schaltflächen direkt nebeneinander',
+  ]},
+  { v: '1.0.28', date: '2026-07-23', changes: [
+    '**Der PDF-Import liest Kontoauszüge jetzt zuverlässig.** Bisher wurde der gesamte Seiteninhalt zu einer einzigen Zeile zusammengezogen, sodass meist nur eine einzige Buchung ankam – die Zeilen werden jetzt korrekt anhand ihrer Position rekonstruiert',
+    '**Neue Vorschau vor dem Import**: Erkannte Buchungen werden mit Datum, Beschreibung, Kategorie und Betrag angezeigt; du wählst aus, was übernommen wird. Nichts landet mehr ungeprüft in den Daten',
+    '**Fehler behoben: Bei Auszügen mit Saldo-Spalte wurde der Kontostand als Buchungsbetrag übernommen** – aus einer Ausgabe von 52,30 € wurde so eine Buchung über 1.234,56 €',
+    'Zusätzliche Formate werden erkannt: Beträge mit „EUR" oder „€", Soll-/Haben-Kennzeichen (S/H), zweistellige Jahreszahlen und Auszüge mit Valuta-Datum',
+    'Kopf- und Fußzeilen wie IBAN, Seitenzahlen oder Saldo-Angaben werden übersprungen',
+    'Der Import ist jetzt über die Einstellungen unter „Daten & Sicherheit" erreichbar und nicht mehr in der Seitenleiste',
+  ]},
   { v: '1.0.27', date: '2026-07-23', changes: [
     '**Fehler behoben: Der Speicherort wurde falsch angezeigt** – statt des Pfads erschien „%APPDATA%⬆inanzverwaltung-prodata.json", weil die Schrägstriche im Text verschluckt wurden',
     '**Die Reiter in den Einstellungen schneiden den Inhalt beim Scrollen nicht mehr an.** Bisher verschwanden Schaltflächen und Texte halb hinter der Leiste – sie deckt den durchlaufenden Inhalt jetzt vollständig ab',
@@ -4780,8 +4795,9 @@ function einstellungen() {
       </div>
       <div class="card mb-2">
         <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
-          <button class="btn btn-ghost btn-sm" onclick="archiveYear()">📦 Jahr archivieren &amp; PDF</button>
-          <span style="font-size:12px;color:var(--muted)">Erstellt PDF-Bericht und Backup, danach folgt der Neues-Jahr-Dialog.</span>
+          <button class="btn btn-ghost btn-sm" onclick="zwischenstandPdf()">📄 Zwischenstand als PDF</button>
+          <button class="btn btn-ghost btn-sm" onclick="archiveYear()">📦 Jahr abschließen</button>
+          <span style="font-size:12px;color:var(--muted)">Der Zwischenstand zeigt den heutigen Stand, ohne etwas zu verändern. Beim Abschluss folgen zusätzlich Backup und Neues-Jahr-Dialog.</span>
         </div>
       </div>
       </div>
@@ -5118,6 +5134,22 @@ function einstellungen() {
               </div>
             </div>` : ''}
           </div>
+        </div>
+      </div>
+
+      <div class="settings-section-header">📥 Kontoauszug importieren</div>
+      <div class="card mb-2">
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+          <span style="font-size:16px">📄</span>
+          <strong style="font-size:13px">PDF-Import</strong>
+          <span style="font-size:12px;color:var(--muted)">${(state.imports||[]).length} Dokument${(state.imports||[]).length===1?'':'e'} bisher</span>
+          <span style="flex:1"></span>
+          <button class="btn btn-sm btn-primary" onclick="navigate('importPage')">Öffnen</button>
+        </div>
+        <div style="font-size:12px;color:var(--muted);margin-top:8px">
+          Liest textbasierte Kontoauszüge (PDF, CSV, TXT) ein und schlägt Buchungen
+          samt Kategorie vor. Übernommen wird nichts ohne deine Bestätigung –
+          eingescannte Auszüge ohne Textebene können nicht gelesen werden.
         </div>
       </div>
 
@@ -6864,6 +6896,53 @@ function showToast(msg, type) {
   }, 2000);
 }
 
+// Vorschau der erkannten Buchungen – erst nach Bestätigung werden sie
+// übernommen. Verhindert, dass ein Fehlparse still in die Daten läuft.
+function importVorschauHtml() {
+  const v = state._importVorschau;
+  if (!v || !v.buchungen || !v.buchungen.length) return '';
+  const b = v.buchungen;
+  const gewaehlt = b.filter(x => x.uebernehmen);
+  const summe = gewaehlt.reduce((s, x) => s + (+x.amount || 0), 0);
+  const zeilen = b.map(x => {
+    const cl = classify(x.desc, x.amount);
+    const kat = cl ? cl.cat : 'wird übersprungen (Umbuchung)';
+    return '<tr style="opacity:' + (x.uebernehmen ? '1' : '.45') + '">' +
+      '<td style="width:34px"><input type="checkbox" ' + (x.uebernehmen ? 'checked' : '') +
+        ' onchange="importVorschauUmschalten(\'' + x.id + '\')" style="width:16px;height:16px;accent-color:var(--accent)"/></td>' +
+      '<td class="muted" style="white-space:nowrap">' + escapeHtml(x.date) + '</td>' +
+      '<td>' + escapeHtml(x.desc) + '</td>' +
+      '<td style="font-size:12px;color:var(--muted)">' + escapeHtml(kat) + '</td>' +
+      '<td class="amount ' + (x.amount < 0 ? 'negative' : 'positive') + '" style="text-align:right;white-space:nowrap">' +
+        fmtEur(x.amount) + '</td>' +
+    '</tr>';
+  }).join('');
+  return '<div class="card mb-2" style="border-color:color-mix(in srgb,var(--accent) 40%,var(--border))">' +
+    '<div class="card-header">' +
+      '<h3>Vorschau – bitte prüfen</h3>' +
+      '<div style="display:flex;gap:8px;align-items:center">' +
+        '<span class="badge badge-muted">' + gewaehlt.length + ' von ' + b.length + ' ausgewählt</span>' +
+        '<strong style="font-size:13px">' + fmtEur(summe) + '</strong>' +
+      '</div>' +
+    '</div>' +
+    '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px">' +
+      '<button class="btn btn-ghost btn-sm" onclick="importVorschauAlle(\'an\')">Alle auswählen</button>' +
+      '<button class="btn btn-ghost btn-sm" onclick="importVorschauAlle(\'aus\')">Keine</button>' +
+      '<span style="flex:1"></span>' +
+      '<button class="btn btn-ghost btn-sm" onclick="importVorschauVerwerfen()">Verwerfen</button>' +
+      '<button class="btn btn-primary btn-sm" onclick="importVorschauUebernehmen()">Übernehmen</button>' +
+    '</div>' +
+    '<div class="table-wrap" style="max-height:420px;overflow:auto"><table>' +
+      '<thead><tr><th></th><th>Datum</th><th>Beschreibung</th><th>Kategorie</th>' +
+      '<th style="text-align:right">Betrag</th></tr></thead>' +
+      '<tbody>' + zeilen + '</tbody></table></div>' +
+    '<div style="font-size:11px;color:var(--muted);margin-top:10px">' +
+      'Negative Beträge werden zu Ausgaben, positive zu Einnahmen. Umbuchungen ' +
+      'zwischen eigenen Konten werden automatisch übersprungen.' +
+    '</div>' +
+  '</div>';
+}
+
 function importPage() {
   const imports = (state.imports || []).sort((a,b) => (b.month||'').localeCompare(a.month||''));
 
@@ -6911,6 +6990,8 @@ function importPage() {
       <div id="importLog" style="margin-top:12px;font-size:13px;color:var(--muted)"></div>
     </div>
 
+    ${importVorschauHtml()}
+
     <div class="card">
       <div class="card-header">
         <h3>Importierte Dokumente</h3>
@@ -6930,78 +7011,214 @@ async function deleteImport(id) {
 
 async function triggerImport() {
   if (!window.EA) return;
-  const zielkonto = document.getElementById('import_zielkonto')?.value || defaultKontoId();
   const files = await window.EA.openFiles();
   if (!files || !files.length) return;
-  if(el('importLog')) el('importLog').textContent = 'Lese Dateien…';
-  let totalImported = 0;
+  if (el('importLog')) el('importLog').textContent = 'Lese Dateien…';
+  const gefunden = [];
+  const dateien = [];
   for (const f of files) {
     try {
       const res = await window.EA.readFile(f.path);
       let text = '';
       if (res.type === 'base64') {
-        if (typeof pdfjsLib === 'undefined') { if(el('importLog')) el('importLog').textContent = 'PDF.js nicht geladen (Internetverbindung prüfen)'; continue; }
+        if (typeof pdfjsLib === 'undefined') {
+          if (el('importLog')) el('importLog').textContent = 'PDF.js nicht geladen (Internetverbindung prüfen)';
+          continue;
+        }
         const buf = Uint8Array.from(atob(res.data), c => c.charCodeAt(0));
         const pdf = await pdfjsLib.getDocument({ data: buf }).promise;
         for (let i = 1; i <= pdf.numPages; i++) {
           const page = await pdf.getPage(i);
           const ct = await page.getTextContent();
-          text += ct.items.map(x => x.str).join(' ') + '\n';
+          text += pdfSeiteZuZeilen(ct).join('\n') + '\n';
         }
       } else { text = res.data; }
-      const count = parseAndImport(text, zielkonto);
-      totalImported += count;
-      if(el('importLog')) el('importLog').textContent = `${f.name}: ${count} Buchungen importiert`;
-    } catch(e) { if(el('importLog')) el('importLog').textContent = `Fehler bei ${f.name}: ${e.message}`; }
+      const treffer = buchungenAusText(text);
+      treffer.forEach(t => { t.datei = f.name; });
+      gefunden.push(...treffer);
+      dateien.push({ name: f.name, size: f.size, count: treffer.length });
+      if (el('importLog')) el('importLog').textContent = f.name + ': ' + treffer.length + ' Buchungen erkannt';
+    } catch (e) {
+      if (el('importLog')) el('importLog').textContent = 'Fehler bei ' + f.name + ': ' + e.message;
+    }
   }
-  // Track this import
+  if (!gefunden.length) {
+    if (el('importLog')) el('importLog').textContent = 'Keine Buchungen erkannt. Prüfe, ob es sich um einen Textbasierten Kontoauszug handelt (kein Scan).';
+    return;
+  }
+  // Vorschau statt direktem Schreiben – nichts landet ungeprüft in den Daten.
+  state._importVorschau = { buchungen: gefunden, dateien };
+  if (el('importLog')) el('importLog').textContent = gefunden.length + ' Buchungen erkannt – bitte prüfen und übernehmen.';
+  renderPage();
+}
+
+function importVorschauUmschalten(id) {
+  const v = state._importVorschau;
+  if (!v) return;
+  const b = v.buchungen.find(x => String(x.id) === String(id));
+  if (b) { b.uebernehmen = !b.uebernehmen; renderPage(); }
+}
+function importVorschauAlle(anAus) {
+  const v = state._importVorschau;
+  if (!v) return;
+  v.buchungen.forEach(b => { b.uebernehmen = (anAus === 'an'); });
+  renderPage();
+}
+function importVorschauVerwerfen() {
+  delete state._importVorschau;
+  if (el('importLog')) el('importLog').textContent = 'Import verworfen.';
+  renderPage();
+}
+async function importVorschauUebernehmen() {
+  const v = state._importVorschau;
+  if (!v) return;
+  const zielkonto = document.getElementById('import_zielkonto')?.value || defaultKontoId();
+  const gewaehlt = v.buchungen.filter(b => b.uebernehmen);
+  if (!gewaehlt.length) { showToast('Keine Buchung ausgewählt', 'info'); return; }
+  const ok = await uiConfirm({
+    title: 'Buchungen übernehmen', icon: '📥',
+    message: gewaehlt.length + ' von ' + v.buchungen.length + ' Buchungen übernehmen?',
+    details: ['Zielkonto: ' + ((kontoById(zielkonto) || {}).name || '—'),
+              'Bereits vorhandene Buchungen werden nicht erkannt – doppelte Importe bitte vermeiden.'],
+    okLabel: 'Übernehmen', cancelLabel: 'Abbrechen',
+  });
+  if (!ok) return;
+  const count = uebernehmeBuchungen(gewaehlt, zielkonto);
   if (!state.imports) state.imports = [];
-  const _zk = kontoById(zielkonto);
-  for (const f of files) {
-    const detectedMonth = currentMonth;
+  const zk = kontoById(zielkonto);
+  (v.dateien || []).forEach(d => {
     state.imports.push({
-      id: uid(),
-      filename: f.name,
-      month: detectedMonth,
-      date: today(),
-      count: totalImported,
-      size: f.size,
-      kontoName: _zk ? _zk.name : ''
+      id: uid(), filename: d.name, month: currentMonth, date: today(),
+      count: count, size: d.size, kontoName: zk ? zk.name : '',
     });
-  }
-  if(el('importLog')) el('importLog').textContent = `✓ Fertig – ${totalImported} Buchungen importiert.`;
+  });
+  delete state._importVorschau;
   saveData(); updateBadges(); renderPage();
+  showToast(count + ' Buchungen importiert', 'info');
+}
+
+// Baut aus den Textfragmenten einer PDF-Seite echte Zeilen. PDF.js liefert
+// die Fragmente einzeln mit Position; ein simples join(' ') würde die ganze
+// Seite zu EINER Zeile machen und der zeilenweise Parser fände dann nur die
+// letzte Buchung. Deshalb wird über die Y-Koordinate gruppiert.
+function pdfSeiteZuZeilen(textContent) {
+  const frag = (textContent.items || [])
+    .filter(it => it && typeof it.str === 'string' && it.str.trim() !== '')
+    .map(it => ({
+      x: it.transform ? it.transform[4] : 0,
+      y: it.transform ? it.transform[5] : 0,
+      s: it.str,
+    }));
+  if (!frag.length) return [];
+  // Nach Y gruppieren (2pt Toleranz, da Zeichen einer Zeile leicht versetzt sind)
+  const zeilen = [];
+  frag.sort((a, b) => (b.y - a.y) || (a.x - b.x));
+  frag.forEach(f => {
+    const z = zeilen.find(z => Math.abs(z.y - f.y) <= 2);
+    if (z) z.teile.push(f);
+    else zeilen.push({ y: f.y, teile: [f] });
+  });
+  return zeilen.map(z =>
+    z.teile.sort((a, b) => a.x - b.x)
+      .map(t => t.s).join(' ')
+      .replace(/\s{2,}/g, ' ').trim()
+  ).filter(Boolean);
 }
 
 function parseAndImport(text, zielkonto) {
+  const treffer = buchungenAusText(text);
+  return uebernehmeBuchungen(treffer, zielkonto);
+}
+
+// ── Zeile → Buchung ────────────────────────────────────────────────────────
+// Erkennt die gängigen Kontoauszug-Formate:
+//   05.07.2026 REWE -52,30
+//   05.07.2026 06.07.2026 REWE 52,30 S        (Valuta + Soll/Haben)
+//   05.07.26  REWE 52,30 EUR
+//   05.07.2026 REWE -52,30 1.234,56           (Saldo am Ende → wird ignoriert)
+const RE_DATUM = /\b(\d{1,2})\.(\d{1,2})\.(\d{2}|\d{4})\b/g;
+const RE_BETRAG = /(-|\+)?\s?(\d{1,3}(?:\.\d{3})+|\d+),(\d{2})\s*(EUR|€)?\s*(S|H|Soll|Haben)?/gi;
+
+function jahrVoll(j) {
+  const n = +j;
+  return j.length === 4 ? n : (n >= 70 ? 1900 + n : 2000 + n);
+}
+function buchungenAusText(text) {
+  const out = [];
+  String(text || '').split('\n').forEach(roh => {
+    const line = roh.replace(/\s{2,}/g, ' ').trim();
+    if (!line || line.length < 8) return;
+    // Kopf-/Fußzeilen überspringen
+    if (/^(kontoauszug|seite|iban|bic|blz|kontonummer|saldo|übertrag|uebertrag|summe|alter kontostand|neuer kontostand)/i.test(line)) return;
+
+    RE_DATUM.lastIndex = 0;
+    const daten = [...line.matchAll(RE_DATUM)];
+    if (!daten.length) return;
+    const d = daten[0];                       // erstes Datum = Buchungstag
+    const jahr = jahrVoll(d[3]);
+    const mon = String(+d[2]).padStart(2, '0');
+    const tag = String(+d[1]).padStart(2, '0');
+    if (+d[2] < 1 || +d[2] > 12 || +d[1] < 1 || +d[1] > 31) return;
+
+    RE_BETRAG.lastIndex = 0;
+    const betraege = [...line.matchAll(RE_BETRAG)].map(m => {
+      const wert = parseFloat((m[2] + '.' + m[3]).replace(/\.(?=\d{3}\b)/g, ''));
+      const zahl = parseFloat(m[2].replace(/\./g, '') + '.' + m[3]);
+      let v = zahl;
+      if (m[1] === '-') v = -v;
+      const kz = (m[5] || '').toUpperCase();
+      if (kz === 'S' || kz === 'SOLL') v = -Math.abs(v);
+      if (kz === 'H' || kz === 'HABEN') v = Math.abs(v);
+      return { wert: v, roh: m[0], index: m.index, hatKz: !!kz || m[1] === '-' || m[1] === '+' };
+    }).filter(b => isFinite(b.wert));
+    if (!betraege.length) return;
+
+    // Bei mehreren Beträgen ist der letzte meist der laufende Saldo.
+    // Als Buchungsbetrag gilt dann der vorletzte – ein Saldo trägt nie ein
+    // Soll/Haben-Kennzeichen oder Vorzeichen, ein Buchungsbetrag oft schon.
+    let gewaehlt = betraege[betraege.length - 1];
+    if (betraege.length > 1) {
+      const mitKz = betraege.filter(b => b.hatKz);
+      gewaehlt = mitKz.length ? mitKz[mitKz.length - 1] : betraege[betraege.length - 2];
+    }
+    const amount = gewaehlt.wert;
+    if (!isFinite(amount) || Math.abs(amount) < 0.01) return;
+
+    // Beschreibung: alle Datums- und Betragsfundstellen entfernen
+    let desc = line;
+    daten.forEach(m => { desc = desc.replace(m[0], ' '); });
+    betraege.forEach(b => { desc = desc.replace(b.roh, ' '); });
+    desc = desc.replace(/\b(EUR|€|S|H)\b/gi, ' ')
+               .replace(/\s{2,}/g, ' ').trim().slice(0, 80);
+    if (!desc || desc.length < 2) return;
+
+    out.push({
+      id: uid(),
+      date: jahr + '-' + mon + '-' + tag,
+      month: jahr + '-' + mon,
+      desc, amount,
+      uebernehmen: true,
+    });
+  });
+  return out;
+}
+
+function uebernehmeBuchungen(liste, zielkonto) {
   const kontoId = zielkonto || defaultKontoId();
-  const lines = text.split('\n');
   let count = 0;
-  const dateRe = /(\d{2})\.(\d{2})\.(\d{4})/;
-  const amountRe = /([+-]?\d{1,3}(?:\.\d{3})*(?:,\d{2})?)\s*$/;
-
-  lines.forEach(line => {
-    const dm = line.match(dateRe);
-    const am = line.match(/(-?\d{1,3}(?:\.\d{3})*,\d{2})\s*$/);
-    if (!dm || !am) return;
-    const date = `${dm[3]}-${dm[2]}-${dm[1]}`;
-    const month = `${dm[3]}-${dm[2]}`;
-    const amount = parseFloat(am[1].replace(/\./g,'').replace(',','.'));
-    const desc = line.replace(dateRe,'').replace(am[0],'').trim().slice(0,80);
-    if (!desc || Math.abs(amount) < 0.01) return;
-
-    const cl = classify(desc, amount);
-    if (!cl) return; // skip umbuchungen
-    currentMonth = month;
-
-    if (amount < 0 && ['Einkauf Lebensmittel','Einkauf Haushalt'].includes(cl.cat)) {
-      state.einkaeufe.push({ id: uid(), month, date, store: desc, amount: Math.abs(amount) });
-    } else if (amount < 0) {
-      state.ausgaben.push({ id: uid(), month, date, desc, category: cl.cat, amount: Math.abs(amount), kontoId });
+  (liste || []).forEach(b => {
+    if (!b || b.uebernehmen === false) return;
+    const cl = classify(b.desc, b.amount);
+    if (!cl) return;                        // Umbuchungen überspringen
+    currentMonth = b.month;
+    if (b.amount < 0 && ['Einkauf Lebensmittel','Einkauf Haushalt'].includes(cl.cat)) {
+      state.einkaeufe.push({ id: uid(), month: b.month, date: b.date, store: b.desc, amount: Math.abs(b.amount) });
+    } else if (b.amount < 0) {
+      state.ausgaben.push({ id: uid(), month: b.month, date: b.date, desc: b.desc, category: cl.cat, amount: Math.abs(b.amount), kontoId });
     } else if (cl.income) {
       const type = cl.cat === 'Gehalt' ? 'Gehalt' : cl.cat === 'Verkauf' ? 'Verkauf' : 'Sonstiges';
-      state.einnahmen.push({ id: uid(), month, date, source: desc, type, amount, bar: false, kontoId });//MARKpdf
-    }
+      state.einnahmen.push({ id: uid(), month: b.month, date: b.date, source: b.desc, type, amount: b.amount, bar: false, kontoId });
+    } else return;
     count++;
   });
   return count;
@@ -7240,96 +7457,347 @@ async function saveQuickAdd(andClose) {
 function saveQuickAddClose() { saveQuickAdd(true); } // legacy compat
 
 // ── INIT ──────────────────────────────────────────────────────────────────
-function buildJahresberichtHTML(year, userName, totals, rows) {
+// ════════════════════════════════════════════════════════════════════════════
+// JAHRESBERICHT / ZWISCHENSTAND ALS PDF
+// ════════════════════════════════════════════════════════════════════════════
+// Mehrseitig im Design der App. Seite 1: Übersicht + Monatstabelle,
+// Seite 2: Konten, Kategorien, Sparen/Depot, Seite 3: Zähler + PV.
+const PDF_FARBEN = {
+  akzent:'#0EA5E9', akzent2:'#0891b2', dunkel:'#0F172A', text:'#1e293b',
+  grau:'#64748b', linie:'#e2e8f0', flaeche:'#f8fafc',
+  gruen:'#059669', rot:'#dc2626',
+};
+
+function pdfKpi(label, wert, farbe) {
+  return '<div class="kpi"><div class="kpi-label">' + label + '</div>' +
+    '<div class="kpi-val"' + (farbe ? ' style="color:' + farbe + '"' : '') + '>' + wert + '</div></div>';
+}
+function pdfTabelle(kopf, zeilen, opt) {
+  const o = opt || {};
+  if (!zeilen.length) return '<p class="leer">' + (o.leer || 'Keine Daten erfasst.') + '</p>';
+  return '<table><thead><tr>' +
+    kopf.map((h,i) => '<th' + (i>0 ? ' class="r"' : '') + '>' + h + '</th>').join('') +
+    '</tr></thead><tbody>' + zeilen.join('') + '</tbody></table>';
+}
+
+function buildJahresberichtHTML(year, userName, totals, rows, opt) {
+  const o = opt || {};
+  const istAbschluss = o.typ !== 'zwischenstand';
+  const stichtag = new Date().toLocaleDateString('de-DE', { day:'2-digit', month:'long', year:'numeric' });
+  const C = PDF_FARBEN;
+
+  // ── Seite 1: Kennzahlen + Monatstabelle ─────────────────────────────────
+  const einnahmenGes = totals.gehalt + totals.nj;
   const kpiBlock = [
-    ['Gehalt gesamt', fmtEur(totals.gehalt), '#11845b'],
-    ['Nebenjob gesamt', fmtEur(totals.nj), '#11845b'],
-    ['Einnahmen gesamt', fmtEur(totals.gehalt + totals.nj), '#11845b'],
-    ['Fixkosten gesamt', fmtEur(totals.fix), '#333'],
-    ['Einkäufe gesamt', fmtEur(totals.eink), '#333'],
-    ['Ausgaben gesamt', fmtEur(totals.ausg), '#b42318'],
-    ['Cashflow gesamt', fmtEur(totals.cf), totals.cf >= 0 ? '#11845b' : '#b42318'],
-  ].map(([label, val, color]) =>
-    '<div class="kpi"><div class="kpi-label">' + label + '</div>' +
-    '<div class="kpi-val" style="color:' + color + '">' + val + '</div></div>'
-  ).join('');
+    ['Einnahmen gesamt', fmtEur(einnahmenGes), C.gruen],
+    ['Ausgaben gesamt', fmtEur(totals.ausg + totals.fix + totals.eink), C.rot],
+    ['Cashflow gesamt', fmtEur(totals.cf), totals.cf >= 0 ? C.gruen : C.rot],
+    ['Gehalt', fmtEur(totals.gehalt), null],
+    ['Fixkosten', fmtEur(totals.fix), null],
+    ['Einkäufe', fmtEur(totals.eink), null],
+  ].map(x => pdfKpi(x[0], x[1], x[2])).join('');
 
-  const rowsHtml = rows.map(function(item, i) {
+  const monatsZeilen = rows.map(function(item, i) {
     const m = item.m, f = item.f, inc = item.inc;
-    const bg = i % 2 ? '#fafafa' : '#fff';
-    return '<tr style="background:' + bg + '">' +
+    return '<tr' + (i % 2 ? ' class="alt"' : '') + '>' +
       '<td>' + monthLabel(m) + '</td>' +
-      '<td>' + fmtEur(inc.gehalt || 0) + '</td>' +
-      '<td>' + fmtEur(inc.nebenjob || 0) + '</td>' +
-      '<td>' + fmtEur(f.fixTotal) + '</td>' +
-      '<td>' + fmtEur(f.einkTotal) + '</td>' +
-      '<td style="color:#b42318">' + fmtEur(f.ausgTotal) + '</td>' +
-      '<td style="color:' + (f.cashflow >= 0 ? '#11845b' : '#b42318') + ';font-weight:600">' + fmtEur(f.cashflow) + '</td>' +
-      '</tr>';
-  }).join('');
-
-  const totalRow = '<tr style="background:#f0f5f3;font-weight:700;border-top:2px solid #1a1916">' +
-    '<td>Gesamt ' + year + '</td>' +
-    '<td>' + fmtEur(totals.gehalt) + '</td>' +
-    '<td>' + fmtEur(totals.nj) + '</td>' +
-    '<td>' + fmtEur(totals.fix) + '</td>' +
-    '<td>' + fmtEur(totals.eink) + '</td>' +
-    '<td style="color:#b42318">' + fmtEur(totals.ausg) + '</td>' +
-    '<td style="color:' + (totals.cf >= 0 ? '#11845b' : '#b42318') + '">' + fmtEur(totals.cf) + '</td>' +
+      '<td class="r">' + fmtEur(inc.gehalt || 0) + '</td>' +
+      '<td class="r">' + fmtEur(inc.nebenjob || 0) + '</td>' +
+      '<td class="r">' + fmtEur(f.fixTotal) + '</td>' +
+      '<td class="r">' + fmtEur(f.einkTotal) + '</td>' +
+      '<td class="r" style="color:' + C.rot + '">' + fmtEur(f.ausgTotal) + '</td>' +
+      '<td class="r b" style="color:' + (f.cashflow >= 0 ? C.gruen : C.rot) + '">' + fmtEur(f.cashflow) + '</td>' +
     '</tr>';
+  }).join('') +
+  '<tr class="sum">' +
+    '<td>Gesamt ' + year + '</td>' +
+    '<td class="r">' + fmtEur(totals.gehalt) + '</td>' +
+    '<td class="r">' + fmtEur(totals.nj) + '</td>' +
+    '<td class="r">' + fmtEur(totals.fix) + '</td>' +
+    '<td class="r">' + fmtEur(totals.eink) + '</td>' +
+    '<td class="r" style="color:' + C.rot + '">' + fmtEur(totals.ausg) + '</td>' +
+    '<td class="r" style="color:' + (totals.cf >= 0 ? C.gruen : C.rot) + '">' + fmtEur(totals.cf) + '</td>' +
+  '</tr>';
 
-  return '<!DOCTYPE html><html><head><meta charset="utf-8"><style>' +
+  // ── Seite 2: Konten ─────────────────────────────────────────────────────
+  let kontenZeilen = [];
+  try {
+    kontenZeilen = getKonten().map(function(k, i) {
+      return '<tr' + (i % 2 ? ' class="alt"' : '') + '>' +
+        '<td>' + escapeHtml(k.name || 'Konto') + '</td>' +
+        '<td>' + (k.cashflow ? 'Cashflow' : 'Reserve') + '</td>' +
+        '<td class="r">' + fmtEur(+k.start || 0) + '</td>' +
+        '<td class="r b">' + fmtEur(kontoSaldo(k.id)) + '</td>' +
+      '</tr>';
+    });
+  } catch (e) { console.error('PDF Konten:', e); }
+
+  // ── Seite 2: Ausgaben nach Kategorie ────────────────────────────────────
+  let katZeilen = [];
+  try {
+    const grp = {};
+    (state.ausgaben || []).filter(a => !a._korrektur).forEach(a => {
+      const k = a.category || 'Ohne Kategorie';
+      grp[k] = (grp[k] || 0) + (+a.amount || 0);
+    });
+    (state.einkaeufe || []).forEach(e => {
+      grp['Einkauf Lebensmittel'] = (grp['Einkauf Lebensmittel'] || 0) + (+e.amount || 0);
+    });
+    const ges = Object.values(grp).reduce((s, v) => s + v, 0) || 1;
+    katZeilen = Object.keys(grp).sort((x, y) => grp[y] - grp[x]).map(function(k, i) {
+      const anteil = (grp[k] / ges) * 100;
+      return '<tr' + (i % 2 ? ' class="alt"' : '') + '>' +
+        '<td>' + escapeHtml(k) + '</td>' +
+        '<td class="r">' + fmtEur(grp[k]) + '</td>' +
+        '<td class="r">' + anteil.toFixed(1).replace('.', ',') + ' %</td>' +
+        '<td><div class="bar"><span style="width:' + Math.min(100, anteil) + '%"></span></div></td>' +
+      '</tr>';
+    });
+  } catch (e) { console.error('PDF Kategorien:', e); }
+
+  // ── Seite 2: Sparen & Depot ─────────────────────────────────────────────
+  let sparZeilen = [];
+  try {
+    sparZeilen = (state.sparen || []).map(function(sp, i) {
+      const kurs = (typeof getEtfKursInfo === 'function') ? getEtfKursInfo(sp) : null;
+      const wert = (kurs && kurs.preis && sp.etf && sp.etf.anteile)
+        ? kurs.preis * sp.etf.anteile : null;
+      return '<tr' + (i % 2 ? ' class="alt"' : '') + '>' +
+        '<td>' + escapeHtml(sp.name || sp.ziel || 'Sparposten') + '</td>' +
+        '<td class="r">' + fmtEur(+sp.betrag || +sp.amount || 0) + '</td>' +
+        '<td class="r">' + (wert !== null ? fmtEur(wert) : '–') + '</td>' +
+      '</tr>';
+    });
+  } catch (e) { console.error('PDF Sparen:', e); }
+
+  // ── Seite 3: Zählerstände ───────────────────────────────────────────────
+  let zaehlerBloecke = '';
+  try {
+    const items = [...(state.zaehler || [])].sort((a, b) => (a.date || '').localeCompare(b.date || ''));
+    const byType = {};
+    items.forEach(z => { const t = z.type || 'Strom'; (byType[t] = byType[t] || []).push(z); });
+    zaehlerBloecke = Object.keys(byType).map(function(typ) {
+      const list = byType[typ];
+      const erster = list[0], letzter = list[list.length - 1];
+      const diff = (letzter && erster) ? (+letzter.value || 0) - (+erster.value || 0) : 0;
+      const zeilen = list.map(function(z, i) {
+        const vorher = i > 0 ? (+z.value || 0) - (+list[i-1].value || 0) : null;
+        return '<tr' + (i % 2 ? ' class="alt"' : '') + '>' +
+          '<td>' + escapeHtml(z.date || '–') + '</td>' +
+          '<td class="r">' + fmt(+z.value || 0) + '</td>' +
+          '<td class="r">' + (vorher !== null ? '+' + fmt(vorher) : '–') + '</td>' +
+          '<td>' + escapeHtml(z.note || '') + '</td>' +
+        '</tr>';
+      });
+      return '<h3>' + escapeHtml(typ) + '</h3>' +
+        '<p class="hint">' + list.length + ' Ablesung' + (list.length === 1 ? '' : 'en') +
+        (list.length > 1 ? ' · Verbrauch gesamt: <b>' + fmt(diff) + '</b>' : '') + '</p>' +
+        pdfTabelle(['Datum', 'Zählerstand', 'Verbrauch', 'Notiz'], zeilen);
+    }).join('');
+  } catch (e) { console.error('PDF Zähler:', e); }
+
+  // ── Seite 3: PV-Anlage ──────────────────────────────────────────────────
+  let pvBlock = '';
+  try {
+    if (typeof pvAktiv === 'function' && pvAktiv() && typeof pvJahre === 'function') {
+      const jahre = pvJahre();
+      if (jahre.length) {
+        const zeilen = jahre.map(function(j, i) {
+          const su = pvJahresSumme(j);
+          return '<tr' + (i % 2 ? ' class="alt"' : '') + '>' +
+            '<td>' + j + '</td>' +
+            '<td class="r">' + (su.produktion === null ? '–' : fmt(su.produktion)) + '</td>' +
+            '<td class="r">' + (su.verbrauch === null ? '–' : fmt(su.verbrauch)) + '</td>' +
+            '<td class="r">' + (su.bezug === null ? '–' : fmt(su.bezug)) + '</td>' +
+            '<td class="r">' + (su.einspeisung === null ? '–' : fmt(su.einspeisung)) + '</td>' +
+            '<td class="r b">' + (su.autarkie === null ? '–' : (su.autarkie*100).toFixed(1).replace('.', ',') + ' %') + '</td>' +
+          '</tr>';
+        });
+        pvBlock = '<h3>PV-Anlage</h3>' +
+          pdfTabelle(['Jahr','Produktion kWh','Verbrauch kWh','Bezug kWh','Einspeisung kWh','Ø Autarkie'], zeilen);
+      }
+    }
+  } catch (e) { console.error('PDF PV:', e); }
+
+  // ── Seite 3: Reisen / Spesen ────────────────────────────────────────────
+  let spesenBlock = '';
+  try {
+    const sp = (state.spesen || []);
+    if (sp.length) {
+      const zeilen = sp.map(function(x, i) {
+        return '<tr' + (i % 2 ? ' class="alt"' : '') + '>' +
+          '<td>' + escapeHtml(x.dateFrom || '–') + '</td>' +
+          '<td>' + escapeHtml(x.country || '–') + '</td>' +
+          '<td>' + escapeHtml(x.customer || x.kunde || '') + '</td>' +
+          '<td class="r">' + fmtEur(+x.allowance || 0) + '</td>' +
+        '</tr>';
+      });
+      const ges = sp.reduce((s, x) => s + (+x.allowance || 0), 0);
+      spesenBlock = '<h3>Geschäftsreisen</h3>' +
+        '<p class="hint">' + sp.length + ' Reise' + (sp.length === 1 ? '' : 'n') +
+        ' · Verpflegungspauschalen gesamt: <b>' + fmtEur(ges) + '</b></p>' +
+        pdfTabelle(['Anreise','Land','Kunde','Pauschale'], zeilen);
+    }
+  } catch (e) { console.error('PDF Spesen:', e); }
+
+  const titel = istAbschluss ? 'Jahresbericht ' + year : 'Zwischenstand ' + year;
+  const untertitel = istAbschluss
+    ? 'Abschluss des Jahres ' + year
+    : 'Stand: ' + stichtag;
+
+  return '<!DOCTYPE html><html lang="de"><head><meta charset="utf-8"><style>' +
+    '@page{size:A4;margin:14mm 12mm}' +
     '*{box-sizing:border-box;margin:0;padding:0}' +
-    'body{font-family:Arial,Helvetica,sans-serif;font-size:10px;color:#1a1916;padding:12mm}' +
-    'h1{font-size:20px;font-weight:700;margin-bottom:4px}' +
-    '.sub{color:#666;font-size:11px;margin-bottom:16px}' +
-    '.kpis{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:20px}' +
-    '.kpi{background:#f5f5f5;border-radius:6px;padding:12px 14px}' +
-    '.kpi-label{font-size:9px;color:#666;text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px}' +
-    '.kpi-val{font-size:18px;font-weight:700}' +
-    'h2{font-size:13px;font-weight:700;margin:16px 0 8px;padding-bottom:4px;border-bottom:2px solid #1a1916}' +
-    'table{width:100%;border-collapse:collapse}' +
-    'th{background:#1a1916;color:#fff;padding:6px 8px;text-align:right;font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.05em}' +
-    'th:first-child{text-align:left}' +
-    'td{padding:5px 8px;border-bottom:1px solid #eee;font-size:10px;text-align:right}' +
-    'td:first-child{text-align:left}' +
-    '.footer{margin-top:20px;padding-top:10px;border-top:1px solid #ddd;font-size:9px;color:#999;text-align:center}' +
+    'body{font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;font-size:9.5px;color:' + C.text + ';line-height:1.45}' +
+    '.kopf{display:flex;align-items:flex-end;justify-content:space-between;' +
+      'border-bottom:3px solid ' + C.akzent + ';padding-bottom:10px;margin-bottom:16px}' +
+    'h1{font-size:22px;font-weight:800;color:' + C.dunkel + ';letter-spacing:-.3px}' +
+    '.sub{color:' + C.grau + ';font-size:10px;margin-top:2px}' +
+    '.marke{text-align:right;font-size:9px;color:' + C.grau + '}' +
+    '.marke b{display:block;font-size:11px;color:' + C.akzent + '}' +
+    'h2{font-size:13px;font-weight:700;color:' + C.dunkel + ';margin:18px 0 8px;' +
+      'padding-left:8px;border-left:3px solid ' + C.akzent + '}' +
+    'h3{font-size:11px;font-weight:700;color:' + C.dunkel + ';margin:14px 0 5px}' +
+    '.hint{color:' + C.grau + ';font-size:9px;margin-bottom:6px}' +
+    '.leer{color:' + C.grau + ';font-size:9px;font-style:italic;padding:6px 0}' +
+    '.kpis{display:grid;grid-template-columns:repeat(3,1fr);gap:7px;margin-bottom:6px}' +
+    '.kpi{background:' + C.flaeche + ';border:1px solid ' + C.linie + ';border-radius:7px;padding:9px 11px}' +
+    '.kpi-label{font-size:8px;text-transform:uppercase;letter-spacing:.06em;color:' + C.grau + ';font-weight:700}' +
+    '.kpi-val{font-size:14px;font-weight:800;margin-top:3px;color:' + C.dunkel + '}' +
+    'table{width:100%;border-collapse:collapse;margin-bottom:4px}' +
+    'th{background:' + C.dunkel + ';color:#fff;font-size:8px;text-transform:uppercase;' +
+      'letter-spacing:.05em;padding:6px 7px;text-align:left;font-weight:700}' +
+    'td{padding:5px 7px;border-bottom:1px solid ' + C.linie + '}' +
+    'tr.alt td{background:' + C.flaeche + '}' +
+    'tr.sum td{background:#e0f2fe;font-weight:800;border-top:2px solid ' + C.akzent + ';' +
+      'border-bottom:none;padding:7px}' +
+    '.r{text-align:right}.b{font-weight:700}' +
+    '.bar{background:' + C.linie + ';border-radius:3px;height:7px;width:100%;overflow:hidden}' +
+    '.bar span{display:block;height:100%;background:' + C.akzent + ';border-radius:3px}' +
+    '.seite{page-break-before:always;padding-top:2mm}' +
+    '.fuss{margin-top:14px;padding-top:8px;border-top:1px solid ' + C.linie + ';' +
+      'color:' + C.grau + ';font-size:8px;display:flex;justify-content:space-between}' +
     '</style></head><body>' +
-    '<h1>Jahresbericht ' + year + '</h1>' +
-    '<div class="sub">' + userName + ' &middot; Erstellt am ' + new Date().toLocaleDateString('de-DE') +
-    ' &middot; Startgeld: ' + fmtEur(state.meta.startgeld || 0) + ' &euro;</div>' +
-    '<div class="kpis">' + kpiBlock + '</div>' +
-    '<h2>Monat&uuml;bersicht ' + year + '</h2>' +
-    '<table><thead><tr>' +
-    '<th>Monat</th><th>Gehalt</th><th>Nebenjob</th><th>Fixkosten</th><th>Eink&auml;ufe</th><th>Ausgaben</th><th>Cashflow</th>' +
-    '</tr></thead><tbody>' + rowsHtml + totalRow + '</tbody></table>' +
-    '<div class="footer">Finanzverwaltung Pro &middot; ' + userName + ' &middot; ' + year + '</div>' +
+
+    // Seite 1
+    '<div class="kopf"><div><h1>' + titel + '</h1>' +
+      '<div class="sub">' + escapeHtml(userName) + ' · ' + untertitel + '</div></div>' +
+      '<div class="marke"><b>Finanzverwaltung Pro</b>Erstellt am ' + stichtag + '</div></div>' +
+    '<h2>Kennzahlen</h2><div class="kpis">' + kpiBlock + '</div>' +
+    '<h2>Monatsübersicht</h2>' +
+    '<table><thead><tr><th>Monat</th><th class="r">Gehalt</th><th class="r">Nebenjob</th>' +
+      '<th class="r">Fixkosten</th><th class="r">Einkäufe</th><th class="r">Ausgaben</th>' +
+      '<th class="r">Cashflow</th></tr></thead><tbody>' + monatsZeilen + '</tbody></table>' +
+    '<div class="fuss"><span>Finanzverwaltung Pro · ' + escapeHtml(userName) + '</span><span>Seite 1</span></div>' +
+
+    // Seite 2
+    '<div class="seite">' +
+      '<h2>Konten</h2>' +
+      pdfTabelle(['Konto','Art','Startwert','Saldo'], kontenZeilen, { leer:'Keine Konten angelegt.' }) +
+      '<h2>Ausgaben nach Kategorie</h2>' +
+      pdfTabelle(['Kategorie','Betrag','Anteil',''], katZeilen, { leer:'Keine Ausgaben erfasst.' }) +
+      (sparZeilen.length ? '<h2>Sparen &amp; Depot</h2>' +
+        pdfTabelle(['Position','Sparbetrag','Aktueller Wert'], sparZeilen) : '') +
+      '<div class="fuss"><span>Finanzverwaltung Pro · ' + escapeHtml(userName) + '</span><span>Seite 2</span></div>' +
+    '</div>' +
+
+    // Seite 3
+    ((zaehlerBloecke || pvBlock || spesenBlock) ?
+      '<div class="seite">' +
+        '<h2>Zähler &amp; Verbrauch</h2>' +
+        (zaehlerBloecke || '<p class="leer">Keine Zählerstände erfasst.</p>') +
+        pvBlock + spesenBlock +
+        '<div class="fuss"><span>Finanzverwaltung Pro · ' + escapeHtml(userName) + '</span><span>Seite 3</span></div>' +
+      '</div>' : '') +
+
     '</body></html>';
+}
+
+// Sammelt die Kennzahlen für den Bericht.
+function berichtDatenSammeln(year) {
+  const rows = allMonths2026.map(m => ({ m, f: monthFinancials(m), inc: state.incomeByMonth[m] || {} }));
+  const totals = rows.reduce((acc, r) => {
+    acc.gehalt += r.inc.gehalt || 0; acc.nj += r.inc.nebenjob || 0;
+    acc.fix += r.f.fixTotal; acc.eink += r.f.einkTotal;
+    acc.ausg += r.f.ausgTotal; acc.cf += r.f.cashflow;
+    return acc;
+  }, { gehalt:0, nj:0, fix:0, eink:0, ausg:0, cf:0 });
+  return { rows, totals };
+}
+
+// Nur PDF erzeugen, nichts abschließen.
+async function zwischenstandPdf() {
+  const year = getSelectedYear();
+  const { rows, totals } = berichtDatenSammeln(year);
+  const html = buildJahresberichtHTML(year, state.meta.userName || 'Nutzer', totals, rows, { typ:'zwischenstand' });
+  if (window.EA && window.EA.printToPdf) {
+    await window.EA.printToPdf({ html, filename: 'Zwischenstand_' + year + '.pdf' });
+    showToast('Zwischenstand erstellt', 'info');
+  } else {
+    await uiAlert({ title:'Nicht verfügbar', icon:'⚠', message:'Der PDF-Export benötigt die Desktop-App.' });
+  }
 }
 
 async function archiveYear() {
   const year = getSelectedYear();
-  if (!await uiConfirm({ message: `Jahr ${year} abschließen?<br><br>Es wird ein <b>PDF-Jahresbericht</b> erstellt (Speicherort wählst du im nächsten Fenster) und ein <b>JSON-Backup</b> gesichert.`, title: 'Jahr archivieren', icon: '📦', okLabel: 'Bericht erstellen' })) return;
 
-  // ── PDF Jahresbericht erstellen (für das AUSGEWÄHLTE Jahr) ─────────────
-  const rows = allMonths2026.map(m => {
-    const f = monthFinancials(m);
-    const inc = state.incomeByMonth[m] || {};
-    return { m, f, inc };
+  // Erst fragen, was gewünscht ist – ein Jahresabschluss ist etwas anderes
+  // als ein Zwischenstand zum heutigen Tag.
+  const abschluss = await uiConfirm({
+    title: 'Bericht für ' + year, icon: '📄',
+    message: 'Was möchtest du erstellen?',
+    html:
+      '<div style="display:flex;flex-direction:column;gap:10px;font-size:13px">' +
+        '<div style="padding:11px 13px;border:1px solid var(--border);border-radius:9px;background:var(--surface-2)">' +
+          '<div style="font-weight:700;margin-bottom:3px">📄 Zwischenstand</div>' +
+          '<div style="color:var(--muted);font-size:12px">' +
+            'PDF mit dem heutigen Stand – Kennzahlen, Konten, Kategorien, Zähler. ' +
+            'Das Jahr bleibt offen, es wird nichts verändert.' +
+          '</div>' +
+        '</div>' +
+        '<div style="padding:11px 13px;border:1px solid var(--border);border-radius:9px;background:var(--surface-2)">' +
+          '<div style="font-weight:700;margin-bottom:3px">📦 Jahr abschließen</div>' +
+          '<div style="color:var(--muted);font-size:12px">' +
+            'Erstellt denselben Bericht als Jahresabschluss, sichert zusätzlich ein ' +
+            'JSON-Backup und bietet danach an, das Folgejahr anzulegen.' +
+          '</div>' +
+        '</div>' +
+      '</div>',
+    okLabel: '📦 Jahr abschließen',
+    cancelLabel: '📄 Nur Zwischenstand',
   });
-  const totals = rows.reduce((acc,{f,inc}) => {
-    acc.gehalt += inc.gehalt||0; acc.nj += inc.nebenjob||0;
-    acc.fix += f.fixTotal; acc.eink += f.einkTotal;
-    acc.ausg += f.ausgTotal; acc.cf += f.cashflow;
-    return acc;
-  }, {gehalt:0,nj:0,fix:0,eink:0,ausg:0,cf:0});
+
+  const { rows, totals } = berichtDatenSammeln(year);
   const userName = state.meta.userName || 'Nutzer';
-  const pdfHtml = buildJahresberichtHTML(year, userName, totals, rows);
-  if (window.EA && window.EA.printToPdf) {
-    await window.EA.printToPdf({ html: pdfHtml, filename: 'Jahresbericht_' + year + '.pdf' });
+
+  if (!abschluss) {
+    // Abbrechen-Schaltfläche = Zwischenstand. Zusätzlich Escape abfangen:
+    // uiConfirm liefert bei Escape ebenfalls false, deshalb hier noch einmal
+    // kurz rückfragen, damit niemand ungewollt ein PDF erzeugt.
+    const willPdf = await uiConfirm({
+      title: 'Zwischenstand erstellen', icon: '📄',
+      message: 'PDF mit dem heutigen Stand von ' + year + ' erstellen?',
+      details: ['Es wird nichts abgeschlossen und nichts verändert.'],
+      okLabel: 'PDF erstellen', cancelLabel: 'Abbrechen',
+    });
+    if (!willPdf) return;
+    const html = buildJahresberichtHTML(year, userName, totals, rows, { typ:'zwischenstand' });
+    if (window.EA && window.EA.printToPdf) {
+      await window.EA.printToPdf({ html, filename: 'Zwischenstand_' + year + '.pdf' });
+      showToast('Zwischenstand erstellt', 'info');
+    } else {
+      await uiAlert({ title:'Nicht verfügbar', icon:'⚠', message:'Der PDF-Export benötigt die Desktop-App.' });
+    }
+    return;
   }
 
-  // ── JSON-Backup: bevorzugt still in den Backup-Ordner, sonst Download ──
+  // ── Jahresabschluss ────────────────────────────────────────────────────
+  const html = buildJahresberichtHTML(year, userName, totals, rows, { typ:'abschluss' });
+  if (window.EA && window.EA.printToPdf) {
+    await window.EA.printToPdf({ html, filename: 'Jahresbericht_' + year + '.pdf' });
+  }
+
+  // JSON-Backup: bevorzugt still in den Backup-Ordner, sonst Download
   let backupZiel = '';
   const json = JSON.stringify(state, null, 2);
   if (window.EA && window.EA.writeBackup && state.config && state.config.backupPath) {
@@ -7339,20 +7807,22 @@ async function archiveYear() {
     } catch {}
   }
   if (!backupZiel) {
-    const blob = new Blob([json], {type:'application/json'});
+    const blob = new Blob([json], { type:'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
-    a.href = url; a.download = `Finanzverwaltung_${year}_Backup.json`; a.click();
+    a.href = url; a.download = 'Finanzverwaltung_' + year + '_Backup.json'; a.click();
     URL.revokeObjectURL(url);
   }
 
-  // ── Abschluss: in den modernen Neues-Jahr-Dialog führen ────────────────
-  // (KEIN Zurücksetzen der Daten mehr – das alte Verhalten konnte im
+  // (KEIN Zurücksetzen der Daten – das alte Verhalten konnte im
   //  Mehrjahres-System zu Datenverlust führen.)
   const weiter = await uiConfirm({
     title: 'Jahr ' + year + ' archiviert', icon: '✅',
-    message: `Jahresbericht erstellt` + (backupZiel ? `<br>Backup gespeichert in:<br><b>${backupZiel}</b>` : `<br>Backup als Download gespeichert`) +
-      `<br><br>Möchtest du jetzt das <b>nächste Jahr anlegen</b>? Dort kannst du per Häkchen Endsaldo, <b>Fixkosten</b>, wiederkehrende Einnahmen und Konten übernehmen.`,
+    message: 'Jahresbericht erstellt' +
+      (backupZiel ? '<br>Backup gespeichert in:<br><b>' + escapeHtml(backupZiel) + '</b>'
+                  : '<br>Backup als Download gespeichert') +
+      '<br><br>Möchtest du jetzt das <b>nächste Jahr anlegen</b>? Dort kannst du per Häkchen ' +
+      'Endsaldo, <b>Fixkosten</b>, wiederkehrende Einnahmen und Konten übernehmen.',
     okLabel: 'Neues Jahr anlegen', cancelLabel: 'Später' });
   if (weiter) createNewYear();
 }
@@ -7988,6 +8458,16 @@ window.tabellenDeaktivieren = tabellenDeaktivieren;
 window.tabellenNavSichtbarkeit = tabellenNavSichtbarkeit;
 window.spesenSatzFuer    = spesenSatzFuer;
 window.spesenNeuBerechnen = spesenNeuBerechnen;
+window.importVorschauUmschalten = importVorschauUmschalten;
+window.importVorschauAlle = importVorschauAlle;
+window.importVorschauVerwerfen = importVorschauVerwerfen;
+window.importVorschauUebernehmen = importVorschauUebernehmen;
+window.importVorschauHtml = importVorschauHtml;
+window.zwischenstandPdf  = zwischenstandPdf;
+window.berichtDatenSammeln = berichtDatenSammeln;
+window.buildJahresberichtHTML = buildJahresberichtHTML;
+window.buchungenAusText  = buchungenAusText;
+window.pdfSeiteZuZeilen  = pdfSeiteZuZeilen;
 window.spesenSaetzeFuerReise = spesenSaetzeFuerReise;
 window.spesenUpdatePruefen = spesenUpdatePruefen;
 window.spesenSaetzeZuruecksetzen = spesenSaetzeZuruecksetzen;
