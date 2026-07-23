@@ -161,6 +161,17 @@ let _snoozedReminders = {};
 // Format je Eintrag: { v: 'Version', date: 'YYYY-MM-DD', changes: ['...','...'] }
 // Änderungen dürfen mit **Fett** Markierung versehen werden.
 const CHANGELOG = [
+  { v: '1.0.33', date: '2026-07-23', changes: [
+    '**Neue Übersicht nach Depot** unter „Sparen & Depot": zeigt für jedes Depot den investierten Betrag, den aktuellen Wert und Gewinn/Verlust – darunter aufgeklappt die einzelnen Positionen',
+    'Jede Position lässt sich einem Depot zuordnen; auf den Positionskarten steht jetzt, wo das Papier liegt',
+    'Der Anteil jedes Depots am gesamten Einsatz wird in Prozent angezeigt',
+    'Positionen ohne aktuellen Kurs werden gesondert ausgewiesen, damit die Summen nicht stillschweigend unvollständig sind',
+  ]},
+  { v: '1.0.32', date: '2026-07-23', changes: [
+    '**Kurse für Fonds können jetzt automatisch geladen werden.** Klassische Investmentfonds werden nicht an der Börse gehandelt und waren über die bisherige Kursquelle nicht abrufbar – für sie wird nun ersatzweise die ISIN verwendet',
+    'Findet die übliche Quelle ein Wertpapier nicht, versucht die App automatisch den Abruf über die ISIN, statt aufzugeben',
+    'Damit lassen sich auch Depots bei Fondsbanken laufend mitverfolgen, ohne die Anteilwerte von Hand einzutragen',
+  ]},
   { v: '1.0.31', date: '2026-07-23', changes: [
     '**Fehler behoben: Bestandsübernahmen verfälschten die Sparquote.** Wer vorhandenes Vermögen einträgt, das über Jahre angespart wurde, sah es als Sparleistung des laufenden Monats – aus 400 € tatsächlicher Sparrate wurden so über 14.000 €. Bestandsübernahmen zählen jetzt nur noch zum Depotwert, nicht zur Sparleistung',
     '**Neuer Bereich „Analyse"** (optional aktivierbar): wertet die eigenen Buchungen aus',
@@ -3803,6 +3814,79 @@ function deleteUmbuchung(id) {
   if (moveToTrash('umbuchungen', id, 'Umbuchung')) { renderPage(); showToast('In Papierkorb verschoben','info'); }
 }
 
+// Übersicht je Depot: Wo liegt was, und wie steht jedes Depot da?
+function depotUebersichtHtml(list, kurse) {
+  if (!list || !list.length) return '';
+  const gruppen = {};
+  list.forEach(p => {
+    const dep = p.depot || 'Ohne Zuordnung';
+    if (!gruppen[dep]) gruppen[dep] = { name: dep, invest: 0, wert: 0, offen: 0, pos: [] };
+    const g = gruppen[dep];
+    const k = kurse[p.symbol];
+    const wert = (k && k.kurs && p.units) ? p.units * k.kurs : null;
+    g.invest += p.invested;
+    if (wert !== null) g.wert += wert; else g.offen++;
+    g.pos.push({ ...p, wert });
+  });
+  const alle = Object.values(gruppen).sort((a, b) => b.invest - a.invest);
+  const gInvest = alle.reduce((s, g) => s + g.invest, 0);
+  const gWert   = alle.reduce((s, g) => s + g.wert, 0);
+  const gOffen  = alle.reduce((s, g) => s + g.offen, 0);
+
+  const zeile = (g) => {
+    const gv = g.offen ? null : g.wert - g.invest;
+    const gvPct = (gv !== null && g.invest > 0) ? (gv / g.invest * 100) : null;
+    const anteil = gInvest > 0 ? (g.invest / gInvest * 100) : 0;
+    const posListe = g.pos.sort((a, b) => b.invested - a.invested).map(p =>
+      '<tr>' +
+        '<td style="padding-left:18px">' + escapeHtml(p.name) +
+          '<span style="font-size:10px;color:var(--muted);font-family:monospace;margin-left:6px">' + escapeHtml(p.symbol) + '</span></td>' +
+        '<td class="r">' + fmtEur(p.invested) + '</td>' +
+        '<td class="r">' + (p.wert !== null ? fmtEur(p.wert) : '<span style="color:var(--muted)">Kurs fehlt</span>') + '</td>' +
+        '<td class="r" style="color:' + (p.wert === null ? 'var(--muted)' : (p.wert - p.invested) >= 0 ? 'var(--green)' : 'var(--red)') + '">' +
+          (p.wert === null ? '–' : ((p.wert - p.invested) >= 0 ? '+' : '') + fmtEur(p.wert - p.invested)) + '</td>' +
+      '</tr>').join('');
+    return '<tbody>' +
+      '<tr style="background:var(--surface-2)">' +
+        '<td style="font-weight:700">' + escapeHtml(g.name) +
+          '<span class="badge badge-muted" style="margin-left:8px">' + g.pos.length + '</span>' +
+          '<span style="font-size:11px;color:var(--muted);margin-left:8px">' + anteil.toFixed(0) + ' % des Einsatzes</span></td>' +
+        '<td class="r" style="font-weight:700">' + fmtEur(g.invest) + '</td>' +
+        '<td class="r" style="font-weight:700">' + fmtEur(g.wert) +
+          (g.offen ? '<span style="font-size:10px;color:var(--muted)"> +' + g.offen + ' ohne Kurs</span>' : '') + '</td>' +
+        '<td class="r" style="font-weight:700;color:' + (gv === null ? 'var(--muted)' : gv >= 0 ? 'var(--green)' : 'var(--red)') + '">' +
+          (gv === null ? '–' : (gv >= 0 ? '+' : '') + fmtEur(gv) +
+            (gvPct !== null ? ' <span style="font-size:11px">(' + (gvPct >= 0 ? '+' : '') + gvPct.toFixed(1).replace('.', ',') + ' %)</span>' : '')) +
+        '</td>' +
+      '</tr>' + posListe + '</tbody>';
+  };
+
+  const gGv = gOffen ? null : gWert - gInvest;
+  return '<div class="card mb-2">' +
+    '<div class="card-header"><h3>🏦 Übersicht nach Depot</h3>' +
+      '<div style="display:flex;gap:8px;align-items:center">' +
+        '<span class="badge badge-muted">' + alle.length + ' Depots</span>' +
+        '<strong style="font-size:13px">' + fmtEur(gWert) + '</strong>' +
+      '</div>' +
+    '</div>' +
+    '<div class="table-wrap"><table>' +
+      '<thead><tr><th>Depot / Position</th><th class="r">Investiert</th>' +
+      '<th class="r">Aktueller Wert</th><th class="r">Gewinn/Verlust</th></tr></thead>' +
+      alle.map(zeile).join('') +
+      '<tfoot><tr style="font-weight:800;background:var(--surface-2)">' +
+        '<td>Gesamt</td>' +
+        '<td class="r">' + fmtEur(gInvest) + '</td>' +
+        '<td class="r">' + fmtEur(gWert) + '</td>' +
+        '<td class="r" style="color:' + (gGv === null ? 'var(--muted)' : gGv >= 0 ? 'var(--green)' : 'var(--red)') + '">' +
+          (gGv === null ? '–' : (gGv >= 0 ? '+' : '') + fmtEur(gGv)) + '</td>' +
+      '</tr></tfoot>' +
+    '</table></div>' +
+    (gOffen ? '<div style="font-size:11px;color:var(--muted);margin-top:8px">' +
+      'Für ' + gOffen + ' Position' + (gOffen === 1 ? '' : 'en') + ' fehlt ein aktueller Kurs – ' +
+      'Gewinn/Verlust lässt sich dort nicht berechnen.</div>' : '') +
+  '</div>';
+}
+
 function buildEtfLiveSection() {
   const cfg = state.config || {};
   const kurse = state.etfKurse || {};
@@ -3820,6 +3904,7 @@ function buildEtfLiveSection() {
         typ:  wp.typ || (s.kategorie === 'ETF' ? 'etf' : s.kategorie === 'Fonds' ? 'fonds' : 'aktie'),
         invested: 0,
         units: 0,
+        depot: '',
         trades: [],
       };
     }
@@ -3827,6 +3912,8 @@ function buildEtfLiveSection() {
     p.invested += (+s.amount) || 0;
     if (typeof s.units === 'number') p.units += s.units;
     p.trades.push(s);
+    // Depot merken – Bestandsübernahmen sind die verlässlichste Quelle
+    if (s.depot && (!p.depot || s.txType === 'bestand')) p.depot = s.depot;
   });
   const list = Object.values(positions);
   if (!list.length) return '';
@@ -3847,7 +3934,8 @@ function buildEtfLiveSection() {
         typeBadge +
       '</div>' +
       '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">' +
-        '<div style="font-size:10px;color:var(--muted);font-family:monospace">' + p.symbol + (p.isin ? ' · ' + p.isin : '') + '</div>' +
+        '<div style="font-size:10px;color:var(--muted);font-family:monospace">' + p.symbol + (p.isin ? ' · ' + p.isin : '') +
+          (p.depot ? '<div style="font-family:inherit;margin-top:2px">🏦 ' + escapeHtml(p.depot) + '</div>' : '') + '</div>' +
         priceBtn +
       '</div>' +
       '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px">' +
@@ -3879,6 +3967,7 @@ function buildEtfLiveSection() {
   return '<div style="margin-top:24px"><div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">' +
     '<h3 style="margin:0">📈 Depot-Positionen</h3>' + refreshBtn +
     '</div>' +
+    depotUebersichtHtml(list, kurse) +
     '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:12px">' + cards + '</div>' +
     '</div>';
 }
@@ -8587,8 +8676,53 @@ async function createDesktopShortcut() {
 
 // QR Code für Einstellungen
 // ── ETF LIVE DATEN ─────────────────────────────────────────────────────────
-async function fetchEtfKurs(ticker) {
+// Fonds sind bei Yahoo Finance meist nicht abrufbar (kein Börsenhandel, nur
+// täglicher Anteilwert). Als Rückfallebene wird die öffentlich erreichbare
+// Kursabfrage der ING genutzt, die auch ISINs kennt.
+// Hinweis: undokumentierte Schnittstelle – kann sich ändern. Deshalb nur als
+// Fallback und mit sauberer Fehlerbehandlung.
+async function fetchKursPerIsin(isin) {
+  if (!/^[A-Z]{2}[A-Z0-9]{9}\d$/.test(String(isin || '').toUpperCase())) {
+    return { fehler: 'Keine gültige ISIN' };
+  }
+  const url = 'https://component-api.wertpapiere.ing.de/api/v1/components/instrumentheader/'
+            + encodeURIComponent(isin.toUpperCase());
+  try {
+    let data = null;
+    try {
+      const res = await fetch(url, { signal: AbortSignal.timeout(7000) });
+      if (!res.ok) throw new Error('Status ' + res.status);
+      data = await res.json();
+    } catch {
+      const proxy = 'https://api.allorigins.win/raw?url=' + encodeURIComponent(url);
+      const res2 = await fetch(proxy, { signal: AbortSignal.timeout(9000) });
+      data = await res2.json();
+    }
+    const kurs = +(data && (data.price ?? data.lastPrice));
+    if (!isFinite(kurs) || kurs <= 0) return { fehler: 'Kein Kurs zu ' + isin };
+    const vortag = +(data.previousClose ?? data.closingPrice ?? 0) || kurs;
+    return {
+      kurs: +kurs.toFixed(4),
+      vortag: +vortag.toFixed(4),
+      waehrung: data.currencyIsoCode || data.currency || 'EUR',
+      name: data.name || data.instrumentName || isin,
+      aktualisiert: new Date().toLocaleString('de-DE'),
+      ticker: isin,
+      quelle: 'isin',
+    };
+  } catch (e) {
+    if (e.name === 'AbortError' || e.name === 'TimeoutError') return { fehler: 'Zeitüberschreitung' };
+    return { fehler: 'Fehler: ' + e.message };
+  }
+}
+
+async function fetchEtfKurs(ticker, isin) {
   if (!ticker) return { fehler: 'Kein Ticker angegeben' };
+  // Sieht der "Ticker" selbst wie eine ISIN aus? Dann direkt dort abfragen.
+  if (/^[A-Z]{2}[A-Z0-9]{9}\d$/.test(String(ticker).toUpperCase())) {
+    const r = await fetchKursPerIsin(ticker);
+    if (!r.fehler) return r;
+  }
   try {
     const url = 'https://query1.finance.yahoo.com/v8/finance/chart/' + encodeURIComponent(ticker) + '?interval=1d&range=2d';
     // Try direct first (works in Electron), then proxy
@@ -8603,7 +8737,14 @@ async function fetchEtfKurs(ticker) {
     }
     const result = data?.chart?.result?.[0];
     const meta = result?.meta;
-    if (!meta || !meta.regularMarketPrice) return { fehler: 'ETF nicht gefunden (' + ticker + ')' };
+    if (!meta || !meta.regularMarketPrice) {
+      // Yahoo kennt das Papier nicht → über die ISIN versuchen
+      if (isin) {
+        const r = await fetchKursPerIsin(isin);
+        if (!r.fehler) return r;
+      }
+      return { fehler: 'Kurs nicht gefunden (' + ticker + ')' };
+    }
     return {
       kurs:         +meta.regularMarketPrice.toFixed(4),
       vortag:       +(meta.chartPreviousClose || meta.previousClose || 0).toFixed(4),
@@ -8613,6 +8754,10 @@ async function fetchEtfKurs(ticker) {
       ticker:       ticker,
     };
   } catch(e) {
+    if (isin) {
+      const r = await fetchKursPerIsin(isin);
+      if (!r.fehler) return r;
+    }
     if (e.name === 'AbortError' || e.name === 'TimeoutError') return { fehler: 'Zeitüberschreitung – keine Verbindung' };
     return { fehler: 'Fehler: ' + e.message };
   }
@@ -8622,7 +8767,17 @@ async function refreshEtfKurse(still) {
   const etfBtn = still ? null : document.getElementById('etf_refresh_btn');
   if (etfBtn) { etfBtn.textContent = '⏳ Lädt…'; etfBtn.disabled = true; }
   if (!state.etfKurse) state.etfKurse = {};
-  const tickers = [...new Set((state.sparen||[]).filter(s=>s.etf&&s.etf.ticker).map(s=>s.etf.ticker))];
+  // Ticker samt ISIN sammeln – die ISIN dient als Rückfallebene für Fonds,
+  // die bei Yahoo Finance nicht gelistet sind.
+  const tickerMap = new Map();
+  (state.sparen||[]).forEach(s => {
+    const wp = s.wertpapier || s.etf;
+    const t = (wp && (wp.symbol || wp.ticker)) || (s.etf && s.etf.ticker);
+    if (!t) return;
+    if (!tickerMap.has(t)) tickerMap.set(t, (wp && wp.isin) || '');
+    else if (!tickerMap.get(t) && wp && wp.isin) tickerMap.set(t, wp.isin);
+  });
+  const tickers = [...tickerMap.keys()];
   if (!tickers.length) {
     if (!still) showToast('Kein ETF mit Ticker gefunden', 'info');
     if (etfBtn) { etfBtn.textContent='🔄 Kurse laden'; etfBtn.disabled=false; }
@@ -8630,7 +8785,7 @@ async function refreshEtfKurse(still) {
   }
   let loaded = 0, errors = 0;
   for (const ticker of tickers) {
-    const data = await fetchEtfKurs(ticker);
+    const data = await fetchEtfKurs(ticker, tickerMap.get(ticker));
     if (data && !data.fehler) { state.etfKurse[ticker] = data; loaded++; }
     else { state.etfKurse[ticker] = data || { fehler: 'Unbekannter Fehler' }; errors++; }
   }
@@ -8878,6 +9033,8 @@ window.berichtDatenSammeln = berichtDatenSammeln;
 window.buildJahresberichtHTML = buildJahresberichtHTML;
 window.buchungenAusText  = buchungenAusText;
 window.pdfSeiteZuZeilen  = pdfSeiteZuZeilen;
+window.fetchKursPerIsin  = fetchKursPerIsin;
+window.depotUebersichtHtml = depotUebersichtHtml;
 window.spesenSaetzeFuerReise = spesenSaetzeFuerReise;
 window.spesenUpdatePruefen = spesenUpdatePruefen;
 window.spesenSaetzeZuruecksetzen = spesenSaetzeZuruecksetzen;
