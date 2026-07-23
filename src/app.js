@@ -161,6 +161,21 @@ let _snoozedReminders = {};
 // Format je Eintrag: { v: 'Version', date: 'YYYY-MM-DD', changes: ['...','...'] }
 // Änderungen dürfen mit **Fett** Markierung versehen werden.
 const CHANGELOG = [
+  { v: '1.0.31', date: '2026-07-23', changes: [
+    '**Fehler behoben: Bestandsübernahmen verfälschten die Sparquote.** Wer vorhandenes Vermögen einträgt, das über Jahre angespart wurde, sah es als Sparleistung des laufenden Monats – aus 400 € tatsächlicher Sparrate wurden so über 14.000 €. Bestandsübernahmen zählen jetzt nur noch zum Depotwert, nicht zur Sparleistung',
+    '**Neuer Bereich „Analyse"** (optional aktivierbar): wertet die eigenen Buchungen aus',
+    'Ausgaben je Kategorie mit Gesamtsumme, Anteil, Monatsschnitt, aktuellem Monat, Abweichung und Verlauf über alle Monate',
+    'Fixkostenquote, Sparquote und verbleibender Überschuss auf einen Blick',
+    'Wertpapiere mit investiertem Betrag, aktuellem Wert, Gewinn/Verlust, jährlicher Wertentwicklung, Haltedauer und Anteil am Depot',
+    'Auffällige Einzelbuchungen: Posten, die deutlich über dem üblichen Betrag ihrer Kategorie liegen',
+    'Beobachtungen in Worten – etwa wenn eine Kategorie stark über dem eigenen Schnitt liegt oder eine einzelne Depotposition sehr schwer wiegt',
+    'Die Analyse rechnet ausschließlich mit den eigenen Zahlen und gibt keine Finanz- oder Anlageberatung',
+  ]},
+  { v: '1.0.30', date: '2026-07-23', changes: [
+    '**Fehler behoben: „Desktop-Verknüpfung erstellen" legte zwei unbrauchbare Dateien an.** Statt einer Verknüpfung entstanden eine Batch- und eine Skriptdatei mit fremden Symbolen, die die App gar nicht starten konnten – sie stammten noch aus der Entwicklungszeit und verwiesen auf einen Projektordner, den es auf einem installierten System nicht gibt',
+    'Jetzt wird eine richtige Windows-Verknüpfung mit dem App-Symbol erstellt',
+    'Die beiden alten Dateien werden dabei automatisch vom Desktop entfernt',
+  ]},
   { v: '1.0.29', date: '2026-07-23', changes: [
     '**Der Jahresbericht ist jetzt ein vollständiger dreiseitiger PDF-Bericht** im Design der App – mit Kennzahlen, Monatsübersicht, Konten, Ausgaben nach Kategorie, Depot, Zählerständen, PV-Anlage und Geschäftsreisen',
     '**Neue Abfrage vor dem Erstellen**: Du wählst zwischen einem Zwischenstand zum heutigen Tag und dem Jahresabschluss. Der Zwischenstand verändert nichts – er erzeugt nur das PDF',
@@ -489,6 +504,10 @@ function sparenKumuliertBisMonat(month) {
     if (!m) return;
     if (m.slice(0,4) !== yr) return;     // nur laufendes Jahr
     if (m > month) return;               // nur bis aktueller Monat
+    // Bestandsübernahmen sind bereits vorher angespartes Vermögen und dürfen
+    // die Sparleistung des laufenden Jahres nicht aufblähen. Das Kennzeichen
+    // wurde zwar gesetzt, bisher aber nirgends ausgewertet.
+    if (s.skipCashflow || s.txType === 'bestand') return;
     summe += (+s.amount||0);
   });
   return Math.round(summe * 100) / 100;
@@ -1776,6 +1795,7 @@ function navigate(page) {
     sparen: ['Planung', 'Sparen & Depot'],
     zaehler: ['Planung', 'Zählerstände'],
     pv: ['Planung', 'PV-Anlage'],
+    analyse: ['Auswertung', 'Analyse'],
     finanzprodukte: ['Planung', 'Finanzprodukte'],  
     einstellungen: ['App', 'Einstellungen'],
     tabellen: ['Planung', 'Eigene Tabellen'],
@@ -2053,7 +2073,7 @@ function reminderBannerHtml() {
 function renderPage() {
   Object.values(chartInstances).forEach(c => { try { c.destroy(); } catch {} });
   chartInstances = {};
-  const pages = { dashboard, jahresuebersicht, suche, buchungen, einkaeufe, ausgaben, einnahmen, spesen, fixkosten, sparen, umbuchungen, zaehler, pv, finanzprodukte, tabellen, einstellungen, importPage };
+  const pages = { dashboard, jahresuebersicht, suche, buchungen, einkaeufe, ausgaben, einnahmen, spesen, fixkosten, sparen, umbuchungen, zaehler, pv, analyse, finanzprodukte, tabellen, einstellungen, importPage };
   const fn = pages[currentPage === 'import' ? 'importPage' : currentPage];
   const banner = reminderBannerHtml();
   if (fn) el('pageContent').innerHTML = banner + fn();
@@ -5015,6 +5035,28 @@ function einstellungen() {
         </div>
       </div>
 
+      <div class="settings-section-header">📊 Analyse</div>
+      <div class="card mb-2">
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+          <span style="font-size:16px">📊</span>
+          <strong style="font-size:13px">Analyse</strong>
+          <span style="font-size:12px;color:${analyseAktiv()?'var(--green)':'var(--muted)'}">
+            ${analyseAktiv()?'aktiv – Menüpunkt sichtbar':'nicht aktiv'}
+          </span>
+          <span style="flex:1"></span>
+          ${analyseAktiv()
+            ? `<button class="btn btn-sm btn-ghost" onclick="navigate('analyse')">Öffnen</button>
+               <button class="btn btn-sm btn-ghost" onclick="analyseDeaktivieren()">Ausblenden</button>`
+            : `<button class="btn btn-sm btn-primary" onclick="analyseAktivieren()">Aktivieren</button>`}
+        </div>
+        <div style="font-size:12px;color:var(--muted);margin-top:8px">
+          Wertet deine Buchungen aus: Ausgaben je Kategorie im Monatsverlauf,
+          Abweichungen vom eigenen Schnitt, Fixkosten- und Sparquote sowie
+          Wertpapiere mit Wertentwicklung und Gewichtung. Rein rechnerisch –
+          keine Finanz- oder Anlageberatung.
+        </div>
+      </div>
+
       <div class="settings-section-header">📝 Eigene Tabellen</div>
       <div class="card mb-2">
         <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
@@ -5171,8 +5213,9 @@ function einstellungen() {
       <div class="settings-section-header">🖥️ System</div>
       <div class="card mb-2">
         <div style="display:flex;flex-direction:column;gap:10px">
-          <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
             <button class="btn btn-ghost btn-sm" onclick="createDesktopShortcut()">🖥 Desktop-Verknüpfung erstellen</button>
+            <span style="font-size:11px;color:var(--muted)">Falls die Verknüpfung vom Installationsprogramm gelöscht wurde</span>
           </div>
           <div style="font-size:11px;color:var(--muted)">
             <span id="creditsVersion">v1.01</span> · Finanzverwaltung Pro · <a href="mailto:marco.conrad00@gmail.com" style="color:var(--accent)">marco.conrad00@gmail.com</a>
@@ -6032,6 +6075,7 @@ async function pvAktivieren() {
   spesenNeuBerechnen();
   pvNavSichtbarkeit();
   tabellenNavSichtbarkeit();
+  analyseNavSichtbarkeit();
   etfAutoRefreshEinrichten();
   etfStartRefresh().catch(e => console.error(e));
   spesenAutoPruefung().catch(e => console.error(e));
@@ -6112,6 +6156,356 @@ function pvToggleVergleich() {
   const cfg = pvCfg();
   cfg.vergleichAktiv = !cfg.vergleichAktiv;
   saveData(); renderPage();
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// ANALYSE
+// ════════════════════════════════════════════════════════════════════════════
+// Zeigt Auffälligkeiten aus den eigenen Zahlen. Bewusst beschreibend statt
+// bewertend: Die App rechnet und stellt gegenüber, die Schlüsse zieht der Nutzer.
+// KEINE Anlageberatung – bei Wertpapieren werden nur Kennzahlen dargestellt.
+function analyseAktiv() { return !!(state.config && state.config.analyseAktiv); }
+function analyseNavSichtbarkeit() {
+  const btn = document.getElementById('navAnalyse');
+  if (btn) btn.style.display = analyseAktiv() ? '' : 'none';
+}
+async function analyseAktivieren() {
+  if (!state.config) state.config = {};
+  state.config.analyseAktiv = true;
+  saveData(); analyseNavSichtbarkeit(); navigate('analyse');
+  showToast('Analyse aktiviert','info');
+}
+async function analyseDeaktivieren() {
+  const ok = await uiConfirm({
+    title: 'Analyse ausblenden', icon: '📊',
+    message: 'Den Menüpunkt „Analyse" ausblenden?',
+    details: ['Es werden keine Daten gelöscht – die Analyse rechnet ohnehin nur aus vorhandenen Buchungen.'],
+    okLabel: 'Ausblenden', cancelLabel: 'Abbrechen' });
+  if (!ok) return;
+  state.config.analyseAktiv = false;
+  saveData(); analyseNavSichtbarkeit(); navigate('einstellungen');
+  showToast('Analyse ausgeblendet','info');
+}
+
+// Monate mit Buchungen im laufenden Jahr
+function analyseMonate() {
+  const jetzt = currentMonth;
+  return allMonths2026.filter(m => m <= jetzt);
+}
+// Ausgaben je Kategorie und Monat
+function analyseKategorien() {
+  const proKat = {};
+  const proKatMonat = {};
+  const zaehler = {};
+  const erfasse = (kat, betrag, monat) => {
+    proKat[kat] = (proKat[kat] || 0) + betrag;
+    proKatMonat[kat] = proKatMonat[kat] || {};
+    proKatMonat[kat][monat] = (proKatMonat[kat][monat] || 0) + betrag;
+    zaehler[kat] = (zaehler[kat] || 0) + 1;
+  };
+  (state.ausgaben || []).forEach(a => {
+    if (a._korrektur) return;
+    erfasse(a.category || 'Ohne Kategorie', +a.amount || 0, a.month || '');
+  });
+  (state.einkaeufe || []).forEach(e => {
+    erfasse('Einkauf Lebensmittel', +e.amount || 0, e.month || '');
+  });
+  const monate = analyseMonate();
+  const n = Math.max(1, monate.length);
+  return Object.keys(proKat).map(k => {
+    const summe = proKat[k];
+    const schnitt = summe / n;
+    const letzter = (proKatMonat[k] || {})[currentMonth] || 0;
+    const abw = schnitt > 0 ? ((letzter - schnitt) / schnitt) * 100 : null;
+    return {
+      kat: k, summe, schnitt, letzter, abw,
+      anzahl: zaehler[k] || 0,
+      proBuchung: (zaehler[k] ? summe / zaehler[k] : 0),
+      verlauf: proKatMonat[k] || {},
+    };
+  }).sort((a, b) => b.summe - a.summe);
+}
+// Einnahmen, Fixkostenquote, Sparquote
+function analyseKennzahlen() {
+  const monate = analyseMonate();
+  let einnahmen = 0, fix = 0, ausgaben = 0, eink = 0;
+  monate.forEach(m => {
+    const f = monthFinancials(m);
+    einnahmen += f.totalIncome;
+    fix += f.fixTotal; ausgaben += f.ausgTotal; eink += f.einkTotal;
+  });
+  const gespart = sparenKumuliertBisMonat(currentMonth);
+  const gesamtAus = fix + ausgaben + eink;
+  return {
+    monate: monate.length, einnahmen, fix, ausgaben, eink, gesamtAus, gespart,
+    fixQuote: einnahmen > 0 ? (fix / einnahmen) * 100 : null,
+    sparQuote: einnahmen > 0 ? (gespart / einnahmen) * 100 : null,
+    uebrig: einnahmen - gesamtAus,
+  };
+}
+// Auffällige Einzelbuchungen. Vergleich gegen den MEDIAN der Kategorie, nicht
+// gegen den Mittelwert: Ein einzelner großer Posten zieht den Mittelwert nach
+// oben und würde sich dadurch selbst verstecken.
+function analyseAusreisser() {
+  const proKat = {};
+  const alle = [
+    ...(state.ausgaben || []).filter(a => !a._korrektur)
+      .map(a => ({ desc: a.desc || '—', kat: a.category || 'Ohne Kategorie', v: +a.amount || 0, date: a.date || '' })),
+    ...(state.einkaeufe || [])
+      .map(e => ({ desc: e.desc || e.store || 'Einkauf', kat: 'Einkauf Lebensmittel', v: +e.amount || 0, date: e.date || '' })),
+  ];
+  alle.forEach(x => { (proKat[x.kat] = proKat[x.kat] || []).push(x.v); });
+  const median = {};
+  Object.keys(proKat).forEach(k => {
+    const w = proKat[k].slice().sort((a, b) => a - b);
+    const m = w.length % 2
+      ? w[(w.length - 1) / 2]
+      : (w[w.length / 2 - 1] + w[w.length / 2]) / 2;
+    median[k] = m;
+  });
+  return alle
+    .map(x => ({ ...x, faktor: median[x.kat] > 0 ? x.v / median[x.kat] : 0 }))
+    .filter(x => x.faktor >= 2 && x.v >= 50)
+    .sort((a, b) => b.v - a.v)
+    .slice(0, 10);
+}
+// Depot: Positionen mit Rendite und Haltedauer
+function analyseDepot() {
+  const kurse = state.etfKurse || {};
+  const pos = {};
+  (state.sparen || []).forEach(s => {
+    const wp = s.wertpapier || s.etf;
+    if (!wp || !(wp.symbol || wp.ticker)) return;
+    const sym = wp.symbol || wp.ticker;
+    if (!pos[sym]) pos[sym] = {
+      symbol: sym, name: wp.name || sym, isin: wp.isin || '',
+      typ: wp.typ || 'wertpapier', invested: 0, units: 0,
+      erstesDatum: null, trades: 0,
+    };
+    const p = pos[sym];
+    p.invested += (+s.amount) || 0;
+    if (typeof s.units === 'number') p.units += s.units;
+    p.trades++;
+    const d = s.date || '';
+    if (d && (!p.erstesDatum || d < p.erstesDatum)) p.erstesDatum = d;
+  });
+  const liste = Object.values(pos).map(p => {
+    const k = kurse[p.symbol];
+    const kurs = k && k.kurs ? k.kurs : null;
+    const wert = (kurs !== null && p.units) ? p.units * kurs : null;
+    const gv = (wert !== null) ? wert - p.invested : null;
+    const gvPct = (gv !== null && p.invested > 0) ? (gv / p.invested) * 100 : null;
+    // Annualisiert: (Endwert/Einsatz)^(1/Jahre) − 1
+    let jahre = null, annual = null;
+    if (p.erstesDatum) {
+      const tage = (Date.now() - new Date(p.erstesDatum).getTime()) / 86400000;
+      jahre = tage / 365.25;
+      if (jahre >= 0.25 && wert !== null && p.invested > 0) {
+        annual = (Math.pow(wert / p.invested, 1 / jahre) - 1) * 100;
+      }
+    }
+    return { ...p, kurs, wert, gv, gvPct, jahre, annual, kursFehlt: kurs === null };
+  }).sort((a, b) => (b.wert || 0) - (a.wert || 0));
+  const gesamtWert = liste.reduce((s, p) => s + (p.wert || 0), 0);
+  const gesamtInv = liste.reduce((s, p) => s + p.invested, 0);
+  liste.forEach(p => { p.gewicht = gesamtWert > 0 && p.wert ? (p.wert / gesamtWert) * 100 : null; });
+  return { liste, gesamtWert, gesamtInv,
+    gesamtGv: gesamtWert > 0 ? gesamtWert - gesamtInv : null };
+}
+
+// ── Beobachtungen ──────────────────────────────────────────────────────────
+// Formulierungen bleiben beschreibend. Die App stellt Zahlen gegenüber und
+// benennt, was auffällt – sie bewertet keine Lebensentscheidungen.
+function analyseBeobachtungen() {
+  const out = [];
+  const kz = analyseKennzahlen();
+  const kats = analyseKategorien();
+  if (kz.fixQuote !== null && kz.fixQuote > 50) {
+    out.push({ art:'hinweis', text:'Deine Fixkosten binden ' + kz.fixQuote.toFixed(0) +
+      ' % der Einnahmen. Alles darüber hinaus ist frei verfügbar – je höher dieser Anteil, desto weniger Spielraum bleibt bei schwankenden Einnahmen.' });
+  }
+  if (kz.uebrig < 0) {
+    out.push({ art:'warnung', text:'In den bisherigen ' + kz.monate + ' Monaten liegen die Ausgaben um ' +
+      fmtEur(Math.abs(kz.uebrig)) + ' über den Einnahmen.' });
+  }
+  if (kz.sparQuote !== null && kz.sparQuote > 0) {
+    out.push({ art:'info', text:'Sparquote im laufenden Jahr: ' + kz.sparQuote.toFixed(1).replace('.', ',') +
+      ' % der Einnahmen (' + fmtEur(kz.gespart) + ').' });
+  }
+  // Stärkster Zuwachs gegenüber dem eigenen Schnitt
+  const steigend = kats.filter(k => k.abw !== null && k.abw > 30 && k.letzter >= 30)
+    .sort((a, b) => b.abw - a.abw).slice(0, 3);
+  steigend.forEach(k => {
+    out.push({ art:'hinweis', text:'„' + k.kat + '" liegt im ' + monthLabel(currentMonth) +
+      ' bei ' + fmtEur(k.letzter) + ' – das sind ' + k.abw.toFixed(0) +
+      ' % über deinem Monatsschnitt von ' + fmtEur(k.schnitt) + '.' });
+  });
+  // Größter Ausgabenblock
+  if (kats.length) {
+    const top = kats[0];
+    const anteil = kz.gesamtAus > 0 ? (top.summe / kz.gesamtAus) * 100 : 0;
+    if (anteil >= 20) {
+      out.push({ art:'info', text:'Größter Ausgabenblock ist „' + top.kat + '" mit ' +
+        fmtEur(top.summe) + ' (' + anteil.toFixed(0) + ' % aller Ausgaben, ' + top.anzahl + ' Buchungen).' });
+    }
+  }
+  // Viele kleine Buchungen
+  const kleinteilig = kats.filter(k => k.anzahl >= 10 && k.proBuchung > 0 && k.proBuchung < 25 && k.summe >= 150);
+  kleinteilig.slice(0, 2).forEach(k => {
+    out.push({ art:'hinweis', text:'„' + k.kat + '": ' + k.anzahl + ' Buchungen mit im Schnitt ' +
+      fmtEur(k.proBuchung) + ' summieren sich auf ' + fmtEur(k.summe) + '.' });
+  });
+  // Depot-Klumpen
+  const dep = analyseDepot();
+  const klumpen = dep.liste.filter(p => p.gewicht !== null && p.gewicht > 40);
+  klumpen.forEach(p => {
+    out.push({ art:'hinweis', text:'„' + p.name + '" macht ' + p.gewicht.toFixed(0) +
+      ' % deines Depotwerts aus. Ein hoher Anteil einzelner Positionen erhöht die Abhängigkeit von deren Entwicklung.' });
+  });
+  if (dep.liste.some(p => p.kursFehlt)) {
+    out.push({ art:'info', text:'Für einzelne Positionen fehlt ein aktueller Kurs – Rendite und Gewichtung lassen sich dort nicht berechnen.' });
+  }
+  if (!out.length) out.push({ art:'info', text:'Keine Auffälligkeiten in den bisher erfassten Daten.' });
+  return out;
+}
+
+function analyse() {
+  if (!analyseAktiv()) {
+    return '<div class="empty-state"><div class="empty-icon">📊</div>' +
+      '<p>Die Analyse ist nicht aktiviert.</p>' +
+      '<button class="btn btn-primary" onclick="analyseAktivieren()" style="margin-top:10px">Analyse aktivieren</button></div>';
+  }
+  const kz = analyseKennzahlen();
+  const kats = analyseKategorien();
+  const dep = analyseDepot();
+  const aus = analyseAusreisser();
+  const beob = analyseBeobachtungen();
+  const monate = analyseMonate();
+
+  const pct = v => v === null ? '–' : v.toFixed(1).replace('.', ',') + ' %';
+
+  // Beobachtungen
+  const farbe = a => a === 'warnung' ? 'var(--red)' : a === 'hinweis' ? '#a86b00' : 'var(--muted)';
+  const icon  = a => a === 'warnung' ? '⚠' : a === 'hinweis' ? '›' : 'ℹ';
+  const beobHtml = beob.map(b =>
+    '<div style="display:flex;gap:9px;padding:9px 0;border-bottom:1px solid var(--border)">' +
+      '<span style="color:' + farbe(b.art) + ';font-weight:700;flex:0 0 auto">' + icon(b.art) + '</span>' +
+      '<span style="font-size:13px;line-height:1.5">' + b.text + '</span>' +
+    '</div>').join('');
+
+  // Kennzahlen
+  const kpi = [
+    ['Einnahmen', fmtEur(kz.einnahmen), null],
+    ['Ausgaben', fmtEur(kz.gesamtAus), null],
+    ['Übrig', fmtEur(kz.uebrig), kz.uebrig >= 0 ? 'var(--green)' : 'var(--red)'],
+    ['Fixkostenquote', pct(kz.fixQuote), null],
+    ['Sparquote', pct(kz.sparQuote), null],
+    ['Betrachtete Monate', String(kz.monate), null],
+  ].map(([l, v, c]) =>
+    '<div class="kpi"><div class="kpi-label">' + l + '</div>' +
+    '<div class="kpi-value"' + (c ? ' style="color:' + c + '"' : '') + '>' + v + '</div></div>').join('');
+
+  // Kategorietabelle mit Monatsverlauf
+  const monatsKopf = monate.map(m => '<th class="r" style="font-size:9px">' + monthLabel(m).slice(0,3) + '</th>').join('');
+  const katZeilen = kats.map(k => {
+    const anteil = kz.gesamtAus > 0 ? (k.summe / kz.gesamtAus) * 100 : 0;
+    const trend = k.abw === null ? '–'
+      : '<span style="color:' + (k.abw > 15 ? 'var(--red)' : k.abw < -15 ? 'var(--green)' : 'var(--muted)') + '">' +
+        (k.abw >= 0 ? '+' : '') + k.abw.toFixed(0) + ' %</span>';
+    return '<tr>' +
+      '<td>' + escapeHtml(k.kat) + '</td>' +
+      '<td class="r">' + fmtEur(k.summe) + '</td>' +
+      '<td class="r">' + anteil.toFixed(1).replace('.', ',') + ' %</td>' +
+      '<td class="r">' + fmtEur(k.schnitt) + '</td>' +
+      '<td class="r">' + fmtEur(k.letzter) + '</td>' +
+      '<td class="r">' + trend + '</td>' +
+      '<td class="r">' + k.anzahl + '</td>' +
+      '<td class="r">' + fmtEur(k.proBuchung) + '</td>' +
+      monate.map(m => '<td class="r" style="font-size:10px;color:var(--muted)">' +
+        ((k.verlauf[m] || 0) ? fmt(k.verlauf[m]) : '·') + '</td>').join('') +
+    '</tr>';
+  }).join('');
+
+  // Depot
+  const depZeilen = dep.liste.map(p =>
+    '<tr>' +
+      '<td>' + escapeHtml(p.name) + '<div style="font-size:10px;color:var(--muted);font-family:monospace">' + escapeHtml(p.symbol) + '</div></td>' +
+      '<td class="r">' + fmtEur(p.invested) + '</td>' +
+      '<td class="r">' + (p.units ? p.units.toFixed(4).replace('.', ',') : '–') + '</td>' +
+      '<td class="r">' + (p.kurs !== null ? fmtEur(p.kurs) : '<span style="color:var(--muted)">Kurs fehlt</span>') + '</td>' +
+      '<td class="r">' + (p.wert !== null ? fmtEur(p.wert) : '–') + '</td>' +
+      '<td class="r" style="color:' + (p.gv === null ? 'var(--muted)' : p.gv >= 0 ? 'var(--green)' : 'var(--red)') + '">' +
+        (p.gv === null ? '–' : (p.gv >= 0 ? '+' : '') + fmtEur(p.gv)) + '</td>' +
+      '<td class="r" style="color:' + (p.gvPct === null ? 'var(--muted)' : p.gvPct >= 0 ? 'var(--green)' : 'var(--red)') + '">' +
+        (p.gvPct === null ? '–' : (p.gvPct >= 0 ? '+' : '') + p.gvPct.toFixed(1).replace('.', ',') + ' %') + '</td>' +
+      '<td class="r">' + (p.annual === null ? '–' : (p.annual >= 0 ? '+' : '') + p.annual.toFixed(1).replace('.', ',') + ' %') + '</td>' +
+      '<td class="r">' + (p.jahre === null ? '–' : p.jahre.toFixed(1).replace('.', ',') + ' J.') + '</td>' +
+      '<td class="r">' + (p.gewicht === null ? '–' : p.gewicht.toFixed(1).replace('.', ',') + ' %') + '</td>' +
+    '</tr>').join('');
+
+  // Ausreißer
+  const ausZeilen = aus.map(x =>
+    '<tr><td class="muted" style="white-space:nowrap">' + escapeHtml(x.date || '–') + '</td>' +
+    '<td>' + escapeHtml(x.desc) + '</td>' +
+    '<td>' + escapeHtml(x.kat) + '</td>' +
+    '<td class="r">' + fmtEur(x.v) + '</td>' +
+    '<td class="r">' + x.faktor.toFixed(1).replace('.', ',') + '×</td></tr>').join('');
+
+  return '<div>' +
+    '<div class="card mb-2">' +
+      '<div class="card-header"><h3>📊 Beobachtungen</h3>' +
+        '<span class="badge badge-muted">' + monate.length + ' Monate ausgewertet</span></div>' +
+      beobHtml +
+      '<div style="font-size:11px;color:var(--muted);margin-top:10px">' +
+        'Alle Angaben sind rechnerische Auswertungen deiner eigenen Buchungen. ' +
+        'Sie stellen keine Finanz- oder Anlageberatung dar.' +
+      '</div>' +
+    '</div>' +
+
+    '<div class="kpi-grid" style="grid-template-columns:repeat(auto-fit,minmax(150px,1fr));margin-bottom:14px">' + kpi + '</div>' +
+
+    '<div class="card mb-2">' +
+      '<div class="card-header"><h3>Ausgaben nach Kategorie</h3></div>' +
+      (kats.length ? '<div class="table-wrap"><table><thead><tr>' +
+        '<th>Kategorie</th><th class="r">Gesamt</th><th class="r">Anteil</th>' +
+        '<th class="r">Ø/Monat</th><th class="r">' + monthLabel(currentMonth).slice(0,3) + '</th>' +
+        '<th class="r">vs. Ø</th><th class="r">Anzahl</th><th class="r">Ø/Buchung</th>' +
+        monatsKopf + '</tr></thead><tbody>' + katZeilen + '</tbody></table></div>'
+        : '<div class="empty-state"><p>Noch keine Ausgaben erfasst.</p></div>') +
+    '</div>' +
+
+    '<div class="card mb-2">' +
+      '<div class="card-header"><h3>Wertpapiere</h3>' +
+        (dep.liste.length ? '<div style="display:flex;gap:8px;align-items:center">' +
+          '<span class="badge badge-muted">Wert ' + fmtEur(dep.gesamtWert) + '</span>' +
+          (dep.gesamtGv !== null ? '<strong style="font-size:13px;color:' +
+            (dep.gesamtGv >= 0 ? 'var(--green)' : 'var(--red)') + '">' +
+            (dep.gesamtGv >= 0 ? '+' : '') + fmtEur(dep.gesamtGv) + '</strong>' : '') +
+        '</div>' : '') +
+      '</div>' +
+      (dep.liste.length ? '<div class="table-wrap"><table><thead><tr>' +
+        '<th>Position</th><th class="r">Investiert</th><th class="r">Stücke</th>' +
+        '<th class="r">Kurs</th><th class="r">Wert</th><th class="r">G/V</th>' +
+        '<th class="r">G/V %</th><th class="r">p.a.</th><th class="r">Dauer</th>' +
+        '<th class="r">Anteil</th></tr></thead><tbody>' + depZeilen + '</tbody></table></div>' +
+        '<div style="font-size:11px;color:var(--muted);margin-top:10px">' +
+          '„p.a." ist die auf ein Jahr umgerechnete Wertentwicklung seit dem ersten Kauf ' +
+          '(erst ab drei Monaten Haltedauer). Kosten, Steuern und Ausschüttungen sind nicht enthalten. ' +
+          'Die Anzeige dient der Übersicht und ist keine Anlageberatung.' +
+        '</div>'
+        : '<div class="empty-state"><p>Keine Wertpapiere erfasst.</p></div>') +
+    '</div>' +
+
+    (aus.length ? '<div class="card mb-2">' +
+      '<div class="card-header"><h3>Auffällige Einzelbuchungen</h3></div>' +
+      '<div class="table-wrap"><table><thead><tr><th>Datum</th><th>Beschreibung</th>' +
+      '<th>Kategorie</th><th class="r">Betrag</th><th class="r">vs. Ø</th></tr></thead>' +
+      '<tbody>' + ausZeilen + '</tbody></table></div>' +
+      '<div style="font-size:11px;color:var(--muted);margin-top:10px">' +
+        'Buchungen, die mindestens das 2,5-fache des Durchschnitts ihrer Kategorie betragen.' +
+      '</div>' +
+    '</div>' : '') +
+  '</div>';
 }
 
 // ── Eigene Tabellen: optional aktivierbar (wie PV) ─────────────────────────
@@ -8175,10 +8569,19 @@ async function editUserName() {
 }
 
 async function createDesktopShortcut() {
-  if (!window.EA || !window.EA.createShortcut) { uiAlert('Nur in der Desktop-App verfügbar'); return; }
+  if (!window.EA || !window.EA.createShortcut) {
+    await uiAlert({ title:'Nicht verfügbar', icon:'⚠', message:'Diese Funktion gibt es nur in der Desktop-App.' });
+    return;
+  }
   const r = await window.EA.createShortcut();
-  if (r.ok) uiAlert('✓ Verknüpfung wurde auf dem Desktop erstellt!\nDatei: ' + r.path);
-  else uiAlert('Fehler: ' + r.error);
+  if (r && r.ok) {
+    await uiAlert({ title:'Verknüpfung erstellt', icon:'✅',
+      message:'Auf dem Desktop liegt jetzt „Finanzverwaltung Pro".' });
+  } else {
+    await uiAlert({ title:'Fehlgeschlagen', icon:'⚠',
+      message:'Die Verknüpfung konnte nicht angelegt werden.<br><br><span style="color:var(--muted)">' +
+        escapeHtml((r && r.error) || 'Unbekannter Fehler') + '</span>' });
+  }
 }
 
 
@@ -8456,6 +8859,13 @@ window.tabellenAktiv     = tabellenAktiv;
 window.tabellenAktivieren = tabellenAktivieren;
 window.tabellenDeaktivieren = tabellenDeaktivieren;
 window.tabellenNavSichtbarkeit = tabellenNavSichtbarkeit;
+window.analyseAktiv      = analyseAktiv;
+window.analyseAktivieren = analyseAktivieren;
+window.analyseDeaktivieren = analyseDeaktivieren;
+window.analyseNavSichtbarkeit = analyseNavSichtbarkeit;
+window.analyseKennzahlen = analyseKennzahlen;
+window.analyseKategorien = analyseKategorien;
+window.analyseDepot      = analyseDepot;
 window.spesenSatzFuer    = spesenSatzFuer;
 window.spesenNeuBerechnen = spesenNeuBerechnen;
 window.importVorschauUmschalten = importVorschauUmschalten;
@@ -8735,7 +9145,7 @@ window.deleteRegelEinnahme   = deleteRegelEinnahme;
     showTermsModal(() => {});
   }
   // Apply saved startPage from settings
-  const validPages = ['dashboard','jahresuebersicht','buchungen','einkaeufe','ausgaben','einnahmen','spesen','fixkosten','sparen','zaehler','pv','finanzprodukte','tabellen','einstellungen'];
+  const validPages = ['dashboard','jahresuebersicht','buchungen','einkaeufe','ausgaben','einnahmen','spesen','fixkosten','sparen','zaehler','pv','analyse','finanzprodukte','tabellen','einstellungen'];
   const savedStart = state.config?.startPage;
   const startPage = (savedStart && validPages.includes(savedStart)) ? savedStart : 'dashboard';
   navigate(startPage);

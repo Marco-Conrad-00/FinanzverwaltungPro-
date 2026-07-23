@@ -741,19 +741,37 @@ ipcMain.handle('print-to-pdf', async (_, { html, filename }) => {
   return true;
 });
 
-// Create desktop shortcut (Windows .bat)
+// Desktop-Verknüpfung erstellen.
+// Früher wurden hier eine .bat und eine .vbs abgelegt, die "npx electron ."
+// aus dem Quellcode-Ordner starteten. In einer installierten App gibt es weder
+// npx noch dieses Verzeichnis – die Dateien waren also funktionslos und zeigten
+// nur generische Windows-Symbole. Jetzt wird eine echte .lnk-Verknüpfung auf
+// die installierte EXE erzeugt (inkl. App-Icon).
 ipcMain.handle('create-shortcut', async () => {
   try {
-    const appDir = path.dirname(path.dirname(__dirname)); // folder containing fp2
-    const desktopPath = path.join(require('os').homedir(), 'Desktop');
-    const batPath = path.join(desktopPath, 'Finanzverwaltung.bat');
-    const batContent = `@echo off\ncd /d "${appDir}"\nstart "" /B npx electron . --no-console\n`;
-    fs.writeFileSync(batPath, batContent);
+    if (process.platform !== 'win32') {
+      return { ok: false, error: 'Nur unter Windows verfügbar' };
+    }
+    const desktopPath = app.getPath('desktop');
+    const ziel = process.execPath;                 // die laufende EXE
+    const lnkPath = path.join(desktopPath, 'Finanzverwaltung Pro.lnk');
 
-    // Also create a VBS wrapper so no CMD window flashes
-    const vbsPath = path.join(desktopPath, 'Finanzverwaltung.vbs');
-    const vbsContent = `Set WshShell = CreateObject("WScript.Shell")\nWshShell.Run "cmd /c cd /d ""${appDir}"" && npx electron .", 0, False\n`;
-    fs.writeFileSync(vbsPath, vbsContent);
-    return { ok: true, path: vbsPath };
-  } catch(e) { return { ok: false, error: e.message }; }
+    // Alte, funktionslose Dateien früherer Versionen aufräumen
+    ['Finanzverwaltung.bat', 'Finanzverwaltung.vbs'].forEach(f => {
+      try {
+        const alt = path.join(desktopPath, f);
+        if (fs.existsSync(alt)) fs.unlinkSync(alt);
+      } catch {}
+    });
+
+    const ok = shell.writeShortcutLink(lnkPath, 'create', {
+      target: ziel,
+      cwd: path.dirname(ziel),
+      icon: ziel,
+      iconIndex: 0,
+      description: 'Finanzverwaltung Pro',
+    });
+    if (!ok) return { ok: false, error: 'Verknüpfung konnte nicht angelegt werden' };
+    return { ok: true, path: lnkPath };
+  } catch (e) { return { ok: false, error: e.message }; }
 });
