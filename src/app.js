@@ -161,6 +161,17 @@ let _snoozedReminders = {};
 // Format je Eintrag: { v: 'Version', date: 'YYYY-MM-DD', changes: ['...','...'] }
 // Änderungen dürfen mit **Fett** Markierung versehen werden.
 const CHANGELOG = [
+  { v: '1.0.35', date: '2026-07-23', changes: [
+    '**Fehler behoben: „Stand setzen" stapelte Korrekturen.** Bei mehrfacher Nutzung blieben alte Abgleich-Buchungen stehen und summierten sich – der Saldo entfernte sich dadurch immer weiter vom echten Kontostand. Eine neue Korrektur ersetzt jetzt die vorherige desselben Monats',
+    'Stimmt der Saldo bereits, wird eine überflüssige alte Korrektur entfernt statt eine neue angelegt',
+  ]},
+  { v: '1.0.34', date: '2026-07-23', changes: [
+    '**Schwerwiegender Fehler behoben: Wertpapierkäufe wurden doppelt gezählt.** Kaufte man über ein Verrechnungskonto einen ETF, blieb das Kontoguthaben unverändert – dasselbe Geld erschien gleichzeitig auf dem Konto und im Depot. Käufe mindern jetzt das Verrechnungskonto',
+    '**Fehler behoben: Die Kontoauswahl bei Fixkosten öffnete sich nicht mehr.** Ein Programmierfehler ließ das Auswahlfenster stillschweigend abbrechen – „Von Konto" und „Zielkonto" lassen sich wieder ändern',
+    '**Sparen & Depot neu gegliedert**: Buchungen sind jetzt nach Jahren und Monaten gruppiert und einzeln aufklappbar. Standardmäßig ist nur der laufende Monat geöffnet',
+    '**Umbuchungen können jetzt monatlich wiederkehren** und ein Enddatum haben. Abgelaufene Umbuchungen werden ausgegraut – genau wie Fixkosten',
+    'Wiederkehrende Umbuchungen werden im Kontosaldo für jeden aktiven Monat gezählt',
+  ]},
   { v: '1.0.33', date: '2026-07-23', changes: [
     '**Neue Übersicht nach Depot** unter „Sparen & Depot": zeigt für jedes Depot den investierten Betrag, den aktuellen Wert und Gewinn/Verlust – darunter aufgeklappt die einzelnen Positionen',
     'Jede Position lässt sich einem Depot zuordnen; auf den Positionskarten steht jetzt, wo das Papier liegt',
@@ -1489,13 +1500,38 @@ function kontoNetBis(kontoId, month) {
     const bisM = (end < grenze) ? end : grenze;
     if (bisM >= start) monthsBetween(start, bisM).forEach((m) => { if (fixkostenAktivImMonat(f, m) && faelligkeitstagErreicht(f.day, m, grenze)) sparTransfer += (+f.amount||0); });
   });
-  // Umbuchungen: Abgang bei vonKonto, Zugang bei nachKonto (bis einschl. month)
+  // Wertpapierkäufe mindern das Verrechnungskonto.
+  // Ohne das erschiene dasselbe Geld doppelt: einmal als Kontoguthaben und
+  // einmal als Depotwert. Maßgeblich ist das Konto, von dem abgebucht wird
+  // (sparenLink.vonKonto, ersatzweise das Konto der Fixkostenbuchung).
+  let wpKauf = 0;
+  (state.sparen||[]).forEach(s => {
+    if (!s || s.txType === 'bestand' || s.skipCashflow) return;   // Altbestand: kein Geldfluss
+    const wp = s.wertpapier || s.etf;
+    if (!wp || !(wp.symbol || wp.ticker)) return;                 // nur Wertpapierkäufe
+    const quelle = s.vonKonto || s.kontoId;
+    if (!quelle || quelle !== kontoId) return;
+    const sm = s.month || (s.date||'').slice(0,7);
+    if (!sm || (grenze && sm > grenze)) return;
+    wpKauf += (+s.amount||0);
+  });
+  // Umbuchungen: Abgang bei vonKonto, Zugang bei nachKonto (bis einschl. month).
+  // Wiederkehrende Umbuchungen zählen für jeden aktiven Monat einzeln.
   let umb = 0;
   (state.umbuchungen||[]).forEach(u => {
-    const um = u.month || (u.date||'').slice(0,7);
-    if (month && um > month) return;
-    if (u.nachKonto === kontoId) umb += (+u.amount||0);
-    if (u.vonKonto === kontoId) umb -= (+u.amount||0);
+    const start = u.month || (u.date||'').slice(0,7);
+    if (!start) return;
+    const betrag = (+u.amount||0);
+    let faktor = 0;
+    if (!u.wiederkehrend) {
+      if (!grenze || start <= grenze) faktor = 1;
+    } else {
+      const ende = u.endMonth && u.endMonth < grenze ? u.endMonth : grenze;
+      if (ende >= start) faktor = monthsBetween(start, ende).length;
+    }
+    if (!faktor) return;
+    if (u.nachKonto === kontoId) umb += betrag * faktor;
+    if (u.vonKonto === kontoId) umb -= betrag * faktor;
   });
   // Gehalt/Nebenjob → zugeordnetes Konto; Fixkosten/Einkäufe/Spesen → Default-Konto.
   // So ist der Saldo jedes Kontos vollständig über kontoNetBis bestimmt und
@@ -1524,7 +1560,7 @@ function kontoNetBis(kontoId, month) {
       if ((t.kontoId||def) === kontoId) sonst += (+(t.allowance||0) - +(t.ausgaben||0));
     });
   });
-  return einn + regel + sparTransfer + umb + sonst - ausg;
+  return einn + regel + sparTransfer + umb + sonst - ausg - wpKauf;
 }
 // Aktueller Saldo eines Kontos = Startwert + Netto-Bewegung des Jahres.
 // Cashflow-Konten: voller Geldfluss (Gehalt/Nebenjob/Fixkosten/Einkäufe/Spesen
@@ -1575,7 +1611,7 @@ function askKontoWahl(opts) {
       '</button>'
     ).join('');
     overlay.innerHTML =
-      '<div style="background:var(--surface);color:var(--text);border:1px solid var(--border);border-radius:12px;padding:0;max-width:' + (extraHtml ? '620px' : '480px') + ';width:100%;box-shadow:0 20px 60px rgba(0,0,0,.5);animation:fadeIn .15s ease-out">' +
+      '<div style="background:var(--surface);color:var(--text);border:1px solid var(--border);border-radius:12px;padding:0;max-width:480px;width:100%;box-shadow:0 20px 60px rgba(0,0,0,.5);animation:fadeIn .15s ease-out">' +
         '<div style="padding:18px 22px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:12px">' +
           '<div style="font-size:28px;line-height:1">' + (o.icon||'🏦') + '</div>' +
           '<h3 style="margin:0;font-size:16px;font-weight:600;color:var(--text)">' + (o.title||'Welches Konto?') + '</h3>' +
@@ -3691,49 +3727,90 @@ async function deleteFixk(id) {
 
 // ── PAGE: SPAREN ──────────────────────────────────────────────────────────
 function sparen() {
-  const items = [...state.sparen].sort((a,b)=>a.date.localeCompare(b.date));
-  const total = items.reduce((s,x)=>s+x.amount,0);
-  const byMonth = {};
-  items.forEach(s => { const m = s.month || (s.date ? s.date.slice(0,7) : ''); if (!m) return; byMonth[m] = (byMonth[m]||0) + (+s.amount||0); });
-  const monthRows = Object.keys(byMonth).sort().map(m =>
-    '<div style="display:flex;justify-content:space-between;align-items:center;background:var(--surface);border-left:3px solid var(--accent);border-radius:6px;padding:8px 12px">' +
-      '<span style="font-size:12px;font-weight:600;color:var(--muted)">' + monthLabel(m) + '</span>' +
-      '<span style="font-weight:700;color:var(--green)">' + fmtEur(byMonth[m]) + '</span>' +
-    '</div>').join('');
+  const items = [...state.sparen].sort((a,b)=>(b.date||'').localeCompare(a.date||''));
+  const total = items.reduce((s,x)=>s+(+x.amount||0),0);
+
+  // Nach Jahr und Monat gruppieren – bei vielen Buchungen wird eine flache
+  // Liste schnell unübersichtlich. Monate sind aufklappbar, standardmäßig zu;
+  // nur der laufende Monat ist offen.
+  const gruppen = {};
+  items.forEach(s => {
+    const m = s.month || (s.date ? s.date.slice(0,7) : '');
+    if (!m) return;
+    const j = m.slice(0,4);
+    (gruppen[j] = gruppen[j] || {})[m] = (gruppen[j][m] || []).concat([s]);
+  });
+  const offen = state.config && state.config.sparenOffen ? state.config.sparenOffen : [currentMonth];
+
+  const zeile = (s) => {
+    const wp = s.wertpapier || s.etf || null;
+    const wpName = wp ? (wp.name || wp.ticker || wp.symbol || '') : '';
+    const wpInfo = wp ? '<div style="font-size:11px;color:var(--muted);margin-top:2px">' +
+        (wp.typ === 'aktie' ? '📊 ' : wp.typ === 'etf' ? '📈 ' : wp.typ === 'fonds' ? '🏛 ' : wp.typ === 'krypto' ? '🪙 ' : '💼 ') + wpName +
+        (s.units ? ' · ' + (s.units > 0 ? s.units.toFixed(4) + ' Stk' : Math.abs(s.units).toFixed(4) + ' Stk Verkauf') : '') +
+        (s.price ? ' @ ' + fmtEur(s.price) : '') +
+      '</div>' : '';
+    const bestand = s.txType === 'bestand'
+      ? '<span class="badge badge-muted" style="font-size:9px;margin-left:6px">BESTAND</span>' : '';
+    return `<tr id="spar_${s.id}">
+      <td><input type="date" value="${s.date||''}" onchange="updateSparen('${s.id}','date',this.value)" style="width:145px"/></td>
+      <td><input type="text" value="${(s.depot||'').replace(/"/g,'&quot;')}" onchange="updateSparen('${s.id}','depot',this.value)" placeholder="Trade Republic, Tagesgeld…"/>${bestand}${wpInfo}</td>
+      <td><input type="text" value="${(s.note||'').replace(/"/g,'&quot;')}" onchange="updateSparen('${s.id}','note',this.value)" placeholder="Notiz…"/></td>
+      <td><input type="number" value="${(+s.amount||0).toFixed(2)}" onchange="updateSparen('${s.id}','amount',+this.value)" step="0.01" style="width:100px;text-align:right"/> ${currencySymbol()}</td>
+      <td style="white-space:nowrap;width:1%">
+        <div style="display:inline-flex;flex-direction:column;gap:4px;align-items:center">
+          <button class="btn-icon" onclick="editSparenEntry('${s.id}')" title="Bearbeiten">✎</button>
+          <button class="btn-icon danger" onclick="deleteSpar('${s.id}')" title="Löschen">×</button>
+        </div>
+      </td>
+    </tr>`;
+  };
+
+  const accordion = Object.keys(gruppen).sort().reverse().map(j => {
+    const monate = Object.keys(gruppen[j]).sort().reverse();
+    const jahrSumme = monate.reduce((sum,m) => sum + gruppen[j][m].reduce((x,y)=>x+(+y.amount||0),0), 0);
+    const jahrAnzahl = monate.reduce((n,m) => n + gruppen[j][m].length, 0);
+    const monatsBloecke = monate.map(m => {
+      const liste = gruppen[j][m];
+      const summe = liste.reduce((x,y)=>x+(+y.amount||0),0);
+      const auf = offen.includes(m);
+      return '<div style="border:1px solid var(--border);border-radius:8px;margin-bottom:6px;overflow:hidden">' +
+        '<button onclick="toggleSparenMonat(\'' + m + '\')" style="display:flex;align-items:center;gap:10px;width:100%;' +
+          'padding:10px 14px;background:var(--surface-2);border:none;cursor:pointer;color:var(--text);font-family:inherit;text-align:left">' +
+          '<span style="font-size:11px;color:var(--muted);width:12px">' + (auf ? '▾' : '▸') + '</span>' +
+          '<span style="font-weight:600;font-size:13px">' + monthLabel(m) + '</span>' +
+          '<span class="badge badge-muted" style="font-size:9px">' + liste.length + '</span>' +
+          '<span style="flex:1"></span>' +
+          '<strong style="font-size:13px;color:var(--green)">' + fmtEur(summe) + '</strong>' +
+        '</button>' +
+        (auf ? '<div class="table-wrap"><table>' +
+          '<thead><tr><th>Datum</th><th>Kategorie / Anbieter</th><th>Notiz</th>' +
+          '<th style="text-align:right">Betrag</th><th></th></tr></thead>' +
+          '<tbody>' + liste.map(zeile).join('') + '</tbody></table></div>' : '') +
+      '</div>';
+    }).join('');
+    return '<div style="margin-bottom:16px">' +
+      '<div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;padding-bottom:6px;border-bottom:2px solid var(--accent)">' +
+        '<h4 style="margin:0;font-size:15px">' + j + '</h4>' +
+        '<span class="badge badge-muted">' + jahrAnzahl + ' Buchungen</span>' +
+        '<span style="flex:1"></span>' +
+        '<strong style="font-size:14px;color:var(--green)">' + fmtEur(jahrSumme) + '</strong>' +
+      '</div>' + monatsBloecke +
+    '</div>';
+  }).join('');
+
   return `${lockBanner()}
     <div class="card">
     <div class="card-header">
       <h3>Sparen & Depot ${getSelectedYear()}</h3>
       <div class="actions">
         <span class="badge badge-green">Gesamt: ${fmtEur(total)}</span>
+        <button class="btn btn-ghost btn-sm" onclick="toggleSparenAlle()">Alle auf/zu</button>
         <button class="btn btn-primary btn-sm" onclick="addSparen()" ${lockAttr()}>+ Einzahlung</button>
       </div>
     </div>
-    ${monthRows ? `<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:8px;margin-bottom:16px">${monthRows}</div>` : ''}
-    <div class="table-wrap"><table>
-      <thead><tr><th>Datum</th><th>Kategorie / Anbieter</th><th>Notiz</th><th style="text-align:right">Betrag</th><th></th></tr></thead>
-      <tbody id="sparenTable">
-        ${items.map(s=>{
-          const wp = s.wertpapier || s.etf || null;
-          const wpName = wp ? (wp.name || wp.ticker || wp.symbol || '') : '';
-          const wpInfo = wp ? '<div style="font-size:11px;color:var(--muted);margin-top:2px">' +
-              (wp.typ === 'aktie' ? '📊 ' : wp.typ === 'etf' ? '📈 ' : wp.typ === 'fonds' ? '🏛 ' : wp.typ === 'krypto' ? '🪙 ' : '💼 ') + wpName +
-              (s.units ? ' · ' + (s.units > 0 ? s.units.toFixed(4) + ' Stk' : Math.abs(s.units).toFixed(4) + ' Stk Verkauf') : '') +
-              (s.price ? ' @ ' + fmtEur(s.price) : '') +
-            '</div>' : '';
-          return `<tr id="spar_${s.id}">
-          <td><input type="date" value="${s.date}" onchange="updateSparen('${s.id}','date',this.value)" style="width:145px"/></td>
-          <td><input type="text" value="${s.depot||''}" onchange="updateSparen('${s.id}','depot',this.value)" placeholder="Trade Republic, Tagesgeld…"/>${wpInfo}</td>
-          <td><input type="text" value="${s.note||''}" onchange="updateSparen('${s.id}','note',this.value)" placeholder="Notiz…"/></td>
-          <td><input type="number" value="${(+s.amount||0).toFixed(2)}" onchange="updateSparen('${s.id}','amount',+this.value)" step="0.01" style="width:100px;text-align:right"/> ${currencySymbol()}</td>
-          <td style="white-space:nowrap;width:1%">
-            <div style="display:inline-flex;flex-direction:column;gap:4px;align-items:center">
-              <button class="btn-icon" onclick="editSparenEntry('${s.id}')" title="Bearbeiten">✎</button>
-              <button class="btn-icon danger" onclick="deleteSpar('${s.id}')" title="Löschen">×</button>
-            </div>
-          </td>
-        </tr>`}).join('')}
-
+    ${accordion || '<div class="empty-state"><div class="empty-icon">🏦</div><p>Noch keine Einzahlungen erfasst.</p></div>'}
+    <table style="display:none"><tbody id="sparenTable">
       </tbody>
     </table></div>
     <div id='etf_live_wrap' style='min-height:0'>${buildEtfLiveSection()}</div>
@@ -3749,13 +3826,27 @@ function umbuchungen() {
   const kontoOpts = (sel) => ks.map(k => '<option value="'+k.id+'"'+(k.id===sel?' selected':'')+'>'+(k.name||'Konto')+(k.cashflow?' (Cashflow)':' (Reserve)')+'</option>').join('');
   const total = items.reduce((s,u)=>s+(+u.amount||0),0);
   const rows = items.map(u => {
-    return '<tr id="umb_'+u.id+'">' +
-      '<td><input type="date" value="'+(u.date||'')+'" onchange="updateUmbuchung(\''+u.id+'\',\'date\',this.value)" style="width:145px"/></td>' +
+    // Wiederkehrende Umbuchungen mit abgelaufenem Enddatum werden ausgegraut –
+    // analog zu den Fixkosten, damit beide Seiten gleich aussehen.
+    const abgelaufen = umbuchungAbgelaufen(u);
+    return '<tr id="umb_'+u.id+'"' + (abgelaufen ? ' style="opacity:.4"' : '') + '>' +
+      '<td><input type="date" value="'+(u.date||'')+'" onchange="updateUmbuchung(\''+u.id+'\',\'date\',this.value)" style="width:145px"/>' +
+        (u.wiederkehrend ? '<div style="font-size:10px;color:var(--muted);margin-top:2px">monatlich' +
+          (u.endMonth ? ' bis ' + monthLabel(u.endMonth) : '') +
+          (abgelaufen ? ' · beendet' : '') + '</div>' : '') + '</td>' +
       '<td><select onchange="updateUmbuchung(\''+u.id+'\',\'vonKonto\',this.value)" '+lockAttr()+'>'+kontoOpts(u.vonKonto)+'</select></td>' +
       '<td style="text-align:center;color:var(--muted)">→</td>' +
       '<td><select onchange="updateUmbuchung(\''+u.id+'\',\'nachKonto\',this.value)" '+lockAttr()+'>'+kontoOpts(u.nachKonto)+'</select></td>' +
       '<td><input type="text" value="'+(u.note||'').replace(/"/g,'&quot;')+'" onchange="updateUmbuchung(\''+u.id+'\',\'note\',this.value)" placeholder="Notiz…"/></td>' +
       '<td style="white-space:nowrap"><input type="number" value="'+(+u.amount||0).toFixed(2)+'" step="0.01" onchange="updateUmbuchung(\''+u.id+'\',\'amount\',+this.value)" style="width:100px;text-align:right"/> '+currencySymbol()+'</td>' +
+      '<td style="white-space:nowrap">' +
+        '<button class="btn-icon" onclick="toggleUmbWiederkehrend(\''+u.id+'\')" ' +
+          'title="' + (u.wiederkehrend ? 'Monatlich wiederkehrend – klicken zum Abschalten' : 'Einmalig – klicken für monatliche Wiederholung') + '" ' +
+          'style="width:auto;min-width:0;padding:0 8px;font-size:12px">' + (u.wiederkehrend ? '🔁' : '1×') + '</button>' +
+        (u.wiederkehrend ? '<input type="month" value="'+(u.endMonth||'')+'" ' +
+          'onchange="updateUmbuchung(\''+u.id+'\',\'endMonth\',this.value)" ' +
+          'title="Läuft bis (leer = unbefristet)" style="width:130px;margin-left:4px"/>' : '') +
+      '</td>' +
       '<td><button class="btn-icon danger" onclick="deleteUmbuchung(\''+u.id+'\')" '+lockAttr()+'>×</button></td>' +
       '</tr>';
   }).join('');
@@ -3765,13 +3856,14 @@ function umbuchungen() {
     .filter(f => f.sparenLink && (f.category==='Sparen'||f.cat==='Sparen')
       && (!f.sparenLink.sparTyp || f.sparenLink.sparTyp==='bargeld')
       && f.sparenLink.zielkonto)
-    .map(f => '<tr style="opacity:.85">' +
+    .map(f => '<tr style="opacity:' + (fixkostenAktivImMonat(f, currentMonth) ? '.85' : '.4') + '">' +
       '<td style="color:var(--muted)">monatl. (Tag '+(f.day||1)+')</td>' +
       '<td>'+kontoName(def)+'</td>' +
       '<td style="text-align:center;color:var(--muted)">→</td>' +
       '<td>'+kontoName(f.sparenLink.zielkonto)+'</td>' +
       '<td><span class="badge badge-green" style="font-size:9px">SPARPLAN</span> '+(f.name||'')+'</td>' +
       '<td style="text-align:right">'+fmtEur(+f.amount||0)+' '+currencySymbol()+'</td>' +
+      '<td style="color:var(--muted);font-size:11px">🔁 monatlich' + (f.end ? ' bis ' + monthLabel(f.end) : '') + '</td>' +
       '<td><span style="color:var(--muted);font-size:11px" title="In Fixkosten verwalten">🔒</span></td>' +
       '</tr>').join('');
   return `${lockBanner()}
@@ -3785,10 +3877,37 @@ function umbuchungen() {
     </div>
     <p style="font-size:12px;color:var(--muted);margin:0 0 12px">Umbuchungen verschieben Geld zwischen deinen Konten. Sie mindern den Cashflow des Quellkontos und erhöhen den des Zielkontos – in der Gesamtsumme sind sie neutral.</p>
     ${(items.length || autoTransfers) ? `<div class="table-wrap"><table>
-      <thead><tr><th>Datum</th><th>Von Konto</th><th></th><th>Nach Konto</th><th>Notiz</th><th style="text-align:right">Betrag</th><th></th></tr></thead>
+      <thead><tr><th>Datum</th><th>Von Konto</th><th></th><th>Nach Konto</th><th>Notiz</th><th style="text-align:right">Betrag</th><th>Wiederholung</th><th></th></tr></thead>
       <tbody>${rows}${autoTransfers}</tbody>
     </table></div>` : '<div class="empty-state" style="padding:24px"><div class="empty-icon">🔄</div><p>Noch keine Umbuchungen.<br>Über „+ Umbuchung" einen Transfer zwischen zwei Konten anlegen.</p></div>'}
   </div>`;
+}
+
+// Ist eine wiederkehrende Umbuchung über ihr Enddatum hinaus?
+function umbuchungAbgelaufen(u) {
+  if (!u || !u.wiederkehrend || !u.endMonth) return false;
+  const jetzt = (typeof currentMonth !== 'undefined' && currentMonth) ? currentMonth : thisMonth();
+  return u.endMonth < jetzt;
+}
+// Läuft die Umbuchung in diesem Monat? Einmalige nur im Buchungsmonat,
+// wiederkehrende ab Startmonat bis einschließlich Enddatum.
+function umbuchungAktivImMonat(u, m) {
+  if (!u || !m) return false;
+  const start = u.month || (u.date||'').slice(0,7);
+  if (!start) return false;
+  if (!u.wiederkehrend) return start === m;
+  if (m < start) return false;
+  if (u.endMonth && m > u.endMonth) return false;
+  return true;
+}
+function toggleUmbWiederkehrend(id) {
+  if (!requireUnlocked()) return;
+  const u = (state.umbuchungen||[]).find(x => String(x.id) === String(id));
+  if (!u) return;
+  u.wiederkehrend = !u.wiederkehrend;
+  if (!u.wiederkehrend) delete u.endMonth;
+  saveData(); renderPage();
+  showToast(u.wiederkehrend ? 'Läuft jetzt monatlich' : 'Wieder einmalig', 'info');
 }
 
 function addUmbuchung() {
@@ -4408,6 +4527,25 @@ async function saveSparenModal() {
     }
   }
 }
+// Monats-Blöcke auf der Sparen-Seite auf-/zuklappen. Der Zustand wird
+// gespeichert, damit er einen Seitenwechsel überlebt.
+function toggleSparenMonat(m) {
+  if (!state.config) state.config = {};
+  const offen = state.config.sparenOffen || [currentMonth];
+  const i = offen.indexOf(m);
+  if (i >= 0) offen.splice(i, 1); else offen.push(m);
+  state.config.sparenOffen = offen;
+  saveData(); renderPage();
+}
+function toggleSparenAlle() {
+  if (!state.config) state.config = {};
+  const alle = [...new Set((state.sparen||[])
+    .map(s => s.month || (s.date||'').slice(0,7)).filter(Boolean))];
+  const offen = state.config.sparenOffen || [];
+  state.config.sparenOffen = (offen.length >= alle.length) ? [] : alle;
+  saveData(); renderPage();
+}
+
 function addSparen(){
   if (!requireUnlocked()) return; openSparenModal(); }
 
@@ -4707,19 +4845,36 @@ function setKontoIstStand(kontoId) {
     if (Math.abs(diff) < 0.01) { showToast('Saldo stimmt bereits', 'info'); return; }
     const datum = today();
     const monat = datum.slice(0, 7);
-    if (diff > 0) {
+    // Alte Korrekturen dieses Kontos im selben Monat entfernen, statt sie zu
+    // stapeln. Sonst summieren sich mehrere „Stand setzen"-Klicks auf und der
+    // Saldo läuft immer weiter von der Realität weg.
+    const vorher = (state.ausgaben||[]).filter(a => a._korrektur && a.kontoId === kontoId && a.month === monat).length
+                 + (state.einnahmen||[]).filter(e => e._korrektur && e.kontoId === kontoId && e.month === monat).length;
+    state.ausgaben  = (state.ausgaben||[]).filter(a => !(a._korrektur && a.kontoId === kontoId && a.month === monat));
+    state.einnahmen = (state.einnahmen||[]).filter(e => !(e._korrektur && e.kontoId === kontoId && e.month === monat));
+    // Nach dem Entfernen neu rechnen – der Zielwert bezieht sich auf den
+    // Saldo OHNE die alten Korrekturen.
+    const basis = kontoSaldo(kontoId);
+    const diff2 = Math.round((ziel - basis) * 100) / 100;
+    if (Math.abs(diff2) < 0.01) {
+      saveData(); renderPage();
+      showToast('Saldo stimmt bereits' + (vorher ? ' (alte Korrektur entfernt)' : ''), 'info');
+      return;
+    }
+    if (diff2 > 0) {
       // zu wenig im App-Saldo → Einnahme als Korrektur
       state.einnahmen.push({ id: uid(), month: monat, date: datum,
-        source: 'Kontostand-Abgleich', type: 'Sonstiges', amount: diff,
+        source: 'Kontostand-Abgleich', type: 'Sonstiges', amount: diff2,
         bar: false, kontoId: kontoId, _korrektur: true });
     } else {
       // zu viel im App-Saldo → Ausgabe als Korrektur
       state.ausgaben.push({ id: uid(), month: monat, date: datum,
-        desc: 'Kontostand-Abgleich', category: 'Sonstige Ausgaben', amount: Math.abs(diff),
+        desc: 'Kontostand-Abgleich', category: 'Sonstige Ausgaben', amount: Math.abs(diff2),
         kontoId: kontoId, _korrektur: true });
     }
     saveData(); if (typeof updateBadges==='function') updateBadges(); renderPage();
-    showToast(k.name + ': Stand auf ' + fmtEur(ziel) + ' gesetzt (Korrektur ' + (diff>0?'+':'') + fmtEur(diff) + ')', 'info');
+    showToast(k.name + ': Stand auf ' + fmtEur(ziel) + ' gesetzt (Korrektur ' + (diff2>0?'+':'') + fmtEur(diff2) + ')'
+      + (vorher ? ' · ' + vorher + ' alte ersetzt' : ''), 'info');
   });
 }
 
@@ -9175,10 +9330,15 @@ window.onEtfChange              = onEtfChange;
 window.refreshEtfKurse          = refreshEtfKurse;
 window.updateSparen             = updateSparen;
 window.deleteSpar               = deleteSpar;
+window.toggleSparenMonat        = toggleSparenMonat;
+window.toggleSparenAlle         = toggleSparenAlle;
 window.umbuchungen              = umbuchungen;
 window.addUmbuchung             = addUmbuchung;
 window.updateUmbuchung          = updateUmbuchung;
 window.deleteUmbuchung          = deleteUmbuchung;
+window.toggleUmbWiederkehrend   = toggleUmbWiederkehrend;
+window.umbuchungAbgelaufen      = umbuchungAbgelaufen;
+window.umbuchungAktivImMonat    = umbuchungAktivImMonat;
 
 // Zähler
 window.addZaehler                = addZaehler;
