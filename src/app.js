@@ -161,6 +161,10 @@ let _snoozedReminders = {};
 // Format je Eintrag: { v: 'Version', date: 'YYYY-MM-DD', changes: ['...','...'] }
 // Änderungen dürfen mit **Fett** Markierung versehen werden.
 const CHANGELOG = [
+  { v: '1.0.27', date: '2026-07-23', changes: [
+    '**Fehler behoben: Der Speicherort wurde falsch angezeigt** – statt des Pfads erschien „%APPDATA%⬆inanzverwaltung-prodata.json", weil die Schrägstriche im Text verschluckt wurden',
+    '**Die Reiter in den Einstellungen schneiden den Inhalt beim Scrollen nicht mehr an.** Bisher verschwanden Schaltflächen und Texte halb hinter der Leiste – sie deckt den durchlaufenden Inhalt jetzt vollständig ab',
+  ]},
   { v: '1.0.26', date: '2026-07-22', changes: [
     '**Fehler behoben: Reisen rechneten mit veralteten Spesensätzen weiter.** Beim Anlegen einer Reise wurde der damals gültige Satz fest gespeichert und nie wieder angepasst – eine Reise in die Schweiz zeigte dadurch 43 € statt der ab 2026 gültigen 47 €',
     'Die Sätze richten sich jetzt nach Land und Reisedatum statt nach dem Zeitpunkt der Erfassung',
@@ -4620,14 +4624,14 @@ function einstellungen() {
 
   return `<div>
 
-    <div class="settings-tabs">
+    <div class="settings-tabs"><div class="settings-tabs-inner">
         <button class="set-tab ${_setTab==='profil'?'set-tab-active':''}" onclick="setSettingsTab('profil')">👤 Profil</button>
         <button class="set-tab ${_setTab==='konten'?'set-tab-active':''}" onclick="setSettingsTab('konten')">🏦 Konten &amp; Jahre</button>
         <button class="set-tab ${_setTab==='design'?'set-tab-active':''}" onclick="setSettingsTab('design')">🎨 Darstellung</button>
         <button class="set-tab ${_setTab==='funktionen'?'set-tab-active':''}" onclick="setSettingsTab('funktionen')">⚙️ Funktionen</button>
         <button class="set-tab ${_setTab==='daten'?'set-tab-active':''}" onclick="setSettingsTab('daten')">💾 Daten &amp; Sicherheit</button>
         <button class="set-tab ${_setTab==='ueber'?'set-tab-active':''}" onclick="setSettingsTab('ueber')">ℹ️ Über</button>
-    </div>
+    </div></div>
 
       <div class="settings-section" style="display:${_setTab==='profil'?'block':'none'}">
       <div class="settings-section-header">👤 Profil</div>
@@ -5074,7 +5078,7 @@ function einstellungen() {
         <div style="display:flex;flex-direction:column;gap:12px">
           <div style="background:var(--surface);border-radius:8px;padding:12px 14px">
             <p style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;margin-bottom:4px">Speicherort</p>
-            <code style="font-size:12px;color:var(--ink)">%APPDATA%\finanzverwaltung-pro\data.json</code>
+            <code style="font-size:12px;color:var(--ink)">%APPDATA%\\finanzverwaltung-pro\\data.json</code>
             <div style="margin-top:8px;display:flex;gap:8px">
               <button class="btn btn-ghost btn-sm" onclick="openDataFolder()">📂 Ordner öffnen</button>
             </div>
