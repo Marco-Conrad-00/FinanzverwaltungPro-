@@ -161,6 +161,13 @@ let _snoozedReminders = {};
 // Format je Eintrag: { v: 'Version', date: 'YYYY-MM-DD', changes: ['...','...'] }
 // Änderungen dürfen mit **Fett** Markierung versehen werden.
 const CHANGELOG = [
+  { v: '1.0.36', date: '2026-07-23', changes: [
+    '**Finanzprodukte lassen sich mit Fixkosten verknüpfen**: Die eingezahlten Beiträge werden dann automatisch fortgeschrieben – ausgehend vom Stichtag der letzten Standmitteilung',
+    '**Fondsgebundene Verträge können mit ihren Fonds hinterlegt werden.** Der Vertragswert wird dann aus den Anteilen und aktuellen Kursen berechnet statt aus dem veralteten Stichtagswert',
+    'Der Vertragswert wird bewusst nicht einfach um die Beiträge hochgezählt – davon gehen Abschluss- und Verwaltungskosten ab, und die Fonds schwanken',
+    'Ist die letzte Standmitteilung älter als ein Jahr, weist die App darauf hin',
+    'Neuer Knopf „↻ Kurse" je Produkt holt die Fondskurse über die ISIN',
+  ]},
   { v: '1.0.35', date: '2026-07-23', changes: [
     '**Fehler behoben: „Stand setzen" stapelte Korrekturen.** Bei mehrfacher Nutzung blieben alte Abgleich-Buchungen stehen und summierten sich – der Saldo entfernte sich dadurch immer weiter vom echten Kontostand. Eine neue Korrektur ersetzt jetzt die vorherige desselben Monats',
     'Stimmt der Saldo bereits, wird eine überflüssige alte Korrektur entfernt statt eine neue angelegt',
@@ -6105,6 +6112,157 @@ async function resetApp() {
   showSetupScreen();
 }
 
+// ════════════════════════════════════════════════════════════════════════════
+// FINANZPRODUKTE: Beiträge aus Fixkosten + Fondsbewertung
+// ════════════════════════════════════════════════════════════════════════════
+// Ein Finanzprodukt kann mit einer Fixkosten-Position verknüpft werden
+// (fp.fixkostenId). Die eingezahlten Beiträge werden dann automatisch
+// fortgeschrieben – ausgehend vom Stichtag der letzten Standmitteilung.
+//
+// Der VERTRAGSWERT wird bewusst NICHT einfach hochgezählt: Von jedem Beitrag
+// gehen Abschluss- und Verwaltungskosten ab, und die hinterlegten Fonds
+// schwanken. Stattdessen werden – falls Fondsanteile hinterlegt sind – die
+// aktuellen Kurse verwendet. Ohne Fondsdaten bleibt der Wert vom Stichtag
+// stehen, ergänzt um einen Hinweis, wie alt er ist.
+
+function fpBeitraegeSeitStichtag(fp) {
+  if (!fp || !fp.fixkostenId || !fp.stichtag) return { summe: 0, monate: 0 };
+  const fk = (state.fixkosten || []).find(f => String(f.id) === String(fp.fixkostenId));
+  if (!fk) return { summe: 0, monate: 0 };
+  const von = fp.stichtag.slice(0, 7);
+  const bis = (typeof currentMonth !== 'undefined' && currentMonth) ? currentMonth : thisMonth();
+  if (bis < von) return { summe: 0, monate: 0 };
+  let summe = 0, monate = 0;
+  // Der Stichtagsmonat zählt MIT: „Gezahlte Beiträge bis zum 01.08." meint den
+  // Stand vor der Augustzahlung – der Beitrag dieses Monats fehlt also noch.
+  monthsBetween(von, bis).forEach(m => {
+    if (!fixkostenAktivImMonat(fk, m)) return;
+    summe += (+fk.amount || 0); monate++;
+  });
+  return { summe: Math.round(summe * 100) / 100, monate };
+}
+
+// Aktueller Fondswert, falls Anteile hinterlegt sind.
+function fpFondswert(fp) {
+  if (!fp || !Array.isArray(fp.fonds) || !fp.fonds.length) return null;
+  const kurse = state.etfKurse || {};
+  let wert = 0, fehlend = 0;
+  fp.fonds.forEach(f => {
+    const k = kurse[f.symbol] || kurse[f.isin];
+    if (k && k.kurs && f.anteile) wert += f.anteile * k.kurs;
+    else fehlend++;
+  });
+  if (fehlend) return null;                      // lieber nichts als halb gerechnet
+  return Math.round(wert * 100) / 100;
+}
+
+// Liefert die anzuzeigenden Zahlen eines Produkts.
+function fpKennzahlen(fp) {
+  const b = fpBeitraegeSeitStichtag(fp);
+  const eingezahlt = Math.round(((+fp.eingezahlt || 0) + b.summe) * 100) / 100;
+  const fonds = fpFondswert(fp);
+  const wert = (fonds !== null) ? fonds : (+fp.wert || 0);
+  let alter = null;
+  if (fp.stichtag) {
+    const t = Date.parse(fp.stichtag);
+    if (isFinite(t)) alter = Math.floor((Date.now() - t) / 86400000);
+  }
+  return {
+    eingezahlt, wert, nachgetragen: b.summe, monate: b.monate,
+    quelle: (fonds !== null) ? 'fonds' : 'stichtag',
+    alterTage: alter,
+    gv: Math.round((wert - eingezahlt) * 100) / 100,
+  };
+}
+
+// Fondskurse eines Produkts aktualisieren (nutzt den ISIN-Abruf).
+// Allgemeiner Auswahldialog (Liste beliebiger Optionen).
+function askAuswahl(opts) {
+  return new Promise((resolve) => {
+    const o = opts || {};
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-overlay';
+    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:99999;display:flex;align-items:center;justify-content:center;padding:20px;backdrop-filter:blur(4px)';
+    const liste = (o.options||[]).map(op =>
+      '<button class="_aw-btn" data-val="' + op.id + '" style="display:flex;justify-content:space-between;' +
+        'align-items:center;width:100%;text-align:left;padding:12px 14px;margin:6px 0;border:1px solid var(--border);' +
+        'border-radius:8px;background:transparent;color:var(--text);cursor:pointer;font-size:14px;font-family:inherit">' +
+        '<span><strong>' + op.label + '</strong>' +
+          (op.sub ? '<div style="font-size:11px;color:var(--muted);margin-top:2px">' + op.sub + '</div>' : '') +
+        '</span>' +
+      '</button>').join('');
+    overlay.innerHTML =
+      '<div style="background:var(--surface);color:var(--text);border:1px solid var(--border);border-radius:12px;max-width:520px;width:100%;box-shadow:0 20px 60px rgba(0,0,0,.5)">' +
+        '<div style="padding:18px 22px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:12px">' +
+          '<div style="font-size:28px;line-height:1">' + (o.icon||'🔗') + '</div>' +
+          '<h3 style="margin:0;font-size:16px;font-weight:600">' + (o.title||'Auswahl') + '</h3>' +
+        '</div>' +
+        '<div style="padding:16px 22px;max-height:60vh;overflow:auto">' +
+          (o.message ? '<p style="margin:0 0 10px;font-size:13px">' + o.message + '</p>' : '') +
+          liste +
+        '</div>' +
+        '<div style="padding:14px 22px;border-top:1px solid var(--border);display:flex;justify-content:flex-end;background:var(--surface-2);border-radius:0 0 12px 12px">' +
+          '<button class="btn btn-ghost" id="_awCancel">Abbrechen</button>' +
+        '</div>' +
+      '</div>';
+    document.body.appendChild(overlay);
+    const fertig = (v) => { overlay.remove(); resolve(v); };
+    overlay.querySelectorAll('._aw-btn').forEach(b =>
+      b.addEventListener('click', () => fertig(b.getAttribute('data-val'))));
+    overlay.querySelector('#_awCancel').addEventListener('click', () => fertig(null));
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) fertig(null); });
+  });
+}
+
+// Finanzprodukt mit einer Fixkosten-Position verknüpfen.
+async function fpVerknuepfen(id) {
+  const fp = (state.finanzprodukte || []).find(x => String(x.id) === String(id));
+  if (!fp) return;
+  const kandidaten = (state.fixkosten || []);
+  if (!kandidaten.length) {
+    await uiAlert({ title:'Keine Fixkosten', icon:'⚠',
+      message:'Lege zuerst die monatlichen Beiträge als Fixkosten an.' });
+    return;
+  }
+  const wahl = await askAuswahl({
+    title: 'Beiträge verknüpfen', icon: '🔗',
+    message: 'Welche Fixkosten-Position enthält die Beiträge für „' + escapeHtml(fp.name) + '"?',
+    options: kandidaten.map(f => ({
+      id: String(f.id),
+      label: escapeHtml(f.name) + ' · ' + fmtEur(+f.amount||0) + '/Monat',
+      sub: (f.start||'') + ' bis ' + (f.end||'offen'),
+    })).concat([{ id:'__keine__', label:'Verknüpfung entfernen',
+                  sub:'Beiträge nicht automatisch fortschreiben' }]),
+  });
+  if (!wahl) return;
+  if (wahl === '__keine__') { delete fp.fixkostenId; }
+  else {
+    fp.fixkostenId = wahl;
+    if (!fp.stichtag) fp.stichtag = fp.datum || today();
+  }
+  saveData(); renderPage();
+  showToast(wahl === '__keine__' ? 'Verknüpfung entfernt' : 'Beiträge werden jetzt fortgeschrieben', 'info');
+}
+
+async function fpKurseLaden(id) {
+  const fp = (state.finanzprodukte || []).find(x => String(x.id) === String(id));
+  if (!fp || !Array.isArray(fp.fonds) || !fp.fonds.length) {
+    showToast('Für dieses Produkt sind keine Fonds hinterlegt', 'info');
+    return;
+  }
+  if (!state.etfKurse) state.etfKurse = {};
+  let ok = 0, fehler = 0;
+  for (const f of fp.fonds) {
+    const sym = f.symbol || f.isin;
+    const r = await fetchEtfKurs(sym, f.isin);
+    if (r && !r.fehler) { state.etfKurse[sym] = r; ok++; }
+    else fehler++;
+  }
+  saveData(); renderPage();
+  showToast(ok + ' Fondskurs' + (ok === 1 ? '' : 'e') + ' aktualisiert'
+    + (fehler ? ', ' + fehler + ' fehlgeschlagen' : ''), fehler && !ok ? 'error' : 'info');
+}
+
 function finanzprodukte() {
   const items = [...(state.finanzprodukte||[])].sort((a,b)=>b.jahr-a.jahr||(b.datum||'').localeCompare(a.datum||''));
   
@@ -6122,14 +6280,18 @@ function finanzprodukte() {
   items.forEach(fp => {
     if (!latestPerProduct[fp.name] || fp.jahr > latestPerProduct[fp.name].jahr) latestPerProduct[fp.name] = fp;
   });
-  const latestWert = Object.values(latestPerProduct).reduce((s,fp)=>s+(+fp.wert||0),0);
-  const latestEingezahlt = Object.values(latestPerProduct).reduce((s,fp)=>s+(+fp.eingezahlt||0),0);
+  // Kennzahlen je Produkt: Beiträge fortgeschrieben, Fondswert falls möglich
+  const kz = {};
+  Object.values(latestPerProduct).forEach(fp => { kz[fp.id] = fpKennzahlen(fp); });
+  const latestWert = Object.values(latestPerProduct).reduce((s,fp)=>s+kz[fp.id].wert,0);
+  const latestEingezahlt = Object.values(latestPerProduct).reduce((s,fp)=>s+kz[fp.id].eingezahlt,0);
   const gwl = latestWert - latestEingezahlt;
 
   const productSections = Object.entries(byName).map(([name, entries]) => {
     const latest = entries[0];
-    const gwlProd = (+latest.wert||0) - (+latest.eingezahlt||0);
-    const gwlPct = latest.eingezahlt ? (gwlProd / latest.eingezahlt * 100) : 0;
+    const K = kz[latest.id] || fpKennzahlen(latest);
+    const gwlProd = K.gv;
+    const gwlPct = K.eingezahlt ? (gwlProd / K.eingezahlt * 100) : 0;
     const rows = entries.map(fp => {
       const g = (+fp.wert||0)-(+fp.eingezahlt||0);
       const pct = fp.eingezahlt ? (g/fp.eingezahlt*100) : 0;
@@ -6151,12 +6313,37 @@ function finanzprodukte() {
         '<div><h3>' + name + '</h3>' +
           '<div style="font-size:12px;color:var(--muted)">' + (latest.typ||'') + (latest.anbieter?' · '+latest.anbieter:'') + '</div></div>' +
         '<div class="actions">' +
+          (K.quelle === 'fonds'
+            ? '<span class="badge badge-green" title="Wert aus aktuellen Fondskursen berechnet">📈 live</span>'
+            : (K.alterTage !== null && K.alterTage > 365
+                ? '<span class="badge badge-amber" title="Standmitteilung ist älter als ein Jahr">⚠ Stand ' + Math.floor(K.alterTage/30) + ' Mon. alt</span>'
+                : '')) +
+          (K.nachgetragen > 0
+            ? '<span class="badge badge-muted" title="' + K.monate + ' Beiträge seit dem Stichtag automatisch ergänzt">+' + fmtEur(K.nachgetragen) + ' Beiträge</span>'
+            : '') +
           '<span class="badge ' + (gwlProd>=0?'badge-green':'badge-red') + '">' + (gwlPct>=0?'+':'') + gwlPct.toFixed(1) + '%</span>' +
-          '<span class="badge badge-muted">Aktuell: ' + fmtEur(+latest.wert||0) + '</span>' +
+          '<span class="badge badge-muted" title="Eingezahlt inkl. fortgeschriebener Beiträge">Eingezahlt: ' + fmtEur(K.eingezahlt) + '</span>' +
+          '<span class="badge badge-muted">Aktuell: ' + fmtEur(K.wert) + '</span>' +
+          (Array.isArray(latest.fonds) && latest.fonds.length
+            ? '<button class="btn btn-ghost btn-sm" onclick="fpKurseLaden(\'' + latest.id + '\')">↻ Kurse</button>' : '') +
+          '<button class="btn btn-ghost btn-sm" onclick="fpVerknuepfen(\'' + latest.id + '\')" ' +
+            'title="' + (latest.fixkostenId ? 'Beiträge sind verknüpft – klicken zum Ändern' : 'Beiträge mit Fixkosten verknüpfen') + '">' +
+            (latest.fixkostenId ? '🔗' : 'Verknüpfen') + '</button>' +
         '</div>' +
       '</div>' +
+      (K.nachgetragen > 0 || K.quelle === 'fonds' ?
+        '<div style="font-size:11px;color:var(--muted);padding:0 0 8px">' +
+          (K.nachgetragen > 0
+            ? 'Eingezahlt enthält ' + K.monate + ' Beiträge seit ' + escapeHtml(latest.stichtag || '') +
+              ' (' + fmtEur(K.nachgetragen) + '), automatisch aus den Fixkosten fortgeschrieben. ' : '') +
+          (K.quelle === 'fonds'
+            ? 'Der Vertragswert wird aus den hinterlegten Fondskursen berechnet. Solange die Kurse nicht aktualisiert sind, ' +
+              'stammt er vom Stichtag – die zwischenzeitlichen Beiträge sind darin noch nicht enthalten, weshalb die ' +
+              'Prozentangabe zu niedrig ausfallen kann. Ein Klick auf „↻ Kurse" holt aktuelle Werte.'
+            : 'Der Vertragswert stammt aus der letzten Standmitteilung und wird nicht hochgerechnet, da Kosten und Kursschwankungen ihn beeinflussen.') +
+        '</div>' : '') +
       '<div class="table-wrap"><table>' +
-        '<thead><tr><th>Jahr</th><th>Datum</th><th>Typ</th><th>Anbieter</th><th style="text-align:right">Eingezahlt</th><th style="text-align:right">Wert</th><th style="text-align:right">G/V</th><th style="text-align:right">G/V %</th><th>Notiz</th><th></th></tr></thead>' +
+        '<thead><tr><th>Jahr</th><th>Stichtag</th><th>Typ</th><th>Anbieter</th><th style="text-align:right">Eingezahlt<div style="font-size:9px;font-weight:400;color:var(--muted)">zum Stichtag</div></th><th style="text-align:right">Wert<div style="font-size:9px;font-weight:400;color:var(--muted)">zum Stichtag</div></th><th style="text-align:right">G/V</th><th style="text-align:right">G/V %</th><th>Notiz</th><th></th></tr></thead>' +
         '<tbody>' + rows + '</tbody>' +
       '</table></div>' +
     '</div>';
@@ -9352,6 +9539,12 @@ window.closeFinanzproduktModal  = closeFinanzproduktModal;
 window.saveFinanzproduktModal   = saveFinanzproduktModal;
 window.onFpTypChange            = onFpTypChange;
 window.deleteFinanzprodukt      = deleteFinanzprodukt;
+window.fpKurseLaden      = fpKurseLaden;
+window.fpKennzahlen      = fpKennzahlen;
+window.fpBeitraegeSeitStichtag = fpBeitraegeSeitStichtag;
+window.fpFondswert       = fpFondswert;
+window.fpVerknuepfen     = fpVerknuepfen;
+window.askAuswahl        = askAuswahl;
 window.openZaehlerModal          = openZaehlerModal;
 window.closeZaehlerModal         = closeZaehlerModal;
 window.saveZaehlerModal          = saveZaehlerModal;
