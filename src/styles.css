@@ -547,10 +547,22 @@ button:disabled {
 
 /* ── Einstellungen: Tab-Navigation ─────────────────────────────────────── */
 .settings-tabs{
-  display:flex; flex-wrap:wrap; gap:4px; margin-bottom:22px;
+  display:flex; flex-wrap:wrap; gap:4px;
   padding:5px; background:var(--surface); border:1px solid var(--border);
-  border-radius:12px; position:sticky; top:0; z-index:20;
+  border-radius:12px; position:sticky; top:0; z-index:30;
+  /* Deckender Hintergrund + Rand nach unten, damit beim Scrollen nichts
+     sichtbar hinter der Leiste durchläuft. Der negative Rand zieht die
+     Fläche über die Seitenpolsterung hinaus, sonst blitzt Inhalt seitlich
+     an der Leiste vorbei. */
+  margin:0 0 22px; box-shadow:0 6px 14px -8px rgba(0,0,0,.45);
 }
+/* Deckt die Polsterung des Scroll-Containers (20px oben, 24px seitlich) ab,
+   damit beim Scrollen kein Inhalt seitlich oder über der Leiste durchblitzt. */
+.settings-tabs::before{
+  content:''; position:absolute; inset:-20px -24px 100% -24px;
+  background:var(--bg); z-index:-1;
+}
+.compact .settings-tabs::before{ inset:-12px -16px 100% -16px; }
 .set-tab{
   flex:1 1 auto; min-width:104px;
   padding:9px 14px; border:1px solid transparent; border-radius:8px;

@@ -161,6 +161,12 @@ let _snoozedReminders = {};
 // Format je Eintrag: { v: 'Version', date: 'YYYY-MM-DD', changes: ['...','...'] }
 // Änderungen dürfen mit **Fett** Markierung versehen werden.
 const CHANGELOG = [
+  { v: '1.0.26', date: '2026-07-22', changes: [
+    '**Fehler behoben: Reisen rechneten mit veralteten Spesensätzen weiter.** Beim Anlegen einer Reise wurde der damals gültige Satz fest gespeichert und nie wieder angepasst – eine Reise in die Schweiz zeigte dadurch 43 € statt der ab 2026 gültigen 47 €',
+    'Die Sätze richten sich jetzt nach Land und Reisedatum statt nach dem Zeitpunkt der Erfassung',
+    'Bestehende Reisen ab 2026 werden beim nächsten Start einmalig neu berechnet; Reisen aus früheren Jahren behalten bewusst ihre damals gültigen Sätze',
+    '**Die Reiter in den Einstellungen überdecken beim Scrollen keine Texte mehr** – die Leiste ist jetzt vollständig deckend und hebt sich sichtbar vom Inhalt ab',
+  ]},
   { v: '1.0.25', date: '2026-07-22', changes: [
     '**Fehler behoben: Die ETF-Automatik hat nie funktioniert.** „Automatisch beim Start aktualisieren" und das Intervall wurden zwar gespeichert und als aktiv angezeigt, aber nirgends ausgewertet – Kurse kamen ausschließlich per Knopfdruck. Beides läuft jetzt tatsächlich',
     'Die Aktualisierung im Hintergrund stört nicht mehr beim Arbeiten: Neu gezeichnet wird nur, wenn die Depot-Seite gerade offen ist',
@@ -491,7 +497,7 @@ function createEmptyYearData(year) {
 }
 
 const DEFAULT_DATA_RAW = {
-  dataVersion: 3,
+  dataVersion: 4,
   currentYear: new Date().getFullYear(),
   selectedYear: new Date().getFullYear(),
   years: { },
@@ -977,6 +983,28 @@ async function loadData() {
     saved.currentYear = Number(year);
     saved.selectedYear = Number(year);
     console.log('[Migration] v1→v3 done for year', year);
+  }
+
+  // ── MIGRATION v4: Spesensätze ab 2026 neu berechnen ─────────────────────
+  // Reisen speicherten bisher die beim Anlegen gültigen Sätze dauerhaft. Nach
+  // dem BMF-Update 2026 rechneten bestehende Reisen dadurch mit veralteten
+  // Beträgen weiter (z.B. Schweiz 43 € statt 47 €). Betroffen sind nur Reisen
+  // ab 2026 – ältere behalten bewusst ihre damals gültigen Sätze.
+  if (!saved.dataVersion || saved.dataVersion < 4) {
+    let korrigiert = 0;
+    const jahre = saved.years || {};
+    Object.keys(jahre).forEach(jr => {
+      const yd = jahre[jr];
+      if (!yd || !Array.isArray(yd.spesen)) return;
+      yd.spesen.forEach(s => {
+        if (!s || !s.dateFrom || !s.country) return;
+        if (String(s.dateFrom).slice(0,4) < '2026') return;   // Altjahre unangetastet
+        s._neuBerechnen = true;
+        korrigiert++;
+      });
+    });
+    saved.dataVersion = 4;
+    if (korrigiert) console.log('[Migration] v4: ' + korrigiert + ' Reise(n) ab 2026 zur Neuberechnung markiert');
   }
 
   // ── Merge into state (preserves proxy properties) ───────────────────────
@@ -3125,10 +3153,42 @@ function spesen() {
   </div>`;
 }
 
+// Ermittelt die gültigen Sätze für eine Reise. Maßgeblich sind Land und
+// Reisedatum – NICHT die beim Anlegen gespeicherten Werte. Sonst würde eine
+// Reise für immer mit einem veralteten Satz rechnen, auch wenn die
+// Pauschbeträge inzwischen aktualisiert wurden.
+// Rechnet markierte Reisen (Migration v4) mit den aktuellen Sätzen neu durch.
+function spesenNeuBerechnen() {
+  let n = 0;
+  Object.keys(state.years || {}).forEach(jr => {
+    const yd = state.years[jr];
+    if (!yd || !Array.isArray(yd.spesen)) return;
+    yd.spesen.forEach(s => {
+      if (!s || !s._neuBerechnen) return;
+      delete s._neuBerechnen;
+      try { calcSpesen(s); n++; } catch(e) { console.error('Spesen-Neuberechnung:', e); }
+    });
+  });
+  if (n) { saveData(); console.log('[Spesen] ' + n + ' Reise(n) auf aktuelle Sätze gebracht'); }
+}
+
+function spesenSaetzeFuerReise(s) {
+  if (!s || !s.country || s.country === 'Deutschland') return { halb: 14, ganz: 28 };
+  const t = spesenSatzFuer(s.country);
+  if (t) return { halb: t.halb, ganz: t.ganz };
+  // Land unbekannt (z.B. eigene Eingabe) → gespeicherte Werte behalten
+  return { halb: +s.rateHalf || 14, ganz: +s.ratePerDay || 28 };
+}
+
 function calcSpesen(s) {
   if (!s.dateFrom) return;
-  const rH = s.rateHalf || 14;
-  const rG = s.ratePerDay || 28;
+  // Sätze immer frisch aus der aktiven Tabelle holen und mitspeichern,
+  // damit Anzeige und Berechnung übereinstimmen.
+  const saetze = spesenSaetzeFuerReise(s);
+  s.rateHalf   = saetze.halb;
+  s.ratePerDay = saetze.ganz;
+  const rH = saetze.halb;
+  const rG = saetze.ganz;
 
   // Use manually entered anreise/vorOrt if available, else auto-calc from dates
   let halfDays, fullDays;
@@ -5933,6 +5993,7 @@ async function pvAktivieren() {
     pvJahrDaten(j);
   }
   saveData();
+  spesenNeuBerechnen();
   pvNavSichtbarkeit();
   tabellenNavSichtbarkeit();
   etfAutoRefreshEinrichten();
@@ -7922,6 +7983,8 @@ window.tabellenAktivieren = tabellenAktivieren;
 window.tabellenDeaktivieren = tabellenDeaktivieren;
 window.tabellenNavSichtbarkeit = tabellenNavSichtbarkeit;
 window.spesenSatzFuer    = spesenSatzFuer;
+window.spesenNeuBerechnen = spesenNeuBerechnen;
+window.spesenSaetzeFuerReise = spesenSaetzeFuerReise;
 window.spesenUpdatePruefen = spesenUpdatePruefen;
 window.spesenSaetzeZuruecksetzen = spesenSaetzeZuruecksetzen;
 window.aktiverSpesenStand = aktiverSpesenStand;
