@@ -161,6 +161,14 @@ let _snoozedReminders = {};
 // Format je Eintrag: { v: 'Version', date: 'YYYY-MM-DD', changes: ['...','...'] }
 // Änderungen dürfen mit **Fett** Markierung versehen werden.
 const CHANGELOG = [
+  { v: '1.0.37', date: '2026-07-24', changes: [
+    '**Finanzprodukte lassen sich jetzt bearbeiten** – bisher konnte man Einträge nur anlegen oder löschen',
+    '**Neuer Knopf „+ Stand"**: erfasst einen neuen Stichtag für ein bestehendes Produkt. Die Stammdaten werden übernommen, nur Datum und Werte sind neu einzutragen – so wächst die Historie',
+    'Beim Bearbeiten bleiben hinterlegte Fonds und die Verknüpfung zu den Beiträgen erhalten',
+    '**Die Jahresübersicht hat jetzt fünf umschaltbare Diagramme**: Cashflow, Einnahmen gegen Ausgaben, Vermögensverlauf, Ausgaben nach Kategorie und Sparleistung',
+    '**Vergleich mit Vorjahren**: Per Häkchen lassen sich beliebige andere Jahre als Vergleichslinie einblenden',
+    'Die zuletzt gewählte Ansicht und die Vergleichsjahre bleiben erhalten',
+  ]},
   { v: '1.0.36', date: '2026-07-23', changes: [
     '**Finanzprodukte lassen sich mit Fixkosten verknüpfen**: Die eingezahlten Beiträge werden dann automatisch fortgeschrieben – ausgehend vom Stichtag der letzten Standmitteilung',
     '**Fondsgebundene Verträge können mit ihren Fonds hinterlegt werden.** Der Vertragswert wird dann aus den Anteilen und aktuellen Kursen berechnet statt aus dem veralteten Stichtagswert',
@@ -2595,34 +2603,208 @@ function jahresuebersicht() {
         </table>
       </div>
     </div>
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:14px">
-      <div class="card"><div class="card-header"><h3>Monatlicher Cashflow ${getSelectedYear()}</h3></div><canvas id="yearCfChart" height="200"></canvas></div>
-      <div class="card"><div class="card-header"><h3>Einnahmen vs. Ausgaben</h3></div><canvas id="yearIncExpChart" height="200"></canvas></div>
-    </div>`;
+    ${jahresChartHtml()}`;
+}
+
+// ── Jahresübersicht: umschaltbare Diagramme mit Vorjahresvergleich ────────
+const JAHRES_CHARTS = [
+  { id:'cashflow',  titel:'Monatlicher Cashflow' },
+  { id:'einaus',    titel:'Einnahmen vs. Ausgaben' },
+  { id:'kumuliert', titel:'Vermögensverlauf (kumuliert)' },
+  { id:'kategorie', titel:'Ausgaben nach Kategorie' },
+  { id:'sparen',    titel:'Sparleistung je Monat' },
+];
+function jahresChartIdx() {
+  const i = (state.config || {}).jahresChart;
+  return (Number.isInteger(i) && i >= 0 && i < JAHRES_CHARTS.length) ? i : 0;
+}
+function jahresChartSetzen(i) {
+  const n = parseInt(i, 10);
+  if (!Number.isFinite(n)) return;
+  if (!state.config) state.config = {};
+  state.config.jahresChart = ((n % JAHRES_CHARTS.length) + JAHRES_CHARTS.length) % JAHRES_CHARTS.length;
+  saveData(); renderPage();
+}
+function jahresChartWechseln(r) { jahresChartSetzen(jahresChartIdx() + r); }
+function jahresVergleichToggle(jahr) {
+  if (!state.config) state.config = {};
+  const v = state.config.jahresVergleich || [];
+  const i = v.indexOf(jahr);
+  if (i >= 0) v.splice(i, 1); else v.push(jahr);
+  state.config.jahresVergleich = v;
+  saveData(); renderPage();
+}
+
+// Monatswerte eines beliebigen Jahres – ohne das aktive Jahr zu wechseln.
+// monthFinancials() rechnet immer mit dem geladenen Jahr, deshalb hier
+// eine eigene, bewusst einfache Berechnung aus den Rohdaten.
+function jahresMonatswerte(jahr, art) {
+  const yd = (state.years || {})[String(jahr)];
+  if (!yd) return null;
+  const def = (yd.konten && yd.konten[0]) ? yd.konten[0].id : null;
+  const M = Array.from({length:12}, (_,i) => jahr + '-' + String(i+1).padStart(2,'0'));
+  return M.map(m => {
+    const inc = (yd.incomeByMonth || {})[m] || {};
+    let ein = (+inc.gehalt||0) + (+inc.nebenjob||0);
+    (yd.einnahmen||[]).forEach(x => { if (x.month === m && !x._korrektur) ein += (+x.amount||0); });
+    let fix = 0;
+    (yd.fixkosten||[]).forEach(f => {
+      const von = f.start || (jahr + '-01'), bis = f.end || (jahr + '-12');
+      if (m >= von && m <= bis) fix += (+f.amount||0);
+    });
+    let aus = fix;
+    (yd.ausgaben||[]).forEach(x => { if (x.month === m && !x._korrektur) aus += (+x.amount||0); });
+    (yd.einkaeufe||[]).forEach(x => { if (x.month === m) aus += (+x.amount||0); });
+    let spar = 0;
+    (yd.sparen||[]).forEach(x => {
+      const sm = x.month || (x.date||'').slice(0,7);
+      if (sm === m && x.txType !== 'bestand' && !x.skipCashflow) spar += (+x.amount||0);
+    });
+    if (art === 'ein') return Math.round(ein*100)/100;
+    if (art === 'aus') return Math.round(aus*100)/100;
+    if (art === 'spar') return Math.round(spar*100)/100;
+    return Math.round((ein - aus)*100)/100;   // cashflow
+  });
+}
+
+function jahresChartHtml() {
+  const c = JAHRES_CHARTS[jahresChartIdx()];
+  const jetzt = String(getSelectedYear());
+  const andere = Object.keys(state.years || {}).filter(y => y !== jetzt).sort().reverse();
+  const gewaehlt = (state.config || {}).jahresVergleich || [];
+  const vergleichbar = ['cashflow','einaus','kumuliert','sparen'].includes(c.id);
+  return '<div class="card" style="margin-top:14px">' +
+    '<div class="card-header" style="gap:8px">' +
+      '<button class="btn-icon" onclick="jahresChartWechseln(-1)" title="Vorheriges Diagramm">‹</button>' +
+      '<h3 style="flex:1;text-align:center;min-width:0">' + c.titel + ' ' + jetzt + '</h3>' +
+      '<button class="btn-icon" onclick="jahresChartWechseln(1)" title="Nächstes Diagramm">›</button>' +
+    '</div>' +
+    (vergleichbar && andere.length ?
+      '<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:10px">' +
+        '<span style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase">Vergleich:</span>' +
+        andere.map(y => '<label style="display:inline-flex;align-items:center;gap:5px;font-size:13px;cursor:pointer">' +
+          '<input type="checkbox" ' + (gewaehlt.includes(y)?'checked':'') +
+          ' onchange="jahresVergleichToggle(\'' + y + '\')" style="width:16px;height:16px;accent-color:var(--accent)"/>' +
+          y + '</label>').join('') +
+      '</div>' : '') +
+    '<div style="position:relative;height:300px"><canvas id="jahresChart"></canvas></div>' +
+    '<div style="display:flex;justify-content:center;gap:6px;margin-top:10px">' +
+      JAHRES_CHARTS.map((x,i) => '<button onclick="jahresChartSetzen(\'' + i + '\')" title="' + x.titel + '" ' +
+        'style="width:7px;height:7px;padding:0;border-radius:50%;cursor:pointer;border:none;background:' +
+        (i===jahresChartIdx() ? 'var(--accent)' : 'var(--border)') + '"></button>').join('') +
+    '</div>' +
+  '</div>';
 }
 
 function renderJahresCharts() {
-  const labels = allMonths2026.map(m => monthLabel(m).slice(0,3));
-  const cfs = allMonths2026.map(m => monthFinancials(m).cashflow);
-  const incs = allMonths2026.map(m => monthFinancials(m).totalIncome);
-  const exps = allMonths2026.map(m => monthFinancials(m).totalExpenses);
+  const ctx = el('jahresChart');
+  if (!ctx || typeof Chart === 'undefined') return;
+  try {
+    const c = JAHRES_CHARTS[jahresChartIdx()];
+    const jetzt = String(getSelectedYear());
+    const labels = allMonths2026.map(m => monthLabel(m).slice(0,3));
+    const css = getComputedStyle(document.documentElement);
+    const textCol = (css.getPropertyValue('--text') || '#e5e7eb').trim();
+    const gridCol = (css.getPropertyValue('--border') || '#334155').trim();
+    const accent  = (css.getPropertyValue('--accent') || '#0EA5E9').trim();
+    const green   = (css.getPropertyValue('--green') || '#22C55E').trim();
+    const red     = (css.getPropertyValue('--red') || '#EF4444').trim();
+    const vergleich = ((state.config||{}).jahresVergleich || []).filter(y => (state.years||{})[y]);
+    const farben = [accent, '#8B5CF6', '#F59E0B', '#EC4899', '#14B8A6'];
+    const achse = {
+      x: { ticks:{ color:textCol, font:{size:10} }, grid:{ display:false } },
+      y: { ticks:{ color:textCol, font:{size:10}, callback:(v)=>fmt(v) }, grid:{ color: gridCol+'55' } },
+    };
+    const legende = { labels:{ color:textCol, font:{size:11}, boxWidth:12 } };
+    let cfg = null;
 
-  const cfCtx = el('yearCfChart');
-  if (cfCtx) chartInstances.yearCf = new Chart(cfCtx, {
-    type: 'bar',
-    data: { labels, datasets: [{ label: 'Cashflow', data: cfs, backgroundColor: cfs.map(v => v>=0?'#0f766e':'#b42318'), borderRadius: 4, borderSkipped: false }] },
-    options: { responsive: true, plugins: { legend: { display: false } }, scales: { y: { ticks: { callback: v => v.toLocaleString('de-DE')+' '+currencySymbol() } } } }
-  });
+    if (c.id === 'cashflow') {
+      const cfs = allMonths2026.map(m => monthFinancials(m).cashflow);
+      const ds = [{ label:'Cashflow ' + jetzt, data:cfs, type:'bar',
+        backgroundColor: cfs.map(v => v>=0 ? green+'cc' : red+'cc'), borderRadius:4 }];
+      vergleich.forEach((y,i) => {
+        const d = jahresMonatswerte(y,'cf'); if (!d) return;
+        ds.push({ label:'Cashflow '+y, data:d, type:'line', borderColor:farben[i%farben.length],
+          backgroundColor:'transparent', borderWidth:2, pointRadius:3, tension:.25 });
+      });
+      cfg = { type:'bar', data:{ labels, datasets:ds },
+        options:{ responsive:true, maintainAspectRatio:false,
+          plugins:{ legend:legende, tooltip:{ callbacks:{ label:(x)=>' '+x.dataset.label+': '+fmtEur(x.parsed.y) } } },
+          scales: achse } };
 
-  const ieCtx = el('yearIncExpChart');
-  if (ieCtx) chartInstances.yearIE = new Chart(ieCtx, {
-    type: 'line',
-    data: { labels, datasets: [
-      { label: 'Einnahmen', data: incs, borderColor: '#0f766e', backgroundColor: 'rgba(15,118,110,.1)', fill: true, tension: .3 },
-      { label: 'Ausgaben', data: exps, borderColor: '#b42318', backgroundColor: 'rgba(180,35,24,.06)', fill: true, tension: .3 },
-    ]},
-    options: { responsive: true, scales: { y: { ticks: { callback: v => v.toLocaleString('de-DE')+' '+currencySymbol() } } } }
-  });
+    } else if (c.id === 'einaus') {
+      const inc = allMonths2026.map(m => monthFinancials(m).totalIncome);
+      const exp = allMonths2026.map(m => monthFinancials(m).totalExpenses);
+      const ds = [
+        { label:'Einnahmen '+jetzt, data:inc, borderColor:green, backgroundColor:green+'1a', fill:true, tension:.3, borderWidth:2 },
+        { label:'Ausgaben '+jetzt,  data:exp, borderColor:red,   backgroundColor:red+'12',  fill:true, tension:.3, borderWidth:2 },
+      ];
+      vergleich.forEach((y,i) => {
+        const e = jahresMonatswerte(y,'ein'), a = jahresMonatswerte(y,'aus');
+        if (!e) return;
+        ds.push({ label:'Einnahmen '+y, data:e, borderColor:farben[i%farben.length],
+          borderDash:[5,4], backgroundColor:'transparent', borderWidth:2, pointRadius:2, tension:.3 });
+        ds.push({ label:'Ausgaben '+y, data:a, borderColor:farben[i%farben.length],
+          borderDash:[2,3], backgroundColor:'transparent', borderWidth:1.5, pointRadius:2, tension:.3 });
+      });
+      cfg = { type:'line', data:{ labels, datasets:ds },
+        options:{ responsive:true, maintainAspectRatio:false,
+          plugins:{ legend:legende, tooltip:{ callbacks:{ label:(x)=>' '+x.dataset.label+': '+fmtEur(x.parsed.y) } } },
+          scales: achse } };
+
+    } else if (c.id === 'kumuliert') {
+      const lauf = (arr, start) => { let s = start||0; return arr.map(v => (s += v)); };
+      const cfs = allMonths2026.map(m => monthFinancials(m).cashflow);
+      const ds = [{ label:'Verlauf '+jetzt, data:lauf(cfs, getYearData().startBalance||0),
+        borderColor:accent, backgroundColor:accent+'1a', fill:true, tension:.25, borderWidth:2 }];
+      vergleich.forEach((y,i) => {
+        const d = jahresMonatswerte(y,'cf'); if (!d) return;
+        const st = ((state.years||{})[y]||{}).startBalance || 0;
+        ds.push({ label:'Verlauf '+y, data:lauf(d, st), borderColor:farben[i%farben.length],
+          backgroundColor:'transparent', borderWidth:2, borderDash:[5,4], pointRadius:2, tension:.25 });
+      });
+      cfg = { type:'line', data:{ labels, datasets:ds },
+        options:{ responsive:true, maintainAspectRatio:false,
+          plugins:{ legend:legende, tooltip:{ callbacks:{ label:(x)=>' '+x.dataset.label+': '+fmtEur(x.parsed.y) } } },
+          scales: achse } };
+
+    } else if (c.id === 'sparen') {
+      const eig = allMonths2026.map(m => {
+        let s = 0;
+        (state.sparen||[]).forEach(x => {
+          const sm = x.month || (x.date||'').slice(0,7);
+          if (sm === m && x.txType !== 'bestand' && !x.skipCashflow) s += (+x.amount||0);
+        });
+        return Math.round(s*100)/100;
+      });
+      const ds = [{ label:'Sparen '+jetzt, data:eig, type:'bar', backgroundColor:accent+'cc', borderRadius:4 }];
+      vergleich.forEach((y,i) => {
+        const d = jahresMonatswerte(y,'spar'); if (!d) return;
+        ds.push({ label:'Sparen '+y, data:d, type:'line', borderColor:farben[i%farben.length],
+          backgroundColor:'transparent', borderWidth:2, pointRadius:3, tension:.25 });
+      });
+      cfg = { type:'bar', data:{ labels, datasets:ds },
+        options:{ responsive:true, maintainAspectRatio:false,
+          plugins:{ legend:legende, tooltip:{ callbacks:{ label:(x)=>' '+x.dataset.label+': '+fmtEur(x.parsed.y) } } },
+          scales: achse } };
+
+    } else if (c.id === 'kategorie') {
+      const grp = {};
+      (state.ausgaben||[]).forEach(a => { if (a._korrektur) return;
+        grp[a.category||'Ohne Kategorie'] = (grp[a.category||'Ohne Kategorie']||0) + (+a.amount||0); });
+      (state.einkaeufe||[]).forEach(e => {
+        grp['Einkauf Lebensmittel'] = (grp['Einkauf Lebensmittel']||0) + (+e.amount||0); });
+      const ks = Object.keys(grp).sort((a,b)=>grp[b]-grp[a]).slice(0,12);
+      cfg = { type:'bar',
+        data:{ labels:ks, datasets:[{ label:'Ausgaben '+jetzt, data:ks.map(k=>grp[k]),
+          backgroundColor: ks.map((_,i)=>farben[i%farben.length]+'cc'), borderRadius:4 }] },
+        options:{ indexAxis:'y', responsive:true, maintainAspectRatio:false,
+          plugins:{ legend:{display:false}, tooltip:{ callbacks:{ label:(x)=>' '+fmtEur(x.parsed.x) } } },
+          scales:{ x:{ ticks:{ color:textCol, font:{size:10}, callback:(v)=>fmt(v) }, grid:{ color:gridCol+'55' } },
+                   y:{ ticks:{ color:textCol, font:{size:10} }, grid:{ display:false } } } } };
+    }
+    if (cfg) chartInstances.jahres = new Chart(ctx, cfg);
+  } catch (e) { console.error('Jahres-Diagramm:', e); }
 }
 
 // ── PAGE: BUCHUNGEN ───────────────────────────────────────────────────────
@@ -6305,7 +6487,10 @@ function finanzprodukte() {
         '<td style="text-align:right;color:' + (g>=0?'var(--green)':'var(--red)') + ';font-weight:600">' + (g>=0?'+':'') + fmtEur(g) + '</td>' +
         '<td style="text-align:right;color:' + (pct>=0?'var(--green)':'var(--red)') + '">' + (pct>=0?'+':'') + pct.toFixed(2) + '%</td>' +
         '<td style="font-size:11px;color:var(--muted)">' + (fp.notiz||'') + '</td>' +
-        '<td><button class="btn-icon danger" onclick="deleteFinanzprodukt(' + fp.id + ')">×</button></td>' +
+        '<td style="white-space:nowrap">' +
+          '<button class="btn-icon" onclick="editFinanzprodukt(\'' + fp.id + '\')" title="Diesen Stand bearbeiten">✎</button>' +
+          '<button class="btn-icon danger" onclick="deleteFinanzprodukt(\'' + fp.id + '\')" title="Diesen Stand löschen">×</button>' +
+        '</td>' +
         '</tr>';
     }).join('');
     return '<div class="card mb-2">' +
@@ -6326,6 +6511,8 @@ function finanzprodukte() {
           '<span class="badge badge-muted">Aktuell: ' + fmtEur(K.wert) + '</span>' +
           (Array.isArray(latest.fonds) && latest.fonds.length
             ? '<button class="btn btn-ghost btn-sm" onclick="fpKurseLaden(\'' + latest.id + '\')">↻ Kurse</button>' : '') +
+          '<button class="btn btn-ghost btn-sm" onclick="neuerStandFinanzprodukt(\'' + latest.id + '\')" ' +
+            'title="Neuen Stichtag erfassen – Stammdaten werden übernommen">+ Stand</button>' +
           '<button class="btn btn-ghost btn-sm" onclick="fpVerknuepfen(\'' + latest.id + '\')" ' +
             'title="' + (latest.fixkostenId ? 'Beiträge sind verknüpft – klicken zum Ändern' : 'Beiträge mit Fixkosten verknüpfen') + '">' +
             (latest.fixkostenId ? '🔗' : 'Verknüpfen') + '</button>' +
@@ -6368,7 +6555,69 @@ function onFpTypChange() {
   const cl  = document.getElementById('fp_typ_custom_label');
   if (cl) cl.classList.toggle('hidden', typ !== 'Sonstiges');
 }
+// Finanzprodukt bearbeiten – lädt den Eintrag ins Formular.
+let _fpEditId = null;
+function editFinanzprodukt(id) {
+  if (!requireUnlocked()) return;
+  const fp = (state.finanzprodukte || []).find(x => String(x.id) === String(id));
+  if (!fp) return;
+  const modal = document.getElementById('finanzproduktModal');
+  if (!modal) return;
+  _fpEditId = String(fp.id);
+  const setv = (i, v) => { const e = document.getElementById(i); if (e) e.value = v; };
+  setv('fp_jahr', fp.jahr || new Date().getFullYear());
+  setv('fp_datum', fp.datum || today());
+  setv('fp_name', fp.name || '');
+  setv('fp_anbieter', fp.anbieter || '');
+  setv('fp_vertrag', fp.vertrag || '');
+  setv('fp_eingezahlt', fp.eingezahlt || '');
+  setv('fp_wert', fp.wert || '');
+  setv('fp_notiz', fp.notiz || '');
+  // Typ: bekannte Auswahl oder Freitext
+  const sel = document.getElementById('fp_typ');
+  const bekannt = sel ? [...sel.options].map(o => o.value) : [];
+  if (bekannt.includes(fp.typ)) { setv('fp_typ', fp.typ); setv('fp_typ_custom', ''); }
+  else { setv('fp_typ', 'Sonstiges'); setv('fp_typ_custom', fp.typ || ''); }
+  onFpTypChange();
+  const t = modal.querySelector('.modal-title, h3');
+  if (t) t.textContent = 'Finanzprodukt bearbeiten';
+  modal.classList.remove('hidden');
+  setTimeout(() => document.getElementById('fp_name')?.focus(), 100);
+}
+
+// Neuen Stand für ein bestehendes Produkt erfassen: Stammdaten werden
+// übernommen, nur Datum und Werte sind neu. So entsteht die Historie.
+function neuerStandFinanzprodukt(id) {
+  if (!requireUnlocked()) return;
+  const fp = (state.finanzprodukte || []).find(x => String(x.id) === String(id));
+  if (!fp) return;
+  const modal = document.getElementById('finanzproduktModal');
+  if (!modal) return;
+  _fpEditId = null;                       // neuer Eintrag, keine Bearbeitung
+  const setv = (i, v) => { const e = document.getElementById(i); if (e) e.value = v; };
+  setv('fp_jahr', new Date().getFullYear());
+  setv('fp_datum', today());
+  setv('fp_name', fp.name || '');         // Name identisch -> gleiche Historie
+  setv('fp_anbieter', fp.anbieter || '');
+  setv('fp_vertrag', fp.vertrag || '');
+  setv('fp_eingezahlt', '');              // bewusst leer: neue Werte eintragen
+  setv('fp_wert', '');
+  setv('fp_notiz', '');
+  const sel = document.getElementById('fp_typ');
+  const bekannt = sel ? [...sel.options].map(o => o.value) : [];
+  if (bekannt.includes(fp.typ)) { setv('fp_typ', fp.typ); setv('fp_typ_custom', ''); }
+  else { setv('fp_typ', 'Sonstiges'); setv('fp_typ_custom', fp.typ || ''); }
+  onFpTypChange();
+  const t = modal.querySelector('.modal-title, h3');
+  if (t) t.textContent = 'Neuer Stand: ' + (fp.name || '');
+  modal.classList.remove('hidden');
+  setTimeout(() => document.getElementById('fp_eingezahlt')?.focus(), 100);
+}
+
 function openFinanzproduktModal() {
+  _fpEditId = null;
+  const t = document.getElementById('finanzproduktModal')?.querySelector('.modal-title, h3');
+  if (t) t.textContent = 'Neues Finanzprodukt';
   if (!requireUnlocked()) return;
   const modal = document.getElementById('finanzproduktModal');
   if (!modal) return;
@@ -6402,6 +6651,21 @@ function saveFinanzproduktModal() {
     notiz: document.getElementById('fp_notiz')?.value||'',
   };
   state.finanzprodukte = state.finanzprodukte || [];
+  if (_fpEditId) {
+    // Bearbeiten: bestehenden Eintrag ersetzen, Zusatzfelder erhalten
+    const i = state.finanzprodukte.findIndex(x => String(x.id) === _fpEditId);
+    if (i >= 0) {
+      const alt = state.finanzprodukte[i];
+      fp.id = alt.id;
+      // Felder, die nicht im Formular stehen, nicht verlieren
+      ['fonds','fixkostenId','stichtag'].forEach(k => { if (alt[k] !== undefined) fp[k] = alt[k]; });
+      state.finanzprodukte[i] = fp;
+    }
+    _fpEditId = null;
+    saveData(); closeFinanzproduktModal(); renderPage();
+    showToast('Finanzprodukt aktualisiert');
+    return;
+  }
   state.finanzprodukte.push(fp);
   saveData(); closeFinanzproduktModal(); renderPage();
   showToast('Finanzprodukt gespeichert');
@@ -9544,6 +9808,13 @@ window.fpKennzahlen      = fpKennzahlen;
 window.fpBeitraegeSeitStichtag = fpBeitraegeSeitStichtag;
 window.fpFondswert       = fpFondswert;
 window.fpVerknuepfen     = fpVerknuepfen;
+window.editFinanzprodukt = editFinanzprodukt;
+window.jahresChartSetzen = jahresChartSetzen;
+window.jahresChartWechseln = jahresChartWechseln;
+window.jahresVergleichToggle = jahresVergleichToggle;
+window.jahresChartHtml   = jahresChartHtml;
+window.jahresMonatswerte = jahresMonatswerte;
+window.neuerStandFinanzprodukt = neuerStandFinanzprodukt;
 window.askAuswahl        = askAuswahl;
 window.openZaehlerModal          = openZaehlerModal;
 window.closeZaehlerModal         = closeZaehlerModal;
