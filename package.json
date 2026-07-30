@@ -1,6 +1,6 @@
 {
   "name": "finanzverwaltung-pro",
-  "version": "1.0.37",
+  "version": "1.0.38",
   "main": "src/main.js",
   "scripts": {
     "start": "electron .",
@@ -43,11 +43,17 @@
       ],
       "language": "1031",
       "installerIcon": "build/icon.ico",
-      "uninstallerIcon": "build/icon.ico"
+      "uninstallerIcon": "build/icon.ico",
+      "installerSidebar": "build/installerSidebar.bmp",
+      "uninstallerSidebar": "build/uninstallerSidebar.bmp",
+      "installerHeader": "build/installerHeader.bmp",
+      "license": "build/license_de.txt",
+      "warningsAsErrors": false
     },
     "files": [
       "src/**/*",
-      "build/**/*"
+      "build/icon.png",
+      "build/icon.ico"
     ]
   },
   "devDependencies": {

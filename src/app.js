@@ -14,6 +14,7 @@ function currencySymbol() {
 }
 const fmtEur = (n) => fmt(n) + ' ' + currencySymbol();
 const today = () => new Date().toISOString().slice(0, 10);
+const nowTime = () => { const d = new Date(); return String(d.getHours()).padStart(2,'0') + ':' + String(d.getMinutes()).padStart(2,'0'); };
 const thisMonth = () => new Date().toISOString().slice(0, 7);
 const monthLabel = (m) => { const [y, mo] = m.split('-'); return ['Jan','Feb','Mär','Apr','Mai','Jun','Jul','Aug','Sep','Okt','Nov','Dez'][+mo-1] + ' ' + y; };
 const monthsBetween = (from, to) => {
@@ -3532,10 +3533,10 @@ function speseRow(s) {
     <td style="text-align:center"><input type="number" value="${s.fruehstueck||0}" min="0" onchange="updateSpese('${s.id}','fruehstueck',+this.value);recalcSpeseRow('${s.id}')" style="width:45px;text-align:center"/></td>
     <td style="text-align:center"><input type="number" value="${s.mittagessen||0}" min="0" onchange="updateSpese('${s.id}','mittagessen',+this.value);recalcSpeseRow('${s.id}')" style="width:45px;text-align:center"/></td>
     <td style="text-align:center"><input type="number" value="${s.abendessen||0}" min="0" onchange="updateSpese('${s.id}','abendessen',+this.value);recalcSpeseRow('${s.id}')" style="width:45px;text-align:center"/></td>
-    <td><input type="number" value="${(+s.ausgaben||0).toFixed(2)}" onchange="updateSpese('${s.id}','ausgaben',+this.value);recalcSpeseRow('${s.id}')" step="0.01" style="width:75px;text-align:right"/> ${currencySymbol()}</td>
+    <td style="white-space:nowrap"><input id="sp_ausg_${s.id}" type="number" value="${(+s.ausgaben||0).toFixed(2)}" onchange="updateSpese('${s.id}','ausgaben',+this.value);recalcSpeseRow('${s.id}')" step="0.01" style="width:75px;text-align:right"/> ${currencySymbol()} <button type="button" class="btn-icon" title="Taschenrechner" onclick="openCalc('sp_ausg_${s.id}')">🧮</button></td>
     <td class="amount positive">${fmtEur(s.allowance||0)}</td>
     <td class="amount ${saldo>=0?'positive':'negative'}">${saldo>=0?'+':''}${fmtEur(saldo)}</td>
-    <td><input type="number" value="${(+s.auslagen||0).toFixed(2)}" onchange="updateSpese('${s.id}','auslagen',+this.value);recalcSpeseRow('${s.id}')" step="0.01" style="width:75px;text-align:right"/> ${currencySymbol()}</td>
+    <td style="white-space:nowrap"><input id="sp_ausl_${s.id}" type="number" value="${(+s.auslagen||0).toFixed(2)}" onchange="updateSpese('${s.id}','auslagen',+this.value);recalcSpeseRow('${s.id}')" step="0.01" style="width:75px;text-align:right"/> ${currencySymbol()} <button type="button" class="btn-icon" title="Taschenrechner" onclick="openCalc('sp_ausl_${s.id}')">🧮</button></td>
     <td class="amount ${zuUeberweisen>=0?'positive':'negative'}" style="font-weight:700">${fmtEur(zuUeberweisen)}</td>
     <td style="white-space:nowrap">${(() => { const _k=kontoById(s.kontoId||defaultKontoId()); const _kn=_k?_k.name:'Konto'; const _cf=_k?_k.cashflow:true; return `<button class="btn-icon" title="Konto (Spesen-Saldo): ${_kn} – klicken zum Ändern" onclick="pickSpeseKonto('${s.id}')" style="width:auto;min-width:0;padding:0 8px;font-size:12px;white-space:nowrap;gap:4px">${_cf?'🏦':'📈'} ${_kn}</button>`; })()}<button class="btn-icon danger" onclick="deleteSpese('${s.id}')">×</button></td>
   </tr>`;
@@ -7454,7 +7455,8 @@ function zaehler() {
       const typeOpts = ['Strom','Warmwasser','Kaltwasser','Wasser allgemein','Sonstiges'].map(t =>
         '<option value="' + t + '"' + (t===z.type?' selected':'') + '>' + t + '</option>').join('');
       return '<tr id="zaeh_' + z.id + '">' +
-        '<td><input type="date" value="' + (z.date||'') + '" onchange="updateZaehler(' + z.id + ',\'date\',this.value)" style="width:145px"/></td>' +
+        '<td><input type="date" value="' + (z.date||'') + '" onchange="updateZaehler(' + z.id + ',\'date\',this.value)" style="width:135px"/></td>' +
+        '<td><input type="time" value="' + (z.time||'') + '" onchange="updateZaehler(' + z.id + ',\'time\',this.value)" style="width:95px"/></td>' +
         '<td><select onchange="updateZaehler(' + z.id + ',\'type\',this.value)" style="width:140px">' + typeOpts + '</select></td>' +
         '<td><input type="number" value="' + (z.value||0) + '" step="0.001" onchange="updateZaehler(' + z.id + ',\'value\',+this.value)" style="width:100px;text-align:right"/></td>' +
         '<td><select onchange="updateZaehlerEinheit(' + z.id + ',this.value)" style="width:90px">' + einheitOpts + '</select>' +
@@ -7481,7 +7483,7 @@ function zaehler() {
       '<span class="badge badge-muted">' + rows.length + ' Einträge</span></div>' +
       (rows.length >= 2 ? '<div style="padding:14px 14px 4px"><div style="height:160px;position:relative"><canvas id="zChart_' + type.replace(/[^a-zA-Z0-9]/g,'_') + '"></canvas></div></div>' : '') +
       '<div class="table-wrap"><table>' +
-      '<thead><tr><th>Datum</th><th>Typ</th><th>Zählerstand</th><th>Einheit</th><th>Verbrauch</th><th>Notiz</th><th></th></tr></thead>' +
+      '<thead><tr><th>Datum</th><th>Uhrzeit</th><th>Typ</th><th>Zählerstand</th><th>Einheit</th><th>Verbrauch</th><th>Notiz</th><th></th></tr></thead>' +
       '<tbody>' + rowsHtml + '</tbody></table></div>' + monthlyHtml + '</div>';
   }).join('');
 
@@ -7553,6 +7555,7 @@ function openZaehlerModal() {
   const modal = document.getElementById('zaehlerModal');
   if (!modal) return;
   document.getElementById('zm_date').value  = today();
+  const zmTime = document.getElementById('zm_time'); if (zmTime) zmTime.value = nowTime();
   document.getElementById('zm_type').value  = 'Strom';
   document.getElementById('zm_value').value = '';
   document.getElementById('zm_note').value  = '';
@@ -7576,10 +7579,11 @@ function saveZaehlerModal() {
   const einheitCustom = document.getElementById('zm_einheit_custom')?.value || '';
   const value   = +(document.getElementById('zm_value').value) || 0;
   const date    = document.getElementById('zm_date').value;
+  const time    = document.getElementById('zm_time')?.value || nowTime();
   const note    = document.getElementById('zm_note').value;
   if (!value) { uiAlert('Bitte Zählerstand eingeben.'); return; }
   state.zaehler.push({
-    id: uid(), date, value, note,
+    id: uid(), date, time, value, note,
     type:    type    === 'Sonstiges' ? typeCustom    || 'Sonstiges' : type,
     einheit: einheit === 'Sonstiges' ? einheitCustom || 'Sonstiges' : einheit,
   });

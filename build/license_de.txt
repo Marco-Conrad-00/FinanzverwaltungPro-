@@ -1,0 +1,30 @@
+Willkommen bei Finanzverwaltung Pro
+Bitte lies die folgenden Hinweise sorgfältig durch, bevor du die App nutzt.
+
+Zweck der App
+Finanzverwaltung Pro dient der privaten Verwaltung und Übersicht deiner Finanzen. Die App unterstützt dich dabei, Einnahmen, Ausgaben, Budgets, Kontostände und finanzielle Entwicklungen besser nachzuvollziehen. Sie dient ausschließlich der persönlichen Orientierung.
+
+Keine Anlage-, Steuer- oder Rechtsberatung
+Finanzverwaltung Pro stellt keine Anlageberatung, Steuerberatung, Rechtsberatung oder sonstige verbindliche Beratung dar. Alle Auswertungen, Übersichten, Budgets, Prognosen und Berechnungen basieren auf den von dir eingegebenen Daten und dienen ausschließlich der privaten Information. Sie stellen keine Empfehlung dar, bestimmte Finanzprodukte zu kaufen oder zu verkaufen, Verträge abzuschließen oder konkrete finanzielle Entscheidungen zu treffen.
+
+Keine Gewähr
+Alle Berechnungen und Auswertungen erfolgen nach bestem Wissen, jedoch ohne Gewähr auf Richtigkeit, Vollständigkeit oder Aktualität. Die Verantwortung für die eingegebenen Daten sowie deren Nutzung liegt vollständig bei dir.
+
+Datenschutz und lokale Speicherung
+Deine Daten werden lokal auf deinem Gerät gespeichert. Es erfolgt keine automatische Übertragung deiner Finanzdaten an Dritte, keine Cloud-Synchronisierung und keine serverseitige Verarbeitung durch Finanzverwaltung Pro. Bitte beachte, dass du selbst für den Schutz deines Geräts und deiner gespeicherten Daten verantwortlich bist.
+
+Datensicherung und Geräteschutz
+Da deine Daten lokal gespeichert werden, bist du selbst für regelmäßige Sicherungen verantwortlich. Bitte erstelle bei Bedarf Backups und stelle sicher, dass dein Gerät ausreichend geschützt ist, zum Beispiel durch ein sicheres Benutzerkonto, Passwort, Virenschutz und regelmäßige Systemupdates.
+
+Import und Export von Daten
+Sofern du Daten importierst oder exportierst, bist du selbst dafür verantwortlich, die Richtigkeit der Daten zu prüfen und exportierte Dateien sicher aufzubewahren.
+
+Verfügbarkeit und Änderungen
+Es wird keine Garantie übernommen, dass die App jederzeit fehlerfrei, vollständig oder dauerhaft verfügbar ist. Funktionen können im Rahmen von Updates geändert, erweitert oder entfernt werden.
+
+Nutzung auf eigenes Risiko
+Die Nutzung von Finanzverwaltung Pro erfolgt auf eigenes Risiko. Für finanzielle Entscheidungen, fehlerhafte Eingaben, unvollständige Daten, Datenverluste oder sonstige Schäden, die durch die Nutzung der App entstehen, wird keine Haftung übernommen.
+
+Mit der Nutzung der App bestätigst du, dass du diese Hinweise gelesen und verstanden hast.
+
+Stand: Juli 2026

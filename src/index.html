@@ -206,7 +206,10 @@
         <input type="text" id="sm_kunde" placeholder="z.B. Robert Bosch GmbH" />
       </label>
       <label class="field">Auslagen (€)
-        <input type="number" id="sm_auslagen" step="0.01" value="0" />
+        <span style="display:flex;gap:6px;align-items:center">
+          <input type="number" id="sm_auslagen" step="0.01" value="0" style="flex:1" />
+          <button type="button" class="btn-icon" title="Taschenrechner" onclick="openCalc('sm_auslagen')">🧮</button>
+        </span>
       </label>
       <label class="field">Notiz
         <input type="text" id="sm_note" placeholder="Optional…" />
@@ -262,6 +265,7 @@
     <div class="modal-title">Neuer Zählerstand</div>
     <div class="form-grid form-grid-2">
       <label class="field">Datum <input type="date" id="zm_date" /></label>
+      <label class="field">Uhrzeit <input type="time" id="zm_time" /></label>
       <label class="field">Zählertyp
         <select id="zm_type" onchange="updateZaehlerModalEinheit()">
           <option>Strom</option><option>Warmwasser</option><option>Kaltwasser</option>

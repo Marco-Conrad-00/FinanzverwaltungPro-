@@ -1,8 +1,7 @@
 {
  "version": "2026-01-01",
  "stand": "BMF-Schreiben vom 05.12.2025, gültig ab 01.01.2026",
- "quelle": "https://www.bundesfinanzministerium.de/Content/DE/Downloads/BMF_Schreiben/Steuerarten/Lohnsteuer/2025-12-05-steuerliche-behandlung-reisekosten-2026.pdf",
- "hinweis": "Für nicht aufgeführte Länder gilt der Pauschbetrag für Luxemburg. 'ganz' = ab 24 Std., 'halb' = An-/Abreisetag bzw. über 8 Std.",
+ "quelle": "https://www.bundesfinanzministerium.de/",
  "laender": [
   {
    "land": "Albanien",
