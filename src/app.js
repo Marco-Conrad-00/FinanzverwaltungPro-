@@ -7455,19 +7455,38 @@ function zaehler() {
       const typeOpts = ['Strom','Warmwasser','Kaltwasser','Wasser allgemein','Sonstiges'].map(t =>
         '<option value="' + t + '"' + (t===z.type?' selected':'') + '>' + t + '</option>').join('');
       return '<tr id="zaeh_' + z.id + '">' +
-        '<td><input type="date" value="' + (z.date||'') + '" onchange="updateZaehler(' + z.id + ',\'date\',this.value)" style="width:135px"/></td>' +
-        '<td><input type="time" value="' + (z.time||'') + '" onchange="updateZaehler(' + z.id + ',\'time\',this.value)" style="width:95px"/></td>' +
-        '<td><select onchange="updateZaehler(' + z.id + ',\'type\',this.value)" style="width:140px">' + typeOpts + '</select></td>' +
-        '<td><input type="number" value="' + (z.value||0) + '" step="0.001" onchange="updateZaehler(' + z.id + ',\'value\',+this.value)" style="width:100px;text-align:right"/></td>' +
-        '<td><select onchange="updateZaehlerEinheit(' + z.id + ',this.value)" style="width:90px">' + einheitOpts + '</select>' +
-        (z.einheitCustom ? '<input type="text" value="' + z.einheitCustom + '" onchange="updateZaehler(' + z.id + ',\'einheitCustom\',this.value)" style="width:80px;margin-left:4px" placeholder="Einheit…"/>' : '') +
+        '<td><input type="date" value="' + (z.date||'') + '" onchange="updateZaehler(\'' + z.id + '\',\'date\',this.value)" style="width:135px"/></td>' +
+        '<td><input type="time" value="' + (z.time||'') + '" onchange="updateZaehler(\'' + z.id + '\',\'time\',this.value)" style="width:95px"/></td>' +
+        '<td><select onchange="updateZaehler(\'' + z.id + '\',\'type\',this.value)" style="width:140px">' + typeOpts + '</select></td>' +
+        '<td><input type="number" value="' + (z.value||0) + '" step="0.001" onchange="updateZaehler(\'' + z.id + '\',\'value\',+this.value)" style="width:100px;text-align:right"/></td>' +
+        '<td><select onchange="updateZaehlerEinheit(\'' + z.id + '\',this.value)" style="width:90px">' + einheitOpts + '</select>' +
+        (z.einheitCustom ? '<input type="text" value="' + z.einheitCustom + '" onchange="updateZaehler(\'' + z.id + '\',\'einheitCustom\',this.value)" style="width:80px;margin-left:4px" placeholder="Einheit…"/>' : '') +
         '</td>' +
         '<td class="amount ' + (diff !== null ? (diff >= 0 ? 'positive' : 'negative') : '') + '">' +
         (diff !== null ? (diff >= 0 ? '+' : '') + fmt(diff) + ' ' + einheit : '–') + '</td>' +
-        '<td><input type="text" value="' + (z.note||'') + '" onchange="updateZaehler(' + z.id + ',\'note\',this.value)" placeholder="Notiz…"/></td>' +
-        '<td><button class="btn-icon danger" onclick="deleteZaehler(' + z.id + ')">×</button></td>' +
+        '<td><input type="text" value="' + (z.note||'') + '" onchange="updateZaehler(\'' + z.id + '\',\'note\',this.value)" placeholder="Notiz…"/></td>' +
+        '<td><button class="btn-icon danger" onclick="deleteZaehler(\'' + z.id + '\')">×</button></td>' +
         '</tr>';
     }).join('');
+
+    // Schnell-Eingabezeile am Ende der Tabelle (neuen Stand eintragen ohne hochzuscrollen)
+    const zTypeKey = type.replace(/[^a-zA-Z0-9]/g, '_');
+    const zLastEinheit = rows[rows.length-1]?.einheit || (type === 'Strom' ? 'kWh' : 'm³');
+    const addRowHtml =
+      '<tr class="zaehler-add-row" style="background:var(--surface)">' +
+      '<td><input type="date" id="zadd_date_' + zTypeKey + '" value="' + today() + '" style="width:135px"/></td>' +
+      '<td><input type="time" id="zadd_time_' + zTypeKey + '" value="' + nowTime() + '" style="width:95px"/></td>' +
+      '<td style="color:var(--muted);font-size:11px;font-weight:600">Neuer Stand</td>' +
+      '<td><input type="number" id="zadd_val_' + zTypeKey + '" step="0.001" placeholder="Wert…" style="width:100px;text-align:right" ' +
+        'onkeydown="if(event.key===\'Enter\'){document.getElementById(\'zaddbtn_' + zTypeKey + '\').click();}"/></td>' +
+      '<td style="color:var(--muted);font-size:11px">' + zLastEinheit + '</td>' +
+      '<td></td>' +
+      '<td><input type="text" id="zadd_note_' + zTypeKey + '" placeholder="Notiz…" ' +
+        'onkeydown="if(event.key===\'Enter\'){document.getElementById(\'zaddbtn_' + zTypeKey + '\').click();}"/></td>' +
+      '<td><button id="zaddbtn_' + zTypeKey + '" class="btn-icon" style="color:#0f766e;font-weight:800;font-size:18px" ' +
+        'data-ztype="' + encodeURIComponent(type) + '" data-zeinheit="' + encodeURIComponent(zLastEinheit) + '" data-zkey="' + zTypeKey + '" ' +
+        'onclick="quickAddZaehler(this)" title="Zählerstand hinzufügen">+</button></td>' +
+      '</tr>';
     // Monatliche Aufschlüsselung
     const monthly = zaehlerMonthlyBreakdown(rows);
     const monthKeys = Object.keys(monthly).sort();
@@ -7484,7 +7503,7 @@ function zaehler() {
       (rows.length >= 2 ? '<div style="padding:14px 14px 4px"><div style="height:160px;position:relative"><canvas id="zChart_' + type.replace(/[^a-zA-Z0-9]/g,'_') + '"></canvas></div></div>' : '') +
       '<div class="table-wrap"><table>' +
       '<thead><tr><th>Datum</th><th>Uhrzeit</th><th>Typ</th><th>Zählerstand</th><th>Einheit</th><th>Verbrauch</th><th>Notiz</th><th></th></tr></thead>' +
-      '<tbody>' + rowsHtml + '</tbody></table></div>' + monthlyHtml + '</div>';
+      '<tbody>' + rowsHtml + addRowHtml + '</tbody></table></div>' + monthlyHtml + '</div>';
   }).join('');
 
   const yearsAvail = (typeof listYears==='function' ? listYears() : []).filter(y => y !== getSelectedYear());
@@ -7724,6 +7743,28 @@ function updateZaehler(id,f,v){
   if (!requireUnlocked()) return;const z=state.zaehler.find(x=>String(x.id) === String(id));if(z){z[f]=v;saveData();}}
 function deleteZaehler(id){
   if (!requireUnlocked()) return; if(moveToTrash('zaehler', id, 'Zählerstand')) { renderPage(); showToast('In Papierkorb verschoben','info'); } }
+function quickAddZaehler(btn){
+  if (!requireUnlocked()) return;
+  const type    = decodeURIComponent(btn.dataset.ztype || '');
+  const einheit = decodeURIComponent(btn.dataset.zeinheit || '');
+  const key     = btn.dataset.zkey;
+  const dateEl  = document.getElementById('zadd_date_' + key);
+  const timeEl  = document.getElementById('zadd_time_' + key);
+  const valEl   = document.getElementById('zadd_val_'  + key);
+  const noteEl  = document.getElementById('zadd_note_' + key);
+  const value   = +(valEl && valEl.value) || 0;
+  if (!value) { showToast('Bitte Zählerstand eingeben','error'); if (valEl) valEl.focus(); return; }
+  state.zaehler.push({
+    id: uid(),
+    date: (dateEl && dateEl.value) || today(),
+    time: (timeEl && timeEl.value) || nowTime(),
+    value,
+    note: (noteEl && noteEl.value) || '',
+    type,
+    einheit,
+  });
+  saveData(); renderPage(); showToast('Zählerstand hinzugefügt');
+}
 
 // ── PAGE: PDF IMPORT ──────────────────────────────────────────────────────
 
@@ -9828,6 +9869,7 @@ window.onZmEinheitChange         = onZmEinheitChange;
 window.updateZaehlerEinheit      = updateZaehlerEinheit;
 window.updateZaehler             = updateZaehler;
 window.deleteZaehler             = deleteZaehler;
+window.quickAddZaehler           = quickAddZaehler;
 
 // Eigene Tabellen
 window.addTab            = addTab;
