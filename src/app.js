@@ -162,6 +162,17 @@ let _snoozedReminders = {};
 // Format je Eintrag: { v: 'Version', date: 'YYYY-MM-DD', changes: ['...','...'] }
 // Änderungen dürfen mit **Fett** Markierung versehen werden.
 const CHANGELOG = [
+  { v: '1.0.40', date: '2026-09-02', changes: [
+    '**Änderungsverlauf korrigiert** – Der „Was ist neu"-Dialog zeigt jetzt wieder die tatsächliche App-Version. Die zuvor fehlenden Einträge zu den Versionen 1.0.38 und 1.0.39 wurden nachgetragen und werden ab sofort bei jedem Update mitgepflegt.',
+  ]},
+  { v: '1.0.39', date: '2026-09-02', changes: [
+    '**Neue Zählerstände lassen sich wieder löschen und bearbeiten** – ein Fehler verhinderte das Löschen und Ändern frisch angelegter Einträge; jetzt behoben (betrifft Datum, Uhrzeit, Typ, Wert, Einheit und Notiz)',
+    '**Schnell-Eingabezeile am Ende jeder Zählerstand-Tabelle**: neuen Stand direkt unten eintragen – Datum und Uhrzeit sind vorbelegt, Typ und Einheit werden automatisch übernommen. Kein Scrollen nach oben mehr; Speichern per Enter oder „+"-Knopf.',
+  ]},
+  { v: '1.0.38', date: '2026-07-30', changes: [
+    '**Uhrzeit bei Zählerständen** – neben dem Datum lässt sich jetzt auch eine Uhrzeit erfassen (automatisch vorbelegt) und in der Tabelle direkt bearbeiten',
+    '**Taschenrechner bei Spesen** – neben „Ausgaben" und „Auslagen" sowie im Reise-Dialog öffnet ein 🧮-Knopf den Rechner, übernimmt den Feldwert als Startwert und schreibt das Ergebnis zurück',
+  ]},
   { v: '1.0.37', date: '2026-07-24', changes: [
     '**Finanzprodukte lassen sich jetzt bearbeiten** – bisher konnte man Einträge nur anlegen oder löschen',
     '**Neuer Knopf „+ Stand"**: erfasst einen neuen Stichtag für ein bestehendes Produkt. Die Stammdaten werden übernommen, nur Datum und Werte sind neu einzutragen – so wächst die Historie',
