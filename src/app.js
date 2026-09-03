@@ -38,7 +38,7 @@ let chartInstances = {};
 // V3 schema: per-year data partitioned into state.years[year]
 // Old code still accesses state.einkaeufe etc. - these are proxied via Object.defineProperty
 
-const YEAR_FIELDS = ['incomeByMonth','einkaeufe','ausgaben','einnahmen','regelEinnahmen','spesen','fixkosten','sparen','zaehler','tabellen','finanzprodukte','umbuchungen'];
+const YEAR_FIELDS = ['incomeByMonth','einkaeufe','ausgaben','einnahmen','regelEinnahmen','spesen','erstattungen','fixkosten','sparen','zaehler','tabellen','finanzprodukte','umbuchungen'];
 
 function emptyIncomeByMonth(year) {
   const obj = {};
@@ -162,6 +162,10 @@ let _snoozedReminders = {};
 // Format je Eintrag: { v: 'Version', date: 'YYYY-MM-DD', changes: ['...','...'] }
 // Änderungen dürfen mit **Fett** Markierung versehen werden.
 const CHANGELOG = [
+  { v: '1.0.41', date: '2026-09-02', changes: [
+    '**Neuer Bereich „Auslagen & Erstattungen"** unter Spesen & Reisen – für verauslagtes Geld, das dir erstattet wird (z.B. Öl oder Tanken für den Firmenwagen). Erfasse Datum, Beschreibung, Kategorie und Betrag und markiere je Eintrag „offen" oder „erstattet" (mit Erstattungsdatum).',
+    '**Kennzahl „Offene Erstattungen"**: zeigt auf einen Blick, wie viel Geld dir noch erstattet werden muss. Diese Auslagen sind reine Durchlaufposten und verfälschen deine Einnahmen/Ausgaben nicht.',
+  ]},
   { v: '1.0.40', date: '2026-09-02', changes: [
     '**Änderungsverlauf korrigiert** – Der „Was ist neu"-Dialog zeigt jetzt wieder die tatsächliche App-Version. Die zuvor fehlenden Einträge zu den Versionen 1.0.38 und 1.0.39 wurden nachgetragen und werden ab sofort bei jedem Update mitgepflegt.',
   ]},
@@ -574,6 +578,7 @@ function createEmptyYearData(year) {
     einnahmen: [],
     regelEinnahmen: [],
     spesen: [],
+    erstattungen: [],
     fixkosten: [],
     sparen: [],
     zaehler: [],
@@ -3437,7 +3442,105 @@ function spesen() {
     <div class="mt-2" style="font-size:11px;color:var(--muted)">
       ½ Tag = An-/Abreise · Ganzer Tag = voller Reisetag · Frühstück/Mittag/Abend reduziert den Tagessatz
     </div>
-  </div>`;
+  </div>
+  ${erstattungenCard()}`;
+}
+
+// ── AUSLAGEN & ERSTATTUNGEN (verauslagtes Geld, das erstattet wird) ──────────
+// Eigene Liste, nicht an eine Reise gebunden. Durchlaufposten: zählt NICHT als
+// Einnahme/Ausgabe – nur "offene Erstattungen" werden als offener Betrag gezeigt.
+const ERSTATTUNG_CATS = ['Firmenwagen','Material','Büro','Reise','Bewirtung','Sonstiges'];
+
+function erstattungenCard() {
+  const list = [...(state.erstattungen||[])].sort((a,b) => {
+    // offen zuerst, dann nach Datum absteigend
+    if ((a.status==='offen') !== (b.status==='offen')) return a.status==='offen' ? -1 : 1;
+    return (b.date||'').localeCompare(a.date||'');
+  });
+  const offen     = list.filter(e => e.status !== 'erstattet').reduce((s,e)=>s+(+e.amount||0),0);
+  const erstattet = list.filter(e => e.status === 'erstattet').reduce((s,e)=>s+(+e.amount||0),0);
+  const offenCount = list.filter(e => e.status !== 'erstattet').length;
+
+  const catOpts = (sel) => ERSTATTUNG_CATS.map(c =>
+    '<option value="' + c + '"' + (c===sel?' selected':'') + '>' + c + '</option>').join('');
+
+  const rowsHtml = list.map(e => {
+    const isErstattet = e.status === 'erstattet';
+    return '<tr>' +
+      '<td><input type="date" value="' + (e.date||'') + '" onchange="updateErstattung(\'' + e.id + '\',\'date\',this.value)" style="width:135px"/></td>' +
+      '<td><input type="text" value="' + (e.desc||'').replace(/"/g,'&quot;') + '" onchange="updateErstattung(\'' + e.id + '\',\'desc\',this.value)" placeholder="z.B. Öl Firmenwagen"/></td>' +
+      '<td><select onchange="updateErstattung(\'' + e.id + '\',\'category\',this.value)" style="width:130px">' + catOpts(e.category) + '</select></td>' +
+      '<td style="white-space:nowrap"><input type="number" value="' + (+e.amount||0).toFixed(2) + '" step="0.01" onchange="updateErstattung(\'' + e.id + '\',\'amount\',+this.value)" style="width:90px;text-align:right"/> ' + currencySymbol() + '</td>' +
+      '<td><select onchange="setErstattungStatus(\'' + e.id + '\',this.value)" style="width:110px">' +
+        '<option value="offen"' + (!isErstattet?' selected':'') + '>🟠 offen</option>' +
+        '<option value="erstattet"' + (isErstattet?' selected':'') + '>🟢 erstattet</option>' +
+      '</select></td>' +
+      '<td><input type="date" value="' + (e.erstattetAm||'') + '" onchange="updateErstattung(\'' + e.id + '\',\'erstattetAm\',this.value)" style="width:135px"' + (isErstattet?'':' disabled') + '/></td>' +
+      '<td><input type="text" value="' + (e.note||'').replace(/"/g,'&quot;') + '" onchange="updateErstattung(\'' + e.id + '\',\'note\',this.value)" placeholder="Notiz…"/></td>' +
+      '<td><button class="btn-icon danger" onclick="deleteErstattung(\'' + e.id + '\')" ' + lockAttr() + '>×</button></td>' +
+      '</tr>';
+  }).join('');
+
+  const addRow =
+    '<tr class="erstattung-add-row" style="background:var(--surface)">' +
+    '<td><input type="date" id="erad_date" value="' + today() + '" style="width:135px"/></td>' +
+    '<td><input type="text" id="erad_desc" placeholder="z.B. Öl Firmenwagen" ' +
+      'onkeydown="if(event.key===\'Enter\'){document.getElementById(\'eraddbtn\').click();}"/></td>' +
+    '<td><select id="erad_cat" style="width:130px">' + catOpts('Firmenwagen') + '</select></td>' +
+    '<td style="white-space:nowrap"><input type="number" id="erad_amount" step="0.01" placeholder="0,00" style="width:90px;text-align:right" ' +
+      'onkeydown="if(event.key===\'Enter\'){document.getElementById(\'eraddbtn\').click();}"/> ' + currencySymbol() + '</td>' +
+    '<td style="color:var(--muted);font-size:11px">🟠 offen</td>' +
+    '<td></td>' +
+    '<td><input type="text" id="erad_note" placeholder="Notiz…" ' +
+      'onkeydown="if(event.key===\'Enter\'){document.getElementById(\'eraddbtn\').click();}"/></td>' +
+    '<td><button id="eraddbtn" class="btn-icon" style="color:#0f766e;font-weight:800;font-size:18px" onclick="quickAddErstattung()" ' + lockAttr() + ' title="Auslage hinzufügen">+</button></td>' +
+    '</tr>';
+
+  return '<div class="card">' +
+    '<div class="card-header"><h3>💶 Auslagen & Erstattungen</h3>' +
+      '<span class="badge badge-muted">' + list.length + ' Einträge</span></div>' +
+    '<div style="font-size:11px;color:var(--muted);margin:-6px 0 12px">' +
+      'Verauslagtes Geld, das dir erstattet wird (z.B. Öl/Tanken Firmenwagen). Reine Durchlaufposten – zählen nicht als Einnahme/Ausgabe.' +
+    '</div>' +
+    '<div class="kpi-grid kpi-grid-3" style="margin-bottom:14px">' +
+      '<div class="kpi"><div class="kpi-label">Offene Erstattungen</div><div class="kpi-value ' + (offen>0?'negative':'') + '">' + fmtEur(offen) + '</div><div class="kpi-sub">' + offenCount + ' offen</div></div>' +
+      '<div class="kpi"><div class="kpi-label">Bereits erstattet</div><div class="kpi-value positive">' + fmtEur(erstattet) + '</div></div>' +
+    '</div>' +
+    '<div class="table-wrap"><table>' +
+    '<thead><tr><th>Datum</th><th>Beschreibung</th><th>Kategorie</th><th style="text-align:right">Betrag</th><th>Status</th><th>Erstattet am</th><th>Notiz</th><th></th></tr></thead>' +
+    '<tbody>' + rowsHtml + addRow + '</tbody></table></div>' +
+    '</div>';
+}
+
+function quickAddErstattung() {
+  if (!requireUnlocked()) return;
+  const dateV  = (document.getElementById('erad_date') && document.getElementById('erad_date').value) || today();
+  const desc   = (document.getElementById('erad_desc') && document.getElementById('erad_desc').value) || '';
+  const cat    = (document.getElementById('erad_cat') && document.getElementById('erad_cat').value) || 'Sonstiges';
+  const amount = +(document.getElementById('erad_amount') && document.getElementById('erad_amount').value) || 0;
+  const note   = (document.getElementById('erad_note') && document.getElementById('erad_note').value) || '';
+  if (!amount) { showToast('Bitte Betrag eingeben','error'); const a=document.getElementById('erad_amount'); if(a)a.focus(); return; }
+  state.erstattungen = state.erstattungen || [];
+  state.erstattungen.push({ id: uid(), date: dateV, desc, category: cat, amount, status: 'offen', erstattetAm: '', note });
+  saveData(); renderPage(); showToast('Auslage hinzugefügt');
+}
+function updateErstattung(id, f, v) {
+  if (!requireUnlocked()) return;
+  const e = (state.erstattungen||[]).find(x => String(x.id) === String(id));
+  if (e) { e[f] = v; saveData(); }
+}
+function setErstattungStatus(id, status) {
+  if (!requireUnlocked()) return;
+  const e = (state.erstattungen||[]).find(x => String(x.id) === String(id));
+  if (!e) return;
+  e.status = status;
+  if (status === 'erstattet' && !e.erstattetAm) e.erstattetAm = today();
+  if (status !== 'erstattet') e.erstattetAm = '';
+  saveData(); renderPage();
+}
+function deleteErstattung(id) {
+  if (!requireUnlocked()) return;
+  if (moveToTrash('erstattungen', id, 'Auslage/Erstattung')) { renderPage(); showToast('In Papierkorb verschoben','info'); }
 }
 
 // Ermittelt die gültigen Sätze für eine Reise. Maßgeblich sind Land und
@@ -6248,6 +6351,7 @@ async function clearAllData() {
   state.einnahmen       = [];
   state.regelEinnahmen  = [];
   state.spesen          = [];
+  state.erstattungen    = [];
   state.sparen          = [];
   state.zaehler         = [];
   state.fixkosten       = [];
@@ -9814,6 +9918,10 @@ window.updateSpeseDate   = updateSpeseDate;
 window.updateSpeseCountry= updateSpeseCountry;
 window.deleteSpese       = deleteSpese;
 window.pickSpeseKonto    = pickSpeseKonto;
+window.quickAddErstattung = quickAddErstattung;
+window.updateErstattung   = updateErstattung;
+window.setErstattungStatus = setErstattungStatus;
+window.deleteErstattung   = deleteErstattung;
 window.recalcSpeseRow    = recalcSpeseRow;
 
 // Fixkosten
