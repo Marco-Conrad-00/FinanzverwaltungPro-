@@ -162,6 +162,12 @@ let _snoozedReminders = {};
 // Format je Eintrag: { v: 'Version', date: 'YYYY-MM-DD', changes: ['...','...'] }
 // Änderungen dürfen mit **Fett** Markierung versehen werden.
 const CHANGELOG = [
+  { v: '1.0.44', date: '2026-09-11', changes: [
+    '**Jahreswechsel-Assistent stark erweitert** – Beim Anlegen eines neuen Jahres kannst du jetzt zusätzlich übernehmen: **Konten** (mit Endständen), **Zählerstände** (letzter Stand je Typ als Startpunkt), **Sparen & Depot** (aktueller Bestand als Snapshot, zählt nicht als neuer Cashflow) und **wiederkehrende Umbuchungen**. Fixkosten und wiederkehrende Einnahmen wie gehabt.',
+    '**Abfragen nach dem Jahreswechsel** – auf Wunsch: aktuelle **Zählerstände** direkt eintragen, je **Sparplan** bestätigen ob er weiterläuft, und am Ende die **Jahresübersicht des Vorjahres als PDF** erstellen.',
+    '**Behoben:** Das Vorjahres-Startguthaben wird beim Jahreswechsel jetzt immer korrekt aus dem Endstand berechnet – auch wenn das Vorjahr gerade nicht ausgewählt ist.',
+    '**Behoben:** Das bei der Ersteinrichtung eingegebene Startgeld wird jetzt tatsächlich als Startguthaben gespeichert (wurde vorher verworfen).',
+  ]},
   { v: '1.0.43', date: '2026-09-11', changes: [
     '**Viele neue Kategorien** – Die Auswahl bei Ausgaben, Einnahmen und Verkauf wurde deutlich erweitert (z.B. Tanken, Strom/Gas/Wasser, Internet & Telefon, Reisen, Sport & Fitness, Geschenke, Bankgebühren; bei Einnahmen u.a. Bonus, Zinsen & Dividenden, Cashback, Erstattung; bei Verkauf u.a. Facebook Marketplace, momox/reBuy, Flohmarkt). Eigene Kategorien kannst du weiterhin unter Einstellungen → „Kategorien verwalten" ergänzen.',
     '**Positionen direkt beim Erfassen** – Im „Was ist neu?"-Dialog gibt es bei Ausgaben und Einkäufen jetzt „⊞ In Positionen aufteilen": du legst eine Buchung samt Unterpositionen in einem Schritt an, der Betrag ergibt sich automatisch aus der Summe. Kein Umweg mehr über die Liste.',
@@ -1950,73 +1956,165 @@ function closeNewYearModal() {
   if (modal) modal.classList.add('hidden');
 }
 
-function confirmNewYear() {
+// Snapshot der Vorjahres-Bestände (Depot + Bargeld-Sparen) als "Bestand"-Einträge
+// fürs neue Jahr. Wertpapiere: Netto-Stückzahl je Symbol, bewertet mit letztem Kurs
+// (sonst Ø-Kaufpreis). Bargeld/Tagesgeld etc.: Netto-Betrag je Kategorie+Depot.
+// txType 'bestand' + skipCashflow: zählt NICHT als neuer Geldfluss.
+function buildDepotSnapshot(prev, ny) {
+  const src = (state.years[prev] && state.years[prev].sparen) || [];
+  const kurse = state.etfKurse || {};
+  const secs = {}, cash = {};
+  src.forEach(s => {
+    const wp = s.wertpapier || s.etf;
+    const sym = wp && (wp.symbol || wp.ticker);
+    if (sym && typeof s.units === 'number') {
+      if (!secs[sym]) secs[sym] = { units: 0, invested: 0,
+        wp: { symbol: sym, name: wp.name || sym, isin: wp.isin || '', wkn: wp.wkn || '', typ: wp.typ || 'etf' },
+        kategorie: s.kategorie || 'ETF', depot: s.depot || '' };
+      secs[sym].units += (+s.units || 0);
+      secs[sym].invested += (+s.amount || 0);
+    } else {
+      const key = (s.kategorie || 'Sonstiges') + '|' + (s.depot || '');
+      if (!cash[key]) cash[key] = { amount: 0, kategorie: s.kategorie || 'Sonstiges', depot: s.depot || '' };
+      cash[key].amount += (+s.amount || 0);
+    }
+  });
+  const out = [], m = ny + '-01', d = ny + '-01-01';
+  Object.values(secs).forEach(p => {
+    if (Math.abs(p.units) < 1e-9) return;
+    const k = kurse[p.wp.symbol];
+    const price = (k && k.kurs) ? k.kurs : (p.units ? p.invested / p.units : 0);
+    out.push({ id: uid(), month: m, date: d, kategorie: p.kategorie, depot: p.depot,
+      wertpapier: p.wp, etf: { name: p.wp.name, ticker: p.wp.symbol, isin: p.wp.isin, wkn: p.wp.wkn },
+      txType: 'bestand', skipCashflow: true, units: Math.round(p.units * 1e6) / 1e6,
+      price: Math.round(price * 100) / 100, amount: Math.round(p.units * price * 100) / 100,
+      note: 'Bestand aus ' + prev });
+  });
+  Object.values(cash).forEach(c => {
+    if (Math.abs(c.amount) < 0.005) return;
+    out.push({ id: uid(), month: m, date: d, kategorie: c.kategorie, depot: c.depot,
+      txType: 'bestand', skipCashflow: true, amount: Math.round(c.amount * 100) / 100,
+      note: 'Bestand aus ' + prev });
+  });
+  return out;
+}
+
+async function confirmNewYear() {
   const inp = document.getElementById('newYear_input');
   const input = (inp?.value || '').trim();
   if (!input) { showToast('Bitte ein Jahr eingeben', 'error'); return; }
   const newYr = parseInt(input);
   if (!newYr || newYr < 2000 || newYr > 2100) { showToast('Ungültiges Jahr (2000–2100)', 'error'); return; }
   if (state.years[String(newYr)]) { showToast('Jahr ' + newYr + ' existiert bereits', 'error'); return; }
-  const takeBalance = document.getElementById('newYear_takeBalance')?.checked;
-  const takeFixkosten = document.getElementById('newYear_takeFixkosten')?.checked;
-  const takeRegel = document.getElementById('newYear_takeRegel')?.checked;
-  state.years[String(newYr)] = createEmptyYearData(newYr);
-  // Take over data from previous year based on checkboxes
+  const chk = id => !!(document.getElementById(id) && document.getElementById(id).checked);
+  const takeBalance = chk('newYear_takeBalance');
+  const takeFixkosten = chk('newYear_takeFixkosten');
+  const takeRegel = chk('newYear_takeRegel');
+  const takeKonten = chk('newYear_takeKonten');
+  const takeZaehler = chk('newYear_takeZaehler');
+  const takeSparen = chk('newYear_takeSparen');
+  const takeUmb = chk('newYear_takeUmbuchungen');
+  const askStaende = chk('newYear_askStaende');
+  const makePdf = chk('newYear_makePdf');
+
+  const ny = String(newYr);
   const prev = String(newYr - 1);
-  if (state.years[prev]) {
-    const prevYr = state.years[prev];
-    if (takeBalance) {
-      // Endstand Vorjahr über die konto-genaue Logik berechnen, sofern das
-      // Vorjahr gerade ausgewählt ist (kontoSaldo rechnet fürs ausgewählte Jahr).
-      // Sonst Fallback auf gespeicherten startBalance des Vorjahres.
-      if (String(getSelectedYear()) === prev) {
-        const sum = getKonten(prev).reduce((s,k) => s + kontoSaldo(k.id, prev + '-12'), 0);
-        state.years[String(newYr)].startBalance = Math.round(sum * 100) / 100;
-      } else {
-        state.years[String(newYr)].startBalance = +(prevYr.startBalance) || 0;
-      }
-    }
+  const prevYr = state.years[prev];
+  state.years[ny] = createEmptyYearData(newYr);
+
+  // Vorjahres-Endstände robust berechnen – unabhängig vom aktuell gewählten Jahr:
+  // temporär das Vorjahr "auswählen", damit kontoSaldo/getKonten dessen Daten lesen.
+  let prevKonten = [];
+  if (prevYr) {
+    const origSel = state.selectedYear;
+    try {
+      state.selectedYear = Number(prev);
+      prevKonten = getKonten(prev).map(k => ({ id: k.id, name: k.name, cashflow: k.cashflow, start: kontoSaldo(k.id, prev + '-12') }));
+    } finally { state.selectedYear = origSel; }
+  }
+  const prevEnd = Math.round(prevKonten.reduce((s, k) => s + (+k.start || 0), 0) * 100) / 100;
+
+  if (prevYr) {
+    if (takeBalance) state.years[ny].startBalance = prevEnd;
     if (takeFixkosten) {
-      state.years[String(newYr)].fixkosten = (prevYr.fixkosten||[]).map(f => ({
-        ...f, id: uid(),
-        start: String(newYr) + '-01',
-        end:   String(newYr) + '-12',
-      }));
+      state.years[ny].fixkosten = (prevYr.fixkosten || []).map(f => ({ ...f, id: uid(), start: ny + '-01', end: ny + '-12' }));
     }
     if (takeRegel) {
-      state.years[String(newYr)].regelEinnahmen = (prevYr.regelEinnahmen||[]).map(r => ({
-        ...r, id: uid(),
-        startMonth: String(newYr) + '-01',
-        endMonth: '',
-      }));
+      state.years[ny].regelEinnahmen = (prevYr.regelEinnahmen || []).map(r => ({ ...r, id: uid(), startMonth: ny + '-01', endMonth: '' }));
     }
-    const takeKonten = document.getElementById('newYear_takeKonten')?.checked;
-    if (takeKonten) {
-      // Konten übernehmen: Namen + Cashflow-Einstellung.
-      // Startwert = Endstand Vorjahr, ABER kontoSaldo() rechnet nur fürs aktuell
-      // ausgewählte Jahr. Nur wenn das ausgewählte Jahr das direkte Vorjahr ist,
-      // können wir die Endstände sauber berechnen; sonst Vorjahres-Startwerte
-      // übernehmen (Nutzer prüft/aktualisiert sie dann manuell – siehe Dialog-Hinweis).
-      const vorjahrKonten = getKonten(prev);
-      const kannBerechnen = (String(getSelectedYear()) === prev);
-      const neueKonten = vorjahrKonten.map(k => ({
-        id: k.id,
-        name: k.name,
-        cashflow: k.cashflow,
-        start: kannBerechnen ? kontoSaldo(k.id, prev + '-12') : (+k.start||0),
-      }));
-      state.years[String(newYr)].konten = neueKonten;
-      const sum = neueKonten.reduce((s,k) => s + (+k.start||0), 0);
-      state.years[String(newYr)].startBalance = Math.round(sum * 100) / 100;
-      // Gehalt/Nebenjob-Konto-Zuordnung des Vorjahres übernehmen
+    if (takeKonten && prevKonten.length) {
+      state.years[ny].konten = prevKonten.map(k => ({ id: k.id, name: k.name, cashflow: k.cashflow, start: +k.start || 0 }));
+      state.years[ny].startBalance = prevEnd;
       if (state.config && state.config.incomeKonten && state.config.incomeKonten[prev]) {
-        state.config.incomeKonten[String(newYr)] = { ...state.config.incomeKonten[prev] };
+        state.config.incomeKonten[ny] = { ...state.config.incomeKonten[prev] };
       }
     }
+    if (takeZaehler) {
+      // Letzten Stand je Zählertyp als Startpunkt ins neue Jahr übernehmen
+      const byType = {};
+      (prevYr.zaehler || []).slice().sort((a, b) => (a.date || '').localeCompare(b.date || '')).forEach(z => { byType[z.type] = z; });
+      state.years[ny].zaehler = Object.values(byType).map(z => ({
+        id: uid(), date: ny + '-01-01', time: '', type: z.type, value: z.value,
+        einheit: z.einheit, einheitCustom: z.einheitCustom, note: 'Übertrag ' + prev }));
+    }
+    if (takeSparen) {
+      state.years[ny].sparen = buildDepotSnapshot(prev, ny);
+    }
+    if (takeUmb) {
+      state.years[ny].umbuchungen = (prevYr.umbuchungen || []).filter(u => u.wiederkehrend).map(u => ({
+        ...u, id: uid(), month: ny + '-01', date: ny + '-01-01', endMonth: '' }));
+    }
   }
+
   closeNewYearModal();
   setSelectedYear(newYr);
   showToast('Jahr ' + newYr + ' angelegt');
+
+  // ── Optionale Abfragen nach dem Anlegen ──────────────────────────────────
+  // 1) Aktuelle Zählerstände eintragen
+  if (askStaende && takeZaehler && (state.years[ny].zaehler || []).length) {
+    const typen = [...new Set(state.years[ny].zaehler.map(z => z.type))];
+    for (const t of typen) {
+      const base = state.years[ny].zaehler.filter(z => z.type === t).slice(-1)[0];
+      const v = await uiPrompt({ title: 'Aktueller Zählerstand', message: 'Aktueller Stand für „' + t + '" zum Jahreswechsel (leer = überspringen):', placeholder: 'z.B. 12345', value: '' });
+      if (v !== null && String(v).trim() !== '' && !isNaN(+v)) {
+        state.years[ny].zaehler.push({ id: uid(), date: ny + '-01-01', time: nowTime(), type: t, value: +v, einheit: base ? base.einheit : '', einheitCustom: base ? base.einheitCustom : '', note: 'Jahreswechsel' });
+      }
+    }
+    saveData(); renderPage();
+  }
+
+  // 2) Sparpläne: laufen sie im neuen Jahr weiter?
+  if (takeFixkosten) {
+    const sps = (state.years[ny].fixkosten || []).filter(f => f.sparenLink);
+    for (const f of sps) {
+      const weiter = await uiConfirm({ title: 'Sparplan im neuen Jahr?', icon: '📈',
+        message: 'Läuft der Sparplan „' + (f.name || '—') + '" (' + fmtEur(f.amount) + ' / Monat) im Jahr ' + ny + ' weiter?',
+        okLabel: 'Ja, weiter', cancelLabel: 'Nein, entfernen' });
+      if (!weiter) state.years[ny].fixkosten = state.years[ny].fixkosten.filter(x => x.id !== f.id);
+    }
+    saveData(); renderPage();
+  }
+
+  // 3) Jahresübersicht des Vorjahres als PDF
+  if (makePdf && prevYr) {
+    const doPdf = await uiConfirm({ title: 'Jahresübersicht als PDF?', icon: '📄',
+      message: 'Für ' + prev + ' eine Jahresübersicht als PDF erstellen?', okLabel: 'PDF erstellen', cancelLabel: 'Nein danke' });
+    if (doPdf) {
+      try {
+        // Für den Bericht kurz aufs Vorjahr umschalten (Daten + Monatsliste), dann zurück.
+        const savedSel = state.selectedYear, savedMonths = allMonths2026.slice();
+        state.selectedYear = Number(prev);
+        allMonths2026.splice(0, allMonths2026.length, ...monthsBetween(prev + '-01', prev + '-12'));
+        const { rows, totals } = berichtDatenSammeln(prev);
+        const html = buildJahresberichtHTML(prev, state.meta.userName || 'Nutzer', totals, rows, { typ: 'jahresabschluss' });
+        state.selectedYear = savedSel;
+        allMonths2026.splice(0, allMonths2026.length, ...savedMonths);
+        if (window.EA && window.EA.printToPdf) { await window.EA.printToPdf({ html, filename: 'Jahresuebersicht_' + prev + '.pdf' }); showToast('PDF erstellt', 'info'); }
+        else { await uiAlert({ title: 'Nicht verfügbar', icon: '⚠', message: 'Der PDF-Export benötigt die Desktop-App.' }); }
+      } catch (e) { console.error('Jahres-PDF:', e); }
+    }
+  }
 }
 
 function onYearChange(val) {
@@ -9655,6 +9753,10 @@ function completeSetup() {
   state.meta.year = year;
   state.meta.startgeld = startgeld;
   state.meta.setupDone = true;
+  // Startgeld tatsächlich als Startguthaben des gewählten Jahres speichern
+  // (sonst überschreibt saveData meta.startgeld wieder mit dem 0-Wert des Jahres)
+  state.selectedYear = year; state.currentYear = year;
+  try { getYearData(String(year)).startBalance = startgeld; } catch(e) { console.error('Setup startBalance:', e); }
 
   // Update displayed name
   const un = document.getElementById('userName');

@@ -628,6 +628,34 @@
           <input type="checkbox" id="newYear_takeRegel" checked />
           <span>Wiederkehrende Einnahmen</span>
         </label>
+        <label style="display:flex;align-items:center;gap:8px;padding:4px 0;font-size:13px;cursor:pointer">
+          <input type="checkbox" id="newYear_takeKonten" checked />
+          <span>Konten (Namen + Endstände)</span>
+        </label>
+        <label style="display:flex;align-items:center;gap:8px;padding:4px 0;font-size:13px;cursor:pointer">
+          <input type="checkbox" id="newYear_takeZaehler" checked />
+          <span>Zählerstände (letzter Stand je Typ)</span>
+        </label>
+        <label style="display:flex;align-items:center;gap:8px;padding:4px 0;font-size:13px;cursor:pointer">
+          <input type="checkbox" id="newYear_takeSparen" checked />
+          <span>Sparen &amp; Depot (Bestand übernehmen)</span>
+        </label>
+        <label style="display:flex;align-items:center;gap:8px;padding:4px 0;font-size:13px;cursor:pointer">
+          <input type="checkbox" id="newYear_takeUmbuchungen" checked />
+          <span>Wiederkehrende Umbuchungen</span>
+        </label>
+      </div>
+      <div style="margin-top:12px;padding:12px;background:var(--surface);border-radius:8px;border:1px solid var(--border)">
+        <div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;margin-bottom:8px">Danach fragen</div>
+        <label style="display:flex;align-items:center;gap:8px;padding:4px 0;font-size:13px;cursor:pointer">
+          <input type="checkbox" id="newYear_askStaende" checked />
+          <span>Aktuelle Zählerstände eintragen</span>
+        </label>
+        <label style="display:flex;align-items:center;gap:8px;padding:4px 0;font-size:13px;cursor:pointer">
+          <input type="checkbox" id="newYear_makePdf" checked />
+          <span>Jahresübersicht (Vorjahr) als PDF</span>
+        </label>
+        <p style="font-size:11px;color:var(--muted);margin:6px 0 0">Sparpläne werden nach dem Anlegen einzeln abgefragt, ob sie weiterlaufen.</p>
       </div>
     </div>
     <div class="modal-footer">
