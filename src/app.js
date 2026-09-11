@@ -162,6 +162,12 @@ let _snoozedReminders = {};
 // Format je Eintrag: { v: 'Version', date: 'YYYY-MM-DD', changes: ['...','...'] }
 // Änderungen dürfen mit **Fett** Markierung versehen werden.
 const CHANGELOG = [
+  { v: '1.0.42', date: '2026-09-11', changes: [
+    '**Ausgaben & Einkäufe in Positionen aufteilen** – große Buchungen (z.B. „Urlaub") lassen sich in einzelne Unterpositionen (Datum, Bezeichnung, Betrag) zerlegen. Über den ⊞-Knopf in der Betrag-Spalte aufteilen; der Gesamtbetrag ist automatisch die Summe. Aufgeteilte Zeilen zeigen einen Pfeil ▸/▾ zum Auf-/Einklappen (Standard: eingeklappt).',
+    '**Gleiche zusammenfassen** – mehrere Buchungen anhaken und über „Ausgewählte zusammenfassen" zu einer Sammel-Buchung verbinden: du vergibst einen Titel, die Einzelbuchungen werden zu Positionen (mit ihrem Datum). Bereits aufgeteilte Buchungen werden dabei übernommen. Über „Wieder trennen" wird eine Sammel-Buchung jederzeit zurück in einzelne Buchungen zerlegt.',
+    '**Autovervollständigung** in den Namensfeldern von Ausgaben und Einkäufen: Während du tippst, schlägt die App passende frühere Einträge vor (aus allen Jahren); bei Einkäufen zusätzlich gängige Handelsketten.',
+    '**Depot-Analyse: Aufteilung nach Anlageklasse** – Die Analyse-Seite zeigt jetzt, wie sich dein Depotwert auf ETF, Einzelaktien, Fonds und Krypto verteilt (Balken + Tabelle mit Anteil und Gewinn/Verlust je Klasse).',
+  ]},
   { v: '1.0.41', date: '2026-09-02', changes: [
     '**Neuer Bereich „Auslagen & Erstattungen"** unter Spesen & Reisen – für verauslagtes Geld, das dir erstattet wird (z.B. Öl oder Tanken für den Firmenwagen). Erfasse Datum, Beschreibung, Kategorie und Betrag und markiere je Eintrag „offen" oder „erstattet" (mit Erstattungsdatum).',
     '**Kennzahl „Offene Erstattungen"**: zeigt auf einen Blick, wie viel Geld dir noch erstattet werden muss. Diese Auslagen sind reine Durchlaufposten und verfälschen deine Einnahmen/Ausgaben nicht.',
@@ -2971,17 +2977,20 @@ function buchungen() {
 function einkaeufe() {
   const items = state.einkaeufe.filter(e => e.month === currentMonth).sort((a,b) => (a.date||'').localeCompare(b.date||''));
   const total = items.reduce((s,e) => s+e.amount, 0);
+  const storeVorschlaege = (typeof SUPERMAERKTE !== 'undefined' ? SUPERMAERKTE.map(s => s.name) : []).concat(allYearsValues('einkaeufe','store'));
   return `${lockBanner()}
+    ${datalistHtml('einkaufStoreList', storeVorschlaege)}
     <div class="card">
     <div class="card-header">
       <h3>Einkäufe – ${monthLabel(currentMonth)}</h3>
       <div class="actions">
         <span class="badge badge-blue">Gesamt: ${fmtEur(total)}</span>
+        <button class="btn btn-ghost btn-sm" onclick="mergeSelected('einkaeufe')" title="Angehakte Einkäufe zu einer Sammel-Buchung zusammenfassen">Ausgewählte zusammenfassen</button>
         <button class="btn btn-primary btn-sm" onclick="openQuickAdd('einkauf')">+ Einkauf</button>
       </div>
     </div>
     <div class="table-wrap"><table>
-      <thead><tr><th>Datum</th><th>Händler / Beschreibung</th><th>Betrag</th><th>Konto</th><th></th></tr></thead>
+      <thead><tr><th style="width:28px"></th><th>Datum</th><th>Händler / Beschreibung</th><th>Betrag</th><th>Konto</th><th></th></tr></thead>
       <tbody id="einkaufTable">
         ${items.map(e => einkaufRow(e)).join('')}
 
@@ -2994,13 +3003,15 @@ function einkaufRow(e) {
   const _k = kontoById(e.kontoId || defaultKontoId());
   const _kn = _k ? _k.name : 'Konto';
   const _cf = _k ? _k.cashflow : true;
+  const editor = (expandedRows[e.id] && e.positionen && e.positionen.length) ? posEditorRow('einkaeufe', e, 6) : '';
   return `<tr id="eink_${e.id}">
+    <td style="text-align:center"><input type="checkbox" class="mergesel-einkaeufe" value="${e.id}" title="Zum Zusammenfassen auswählen"/></td>
     <td><input type="date" value="${e.date||''}" onchange="updateEinkauf('${e.id}','date',this.value)" style="width:145px" /></td>
-    <td><input type="text" value="${(e.store||'').replace(/"/g,'&quot;')}" onchange="updateEinkauf('${e.id}','store',this.value)" placeholder="Händler / Beschreibung…" /></td>
-    <td><input type="number" value="${(+e.amount||0).toFixed(2)}" onchange="updateEinkauf('${e.id}','amount',+this.value)" step="0.01" style="width:90px;text-align:right"/> ${currencySymbol()}</td>
+    <td><input type="text" value="${(e.store||'').replace(/"/g,'&quot;')}" list="einkaufStoreList" onchange="updateEinkauf('${e.id}','store',this.value)" placeholder="Händler / Beschreibung…" /></td>
+    ${amountCellPos('einkaeufe', e, 'updateEinkauf')}
     <td><button class="btn-icon" title="Konto: ${_kn} – klicken zum Ändern" onclick="pickEinkaufKonto('${e.id}')" style="width:auto;min-width:0;padding:0 8px;font-size:12px;white-space:nowrap;gap:4px">${_cf?'🏦':'📈'} ${_kn}</button></td>
     <td><button class="btn-icon danger" onclick="deleteEinkauf('${e.id}')">×</button></td>
-  </tr>`;
+  </tr>${editor}`;
 }
 
 function addEinkauf() {
@@ -3043,16 +3054,18 @@ function ausgaben() {
   const total = items.reduce((s,a) => s+a.amount, 0);
   const catOpts = EXPENSE_CATS.map(c => `<option value="${c}">${c}</option>`).join('');
   return `${lockBanner()}
+    ${datalistHtml('ausgabeDescList', allYearsValues('ausgaben','desc'))}
     <div class="card">
     <div class="card-header">
       <h3>Ausgaben – ${monthLabel(currentMonth)}</h3>
       <div class="actions">
         <span class="badge badge-amber">Gesamt: ${fmtEur(total)}</span>
+        <button class="btn btn-ghost btn-sm" onclick="mergeSelected('ausgaben')" title="Angehakte Ausgaben zu einer Sammel-Buchung zusammenfassen">Ausgewählte zusammenfassen</button>
         <button class="btn btn-primary btn-sm" onclick="openQuickAdd('ausgabe')">+ Ausgabe</button>
       </div>
     </div>
     <div class="table-wrap"><table>
-      <thead><tr><th>Datum</th><th>Beschreibung</th><th>Kategorie</th><th>Betrag</th><th>Konto</th><th></th></tr></thead>
+      <thead><tr><th style="width:28px"></th><th>Datum</th><th>Beschreibung</th><th>Kategorie</th><th>Betrag</th><th>Konto</th><th></th></tr></thead>
       <tbody id="ausgabeTable">
         ${items.map(a => ausgabeRow(a, catOpts)).join('')}
 
@@ -3078,14 +3091,16 @@ function ausgabeRow(a, catOpts) {
   const _k = kontoById(a.kontoId || defaultKontoId());
   const _kLabel = _k ? _k.name : 'Konto';
   const _kCf = _k ? _k.cashflow : true;
+  const editor = (expandedRows[a.id] && a.positionen && a.positionen.length) ? posEditorRow('ausgaben', a, 7) : '';
   return `<tr id="ausg_${a.id}">
+    <td style="text-align:center"><input type="checkbox" class="mergesel-ausgaben" value="${a.id}" title="Zum Zusammenfassen auswählen"/></td>
     <td><input type="date" value="${a.date||''}" onchange="updateAusgabe('${a.id}','date',this.value)" style="width:145px" /></td>
-    <td><input type="text" value="${a.desc||''}" onchange="updateAusgabe('${a.id}','desc',this.value)" placeholder="Beschreibung…" /></td>
+    <td><input type="text" value="${(a.desc||'').replace(/"/g,'&quot;')}" list="ausgabeDescList" onchange="updateAusgabe('${a.id}','desc',this.value)" placeholder="Beschreibung…" /></td>
     <td><select onchange="updateAusgabe('${a.id}','category',this.value)">${EXPENSE_CATS.map(c=>`<option value="${c}" ${c===a.category?'selected':''}>${c}</option>`).join('')}</select></td>
-    <td style="white-space:nowrap"><input type="number" value="${(+a.amount||0).toFixed(2)}" onchange="updateAusgabe('${a.id}','amount',+this.value)" step="0.01" style="width:90px;text-align:right" /> ${currencySymbol()}</td>
+    ${amountCellPos('ausgaben', a, 'updateAusgabe')}
     <td><button class="btn-icon" title="Konto: ${_kLabel}${_kCf?' (Cashflow)':' (Reserve)'} – klicken zum Ändern" onclick="pickAusgabeKonto('${a.id}')" style="width:auto;min-width:0;padding:0 8px;font-size:12px;white-space:nowrap;gap:4px">${_kCf?'🏦':'📈'} ${_kLabel}</button></td>
     <td><button class="btn-icon danger" onclick="deleteAusgabe('${a.id}')">×</button></td>
-  </tr>`;
+  </tr>${editor}`;
 }
 
 function addAusgabe() {
@@ -3107,6 +3122,168 @@ function updateAusgabe(id, f, v) {
 function deleteAusgabe(id) {
   if (!requireUnlocked()) return;
   if (moveToTrash('ausgaben', id, 'Ausgabe')) { renderPage(); showToast('In Papierkorb verschoben','info'); }
+}
+
+// ── POSITIONEN / AUFTEILUNG (für Ausgaben & Einkäufe) ───────────────────────
+// Eine Zeile kann optional in Unterpositionen (desc + Betrag) aufgeteilt werden.
+// Solange positionen existieren, ist o.amount die (gesperrte) Summe der Positionen –
+// dadurch bleiben Summen/Cashflow automatisch korrekt. Auf-/Zuklappen ist rein
+// visuell (expandedRows, nicht persistiert; Standard = eingeklappt).
+const expandedRows = {};
+function posSum(o) { return (o.positionen || []).reduce((s, p) => s + (+p.amount || 0), 0); }
+function syncPosAmount(o) { if (Array.isArray(o.positionen) && o.positionen.length) o.amount = Math.round(posSum(o) * 100) / 100; }
+function findPosItem(coll, id) { return (state[coll] || []).find(x => String(x.id) === String(id)); }
+function togglePos(coll, id) { expandedRows[id] = !expandedRows[id]; renderPage(); }
+function splitStart(coll, id) {
+  if (!requireUnlocked()) return;
+  const o = findPosItem(coll, id); if (!o) return;
+  const label = (o.desc || o.store || '').trim();
+  o.positionen = [{ desc: label || 'Position 1', amount: +o.amount || 0 }];
+  syncPosAmount(o); expandedRows[id] = true; saveData(); renderPage();
+}
+function addPosition(coll, id) {
+  if (!requireUnlocked()) return;
+  const o = findPosItem(coll, id); if (!o) return;
+  o.positionen = o.positionen || [];
+  o.positionen.push({ desc: '', amount: 0 });
+  syncPosAmount(o); expandedRows[id] = true; saveData(); renderPage();
+}
+function updatePosition(coll, id, idx, field, val) {
+  if (!requireUnlocked()) return;
+  const o = findPosItem(coll, id); if (!o || !o.positionen || !o.positionen[idx]) return;
+  o.positionen[idx][field] = val; syncPosAmount(o); saveData();
+  if (field === 'amount') renderPage();
+}
+function deletePosition(coll, id, idx) {
+  if (!requireUnlocked()) return;
+  const o = findPosItem(coll, id); if (!o || !o.positionen) return;
+  o.positionen.splice(idx, 1);
+  if (o.positionen.length) { syncPosAmount(o); }
+  else { o.amount = Math.round(posSum(o) * 100) / 100; delete o.positionen; expandedRows[id] = false; }
+  saveData(); renderPage();
+}
+function removeSplit(coll, id) {
+  if (!requireUnlocked()) return;
+  const o = findPosItem(coll, id); if (!o) return;
+  o.amount = Math.round(posSum(o) * 100) / 100; delete o.positionen; expandedRows[id] = false;
+  saveData(); renderPage();
+}
+// Baut die Betrag-Zelle: mit Positionen -> Summe + ▸/▾ Toggle; ohne -> Eingabe + ⊞
+function amountCellPos(coll, o, updateFn) {
+  const has = Array.isArray(o.positionen) && o.positionen.length > 0;
+  if (has) {
+    return '<td style="white-space:nowrap"><button class="btn-icon" onclick="togglePos(\'' + coll + '\',\'' + o.id + '\')" title="Positionen ein-/ausklappen" style="width:auto;min-width:0;padding:0 6px;font-size:12px;gap:5px">' +
+      (expandedRows[o.id] ? '▾' : '▸') + ' <span style="font-weight:600">' + fmtEur(posSum(o)) + '</span> <span style="color:var(--muted);font-size:11px">(' + o.positionen.length + ')</span></button></td>';
+  }
+  return '<td style="white-space:nowrap"><input type="number" value="' + (+o.amount || 0).toFixed(2) + '" onchange="' + updateFn + '(\'' + o.id + '\',\'amount\',+this.value)" step="0.01" style="width:90px;text-align:right"/> ' + currencySymbol() +
+    ' <button class="btn-icon" title="In Positionen aufteilen" onclick="splitStart(\'' + coll + '\',\'' + o.id + '\')" style="width:26px;height:26px;padding:0;font-size:13px">⊞</button></td>';
+}
+// Baut die aufgeklappte Positionen-Editor-Zeile (colspan über die ganze Tabelle)
+function posEditorRow(coll, o, colspan) {
+  const rows = (o.positionen || []).map((p, idx) =>
+    '<tr>' +
+    '<td style="padding:3px 6px"><input type="date" value="' + (p.date || '') + '" onchange="updatePosition(\'' + coll + '\',\'' + o.id + '\',' + idx + ',\'date\',this.value)" style="width:135px" title="Datum (optional)"/></td>' +
+    '<td style="padding:3px 6px"><input type="text" value="' + (p.desc || '').replace(/"/g, '&quot;') + '" onchange="updatePosition(\'' + coll + '\',\'' + o.id + '\',' + idx + ',\'desc\',this.value)" placeholder="Position…" style="width:220px"/></td>' +
+    '<td style="padding:3px 6px;white-space:nowrap"><input type="number" value="' + (+p.amount || 0).toFixed(2) + '" step="0.01" onchange="updatePosition(\'' + coll + '\',\'' + o.id + '\',' + idx + ',\'amount\',+this.value)" style="width:90px;text-align:right"/> ' + currencySymbol() + '</td>' +
+    '<td style="padding:3px 6px"><button class="btn-icon danger" onclick="deletePosition(\'' + coll + '\',\'' + o.id + '\',' + idx + ')" title="Position löschen">×</button></td>' +
+    '</tr>').join('');
+  return '<tr class="pos-editor"><td colspan="' + colspan + '" style="background:var(--surface);padding:6px 14px 10px 30px">' +
+    '<div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px">Positionen von „' + (o.desc || o.store || '').replace(/"/g, '&quot;') + '"</div>' +
+    '<table style="width:auto;border:none"><tbody>' + rows + '</tbody></table>' +
+    '<div style="margin-top:8px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">' +
+      '<button class="btn btn-ghost btn-sm" onclick="addPosition(\'' + coll + '\',\'' + o.id + '\')">+ Position</button>' +
+      '<span style="font-size:12px;color:var(--muted)">Summe: <strong>' + fmtEur(posSum(o)) + '</strong></span>' +
+      '<button class="btn btn-ghost btn-sm" onclick="unmergeRow(\'' + coll + '\',\'' + o.id + '\')" style="margin-left:auto" title="Jede Position wird wieder eine eigene Buchung">Wieder trennen</button>' +
+      '<button class="btn btn-ghost btn-sm" onclick="removeSplit(\'' + coll + '\',\'' + o.id + '\')" title="Positionen entfernen, Summe als eine Buchung behalten">Aufteilung entfernen</button>' +
+    '</div>' +
+  '</td></tr>';
+}
+
+// Sammel-Buchung wieder in einzelne Buchungen zerlegen (jede Position -> eigene Buchung)
+function unmergeRow(coll, id) {
+  if (!requireUnlocked()) return;
+  const o = findPosItem(coll, id);
+  if (!o || !Array.isArray(o.positionen) || !o.positionen.length) return;
+  const arr = state[coll]; if (!arr) return;
+  const idx = arr.findIndex(x => String(x.id) === String(o.id));
+  if (idx === -1) return;
+  const neu = o.positionen.map(p => {
+    const e = {
+      id: uid(),
+      month: (p.date ? String(p.date).slice(0, 7) : (o.month || currentMonth)),
+      date: p.date || o.date || today(),
+      amount: +p.amount || 0,
+      kontoId: p.kontoId || o.kontoId || defaultKontoId(),
+    };
+    if (coll === 'einkaeufe') { e.store = p.desc || o.store || o.desc || ''; }
+    else { e.desc = p.desc || o.desc || ''; e.category = p.category || o.category || 'Sonstige Ausgaben'; }
+    return e;
+  });
+  arr.splice(idx, 1, ...neu);
+  delete expandedRows[id];
+  saveData(); renderPage(); showToast(neu.length + ' Einzelbuchungen wiederhergestellt');
+}
+
+// Mehrere angehakte Buchungen zu einer Sammel-Buchung mit Positionen zusammenfassen
+async function mergeSelected(coll) {
+  if (!requireUnlocked()) return;
+  const ids = Array.from(document.querySelectorAll('.mergesel-' + coll + ':checked')).map(b => b.value);
+  if (ids.length < 2) { showToast('Mindestens zwei Buchungen anhaken', 'info'); return; }
+  const arr = state[coll] || [];
+  const idset = new Set(ids.map(String));
+  const sel = arr.filter(x => idset.has(String(x.id)));
+  if (sel.length < 2) { showToast('Auswahl nicht gefunden', 'error'); return; }
+  const nameOf = e => (coll === 'einkaeufe' ? (e.store || '') : (e.desc || '')).trim();
+  const ddmm = d => (d && d.length >= 10) ? (d.slice(8, 10) + '.' + d.slice(5, 7) + '. ') : '';
+  const preview = sel.map(e => '• ' + ddmm(e.date) + (nameOf(e) || '—') + ' – ' + fmtEur(+e.amount || 0)).join('<br>');
+  const names = sel.map(nameOf).filter(Boolean);
+  const allSame = names.length > 0 && names.every(n => n.toLowerCase() === names[0].toLowerCase());
+  const defaultTitel = allSame ? names[0] : '';
+  const titel = await uiPrompt({
+    title: 'Zusammenfassen', icon: '🧾',
+    message: 'Diese ' + sel.length + ' Buchungen zu einer Sammel-Buchung zusammenfassen (jede wird eine Position):<br><br>' + preview,
+    value: defaultTitel, placeholder: 'Titel der Sammel-Buchung',
+  });
+  if (titel === null) return;
+  const titelClean = (titel || '').trim() || defaultTitel || 'Sammelbuchung';
+  const positionen = [];
+  sel.forEach(e => {
+    if (Array.isArray(e.positionen) && e.positionen.length) {
+      e.positionen.forEach(p => positionen.push({
+        date: p.date || e.date || '', desc: p.desc || nameOf(e) || '', amount: +p.amount || 0,
+        category: p.category || e.category, kontoId: p.kontoId || e.kontoId,
+      }));
+    } else {
+      positionen.push({ date: e.date || '', desc: nameOf(e) || '', amount: +e.amount || 0, category: e.category, kontoId: e.kontoId });
+    }
+  });
+  const mode = vals => { const m = {}; let best = null, bc = 0; vals.filter(Boolean).forEach(v => { m[v] = (m[v] || 0) + 1; if (m[v] > bc) { bc = m[v]; best = v; } }); return best; };
+  const konto = mode(sel.map(e => e.kontoId)) || defaultKontoId();
+  const datum = sel.map(e => e.date || '').filter(Boolean).sort().pop() || today();
+  const merged = { id: uid(), month: currentMonth, date: datum, kontoId: konto, positionen };
+  if (coll === 'einkaeufe') merged.store = titelClean;
+  else { merged.desc = titelClean; merged.category = mode(sel.map(e => e.category)) || 'Sonstige Ausgaben'; }
+  syncPosAmount(merged);
+  const firstIdx = arr.findIndex(x => String(x.id) === String(sel[0].id));
+  const remaining = arr.filter(x => !idset.has(String(x.id)));
+  remaining.splice(Math.max(0, Math.min(firstIdx, remaining.length)), 0, merged);
+  state[coll] = remaining;
+  expandedRows[merged.id] = true;
+  saveData(); renderPage(); showToast(sel.length + ' Buchungen zusammengefasst');
+}
+
+// Vorschlagswerte (datalist) aus allen Jahren für ein Feld
+function allYearsValues(coll, field) {
+  const set = new Set();
+  Object.values(state.years || {}).forEach(yd => {
+    ((yd && yd[coll]) ? yd[coll] : []).forEach(x => { const v = (x[field] || '').trim(); if (v) set.add(v); });
+  });
+  return Array.from(set);
+}
+function datalistHtml(id, values) {
+  const seen = new Set(); const opts = [];
+  values.forEach(v => { const t = (v || '').trim(); if (t && !seen.has(t.toLowerCase())) { seen.add(t.toLowerCase()); opts.push('<option value="' + t.replace(/"/g, '&quot;') + '"></option>'); } });
+  return '<datalist id="' + id + '">' + opts.join('') + '</datalist>';
 }
 
 // ── PAGE: EINNAHMEN ───────────────────────────────────────────────────────
@@ -7262,6 +7439,31 @@ function analyse() {
     '<td class="r">' + fmtEur(x.v) + '</td>' +
     '<td class="r">' + x.faktor.toFixed(1).replace('.', ',') + '×</td></tr>').join('');
 
+  // Aufteilung nach Anlageklasse (aus den vorhandenen Depot-Daten)
+  const klasseLabel = { etf:'ETF', aktie:'Einzelaktien', fonds:'Fonds', krypto:'Krypto', wertpapier:'Sonstige' };
+  const klassen = {};
+  dep.liste.forEach(p => {
+    if (p.wert === null) return;
+    const key = klasseLabel[p.typ] || 'Sonstige';
+    if (!klassen[key]) klassen[key] = { wert:0, invested:0, anzahl:0 };
+    klassen[key].wert += p.wert; klassen[key].invested += p.invested; klassen[key].anzahl++;
+  });
+  const klassenArr = Object.keys(klassen).map(k => ({ name:k, wert:klassen[k].wert, invested:klassen[k].invested, anzahl:klassen[k].anzahl })).sort((a,b)=>b.wert-a.wert);
+  const klassenGesamt = klassenArr.reduce((s,k)=>s+k.wert,0);
+  const farbenAK = ['#0f766e','#2563eb','#d97706','#7c3aed','#16a34a','#64716d'];
+  const klassenBalken = klassenArr.map((k,i)=>{ const a=klassenGesamt>0?(k.wert/klassenGesamt)*100:0; return '<div style="height:100%;width:'+a+'%;background:'+farbenAK[i%farbenAK.length]+'" title="'+escapeHtml(k.name)+' '+a.toFixed(0)+' %"></div>'; }).join('');
+  const klassenZeilen = klassenArr.map((k,i)=>{
+    const anteil = klassenGesamt>0 ? (k.wert/klassenGesamt)*100 : 0;
+    const gv = k.wert - k.invested; const gvPct = k.invested>0 ? (gv/k.invested)*100 : null;
+    return '<tr>' +
+      '<td><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:'+farbenAK[i%farbenAK.length]+';margin-right:6px"></span>'+escapeHtml(k.name)+'</td>' +
+      '<td class="r">'+k.anzahl+'</td>' +
+      '<td class="r">'+fmtEur(k.wert)+'</td>' +
+      '<td class="r">'+anteil.toFixed(1).replace('.',',')+' %</td>' +
+      '<td class="r" style="color:'+(gv>=0?'var(--green)':'var(--red)')+'">'+(gv>=0?'+':'')+fmtEur(gv)+(gvPct!==null?' ('+(gvPct>=0?'+':'')+gvPct.toFixed(1).replace('.',',')+' %)':'')+'</td>' +
+    '</tr>';
+  }).join('');
+
   return '<div>' +
     '<div class="card mb-2">' +
       '<div class="card-header"><h3>📊 Beobachtungen</h3>' +
@@ -7306,6 +7508,14 @@ function analyse() {
         '</div>'
         : '<div class="empty-state"><p>Keine Wertpapiere erfasst.</p></div>') +
     '</div>' +
+
+    (dep.liste.length && klassenArr.length ? '<div class="card mb-2">' +
+      '<div class="card-header"><h3>Aufteilung nach Anlageklasse</h3></div>' +
+      '<div style="display:flex;height:14px;border-radius:7px;overflow:hidden;margin-bottom:12px;border:1px solid var(--border)">' + klassenBalken + '</div>' +
+      '<div class="table-wrap"><table><thead><tr><th>Anlageklasse</th><th class="r">Positionen</th>' +
+      '<th class="r">Wert</th><th class="r">Anteil</th><th class="r">G/V</th></tr></thead><tbody>' + klassenZeilen + '</tbody></table></div>' +
+      '<div style="font-size:11px;color:var(--muted);margin-top:10px">Verteilung deines Depotwerts nach Anlageklasse. Nur zur Übersicht – keine Anlageberatung.</div>' +
+    '</div>' : '') +
 
     (aus.length ? '<div class="card mb-2">' +
       '<div class="card-header"><h3>Auffällige Einzelbuchungen</h3></div>' +
@@ -9894,6 +10104,14 @@ window.pickEinkaufKonto  = pickEinkaufKonto;
 window.addAusgabe        = addAusgabe;
 window.updateAusgabe     = updateAusgabe;
 window.deleteAusgabe     = deleteAusgabe;
+window.togglePos         = togglePos;
+window.splitStart        = splitStart;
+window.addPosition       = addPosition;
+window.updatePosition    = updatePosition;
+window.deletePosition    = deletePosition;
+window.removeSplit       = removeSplit;
+window.unmergeRow        = unmergeRow;
+window.mergeSelected     = mergeSelected;
 window.pickEinnahmeKonto = pickEinnahmeKonto;
 window.pickFixkZielkonto = pickFixkZielkonto;
 window.pickFixkKonto = pickFixkKonto;
