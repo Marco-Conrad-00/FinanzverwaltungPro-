@@ -162,6 +162,10 @@ let _snoozedReminders = {};
 // Format je Eintrag: { v: 'Version', date: 'YYYY-MM-DD', changes: ['...','...'] }
 // Änderungen dürfen mit **Fett** Markierung versehen werden.
 const CHANGELOG = [
+  { v: '1.0.43', date: '2026-09-11', changes: [
+    '**Viele neue Kategorien** – Die Auswahl bei Ausgaben, Einnahmen und Verkauf wurde deutlich erweitert (z.B. Tanken, Strom/Gas/Wasser, Internet & Telefon, Reisen, Sport & Fitness, Geschenke, Bankgebühren; bei Einnahmen u.a. Bonus, Zinsen & Dividenden, Cashback, Erstattung; bei Verkauf u.a. Facebook Marketplace, momox/reBuy, Flohmarkt). Eigene Kategorien kannst du weiterhin unter Einstellungen → „Kategorien verwalten" ergänzen.',
+    '**Positionen direkt beim Erfassen** – Im „Was ist neu?"-Dialog gibt es bei Ausgaben und Einkäufen jetzt „⊞ In Positionen aufteilen": du legst eine Buchung samt Unterpositionen in einem Schritt an, der Betrag ergibt sich automatisch aus der Summe. Kein Umweg mehr über die Liste.',
+  ]},
   { v: '1.0.42', date: '2026-09-11', changes: [
     '**Ausgaben & Einkäufe in Positionen aufteilen** – große Buchungen (z.B. „Urlaub") lassen sich in einzelne Unterpositionen (Datum, Bezeichnung, Betrag) zerlegen. Über den ⊞-Knopf in der Betrag-Spalte aufteilen; der Gesamtbetrag ist automatisch die Summe. Aufgeteilte Zeilen zeigen einen Pfeil ▸/▾ zum Auf-/Einklappen (Standard: eingeklappt).',
     '**Gleiche zusammenfassen** – mehrere Buchungen anhaken und über „Ausgewählte zusammenfassen" zu einer Sammel-Buchung verbinden: du vergibst einen Titel, die Einzelbuchungen werden zu Positionen (mit ihrem Datum). Bereits aufgeteilte Buchungen werden dabei übernommen. Über „Wieder trennen" wird eine Sammel-Buchung jederzeit zurück in einzelne Buchungen zerlegt.',
@@ -1180,7 +1184,7 @@ const SUPERMAERKTE = [
   { name: 'Sonstiges', emoji: '🛒', color: '#666666' },
 ];
 
-const EXPENSE_CATS_DEFAULT = ['Essen & Trinken','Einkauf Lebensmittel','Einkauf Haushalt','Auto','Versicherungen','Miete & Wohnen','Kreditrate','Freizeit','Kleidung','Gesundheit','Abos & Software','Sonstige Ausgaben'];
+const EXPENSE_CATS_DEFAULT = ['Essen & Trinken','Restaurant / Essen gehen','Einkauf Lebensmittel','Einkauf Haushalt','Drogerie & Körperpflege','Auto','Tanken / Kraftstoff','Werkstatt / Reparatur','ÖPNV & Bahn','Parken / Maut','Kfz-Steuer','Versicherungen','Miete & Wohnen','Strom','Gas / Heizung','Wasser','Internet & Telefon','Haus & Garten','Möbel & Einrichtung','Kreditrate','Freizeit','Reisen / Urlaub','Sport & Fitness','Hobby','Kleidung','Elektronik / Technik','Friseur / Beauty','Gesundheit','Bildung / Weiterbildung','Haustier','Geschenke','Spenden','Abos & Software','Bankgebühren','Steuern & Abgaben','Bußgeld / Gebühren','Sonstige Ausgaben'];
 
 function getExpenseCats() { return mergeCats(EXPENSE_CATS_DEFAULT, 'ausgabe'); }
 
@@ -1197,8 +1201,9 @@ Object.defineProperty(globalThis, 'EINKAUF_CATS', { get: () => getEinkaufCats() 
 const SPESEN_STAND = 'BMF-Schreiben vom 05.12.2025, gültig ab 01.01.2026';
 const SPESEN_VERSION = '2026-01-01';
 const SPESEN_LAENDER = [{"land": "Albanien", "ganz": 33, "halb": 22}, {"land": "Algerien", "ganz": 47, "halb": 32}, {"land": "Andorra", "ganz": 45, "halb": 30}, {"land": "Angola", "ganz": 40, "halb": 27}, {"land": "Argentinien", "ganz": 42, "halb": 28}, {"land": "Armenien", "ganz": 29, "halb": 20}, {"land": "Aserbaidschan", "ganz": 44, "halb": 29}, {"land": "Australien / Canberra", "ganz": 74, "halb": 49}, {"land": "Australien / Sydney", "ganz": 57, "halb": 38}, {"land": "Australien / im Übrigen", "ganz": 57, "halb": 38}, {"land": "Bahrain", "ganz": 48, "halb": 32}, {"land": "Bangladesch", "ganz": 46, "halb": 31}, {"land": "Barbados", "ganz": 54, "halb": 36}, {"land": "Belgien", "ganz": 59, "halb": 40}, {"land": "Benin", "ganz": 40, "halb": 27}, {"land": "Bhutan", "ganz": 27, "halb": 18}, {"land": "Bolivien", "ganz": 46, "halb": 31}, {"land": "Bosnien und Herzegowina", "ganz": 32, "halb": 21}, {"land": "Botsuana", "ganz": 40, "halb": 27}, {"land": "Brasilien / Brasilia", "ganz": 51, "halb": 34}, {"land": "Brasilien / Rio de Janeiro", "ganz": 69, "halb": 46}, {"land": "Brasilien / Sao Paulo", "ganz": 46, "halb": 31}, {"land": "Brasilien / im Übrigen", "ganz": 46, "halb": 31}, {"land": "Brunei", "ganz": 45, "halb": 30}, {"land": "Bulgarien", "ganz": 38, "halb": 25}, {"land": "Burkina Faso", "ganz": 39, "halb": 26}, {"land": "Burundi", "ganz": 58, "halb": 39}, {"land": "Chile", "ganz": 44, "halb": 29}, {"land": "China / Hongkong", "ganz": 83, "halb": 56}, {"land": "China / Peking", "ganz": 57, "halb": 38}, {"land": "China / Shanghai", "ganz": 48, "halb": 32}, {"land": "China / im Übrigen", "ganz": 48, "halb": 32}, {"land": "Costa Rica", "ganz": 60, "halb": 40}, {"land": "Côte d’Ivoire", "ganz": 60, "halb": 40}, {"land": "Departments 77, 78, 91 bis / im Übrigen", "ganz": 53, "halb": 36}, {"land": "Deutschland", "ganz": 28, "halb": 14}, {"land": "Dominikanische Republik", "ganz": 50, "halb": 33}, {"land": "Dschibuti", "ganz": 77, "halb": 52}, {"land": "Dänemark", "ganz": 75, "halb": 50}, {"land": "Ecuador", "ganz": 27, "halb": 18}, {"land": "El Salvador", "ganz": 65, "halb": 44}, {"land": "Eritrea", "ganz": 46, "halb": 31}, {"land": "Estland", "ganz": 39, "halb": 26}, {"land": "Fidschi", "ganz": 32, "halb": 21}, {"land": "Finnland", "ganz": 54, "halb": 36}, {"land": "Frankreich / Paris (inkl. Dept. 77, 78, 91–95)", "ganz": 58, "halb": 39}, {"land": "Frankreich / im Übrigen", "ganz": 53, "halb": 36}, {"land": "Gabun", "ganz": 64, "halb": 43}, {"land": "Gambia", "ganz": 40, "halb": 27}, {"land": "Georgien", "ganz": 45, "halb": 30}, {"land": "Ghana", "ganz": 46, "halb": 31}, {"land": "Griechenland / Athen", "ganz": 40, "halb": 27}, {"land": "Griechenland / im Übrigen", "ganz": 36, "halb": 24}, {"land": "Guatemala", "ganz": 46, "halb": 31}, {"land": "Guinea", "ganz": 59, "halb": 40}, {"land": "Guinea-Bissau", "ganz": 32, "halb": 21}, {"land": "Honduras", "ganz": 57, "halb": 38}, {"land": "Indien / Bangalore", "ganz": 42, "halb": 28}, {"land": "Indien / Chennai", "ganz": 22, "halb": 15}, {"land": "Indien / Kalkutta", "ganz": 32, "halb": 21}, {"land": "Indien / Mumbai", "ganz": 53, "halb": 36}, {"land": "Indien / Neu Delhi", "ganz": 46, "halb": 31}, {"land": "Indien / im Übrigen", "ganz": 22, "halb": 15}, {"land": "Indonesien", "ganz": 45, "halb": 30}, {"land": "Iran", "ganz": 33, "halb": 22}, {"land": "Irland", "ganz": 64, "halb": 43}, {"land": "Island", "ganz": 62, "halb": 41}, {"land": "Israel", "ganz": 59, "halb": 40}, {"land": "Italien / Mailand", "ganz": 42, "halb": 28}, {"land": "Italien / Rom", "ganz": 48, "halb": 32}, {"land": "Italien / im Übrigen", "ganz": 42, "halb": 28}, {"land": "Jamaika", "ganz": 39, "halb": 26}, {"land": "Japan / Osaka", "ganz": 33, "halb": 22}, {"land": "Japan / Tokio", "ganz": 50, "halb": 33}, {"land": "Japan / im Übrigen", "ganz": 33, "halb": 22}, {"land": "Jordanien", "ganz": 57, "halb": 38}, {"land": "Kambodscha", "ganz": 42, "halb": 28}, {"land": "Kamerun", "ganz": 56, "halb": 37}, {"land": "Kanada / Ottawa", "ganz": 62, "halb": 41}, {"land": "Kanada / Toronto", "ganz": 54, "halb": 36}, {"land": "Kanada / Vancouver", "ganz": 63, "halb": 42}, {"land": "Kanada / im Übrigen", "ganz": 54, "halb": 36}, {"land": "Kap Verde", "ganz": 38, "halb": 25}, {"land": "Kasachstan", "ganz": 33, "halb": 22}, {"land": "Katar", "ganz": 81, "halb": 54}, {"land": "Kenia", "ganz": 48, "halb": 32}, {"land": "Kirgisistan", "ganz": 35, "halb": 24}, {"land": "Kolumbien", "ganz": 34, "halb": 23}, {"land": "Kongo, Demokratische Republik", "ganz": 65, "halb": 44}, {"land": "Kongo, Republik", "ganz": 53, "halb": 36}, {"land": "Korea, Republik", "ganz": 39, "halb": 26}, {"land": "Kosovo", "ganz": 24, "halb": 16}, {"land": "Kroatien", "ganz": 46, "halb": 31}, {"land": "Kuba", "ganz": 51, "halb": 34}, {"land": "Kuwait", "ganz": 63, "halb": 42}, {"land": "Laos", "ganz": 35, "halb": 24}, {"land": "Lesotho", "ganz": 28, "halb": 19}, {"land": "Lettland", "ganz": 46, "halb": 31}, {"land": "Libanon", "ganz": 69, "halb": 46}, {"land": "Liberia", "ganz": 65, "halb": 44}, {"land": "Liechtenstein", "ganz": 57, "halb": 38}, {"land": "Litauen", "ganz": 48, "halb": 32}, {"land": "Luxemburg", "ganz": 63, "halb": 42}, {"land": "Madagaskar", "ganz": 33, "halb": 22}, {"land": "Malawi", "ganz": 41, "halb": 28}, {"land": "Malaysia", "ganz": 36, "halb": 24}, {"land": "Malediven", "ganz": 70, "halb": 47}, {"land": "Mali", "ganz": 42, "halb": 28}, {"land": "Malta", "ganz": 59, "halb": 40}, {"land": "Marokko", "ganz": 41, "halb": 28}, {"land": "Marshall Inseln", "ganz": 45, "halb": 30}, {"land": "Mauretanien", "ganz": 35, "halb": 24}, {"land": "Mauritius", "ganz": 44, "halb": 29}, {"land": "Mexiko", "ganz": 40, "halb": 27}, {"land": "Moldau, Republik", "ganz": 26, "halb": 17}, {"land": "Monaco", "ganz": 52, "halb": 35}, {"land": "Mongolei", "ganz": 23, "halb": 16}, {"land": "Montenegro", "ganz": 32, "halb": 21}, {"land": "Mosambik", "ganz": 51, "halb": 34}, {"land": "Myanmar", "ganz": 23, "halb": 16}, {"land": "Namibia", "ganz": 28, "halb": 19}, {"land": "Nepal", "ganz": 33, "halb": 22}, {"land": "Neuseeland", "ganz": 58, "halb": 39}, {"land": "Nicaragua", "ganz": 46, "halb": 31}, {"land": "Niederlande", "ganz": 58, "halb": 39}, {"land": "Niger", "ganz": 42, "halb": 28}, {"land": "Nigeria", "ganz": 52, "halb": 35}, {"land": "Nordmazedonien", "ganz": 27, "halb": 18}, {"land": "Norwegen", "ganz": 75, "halb": 50}, {"land": "Oman", "ganz": 64, "halb": 43}, {"land": "Pakistan", "ganz": 41, "halb": 28}, {"land": "Palau", "ganz": 51, "halb": 34}, {"land": "Panama", "ganz": 41, "halb": 28}, {"land": "Papua-Neuguinea", "ganz": 59, "halb": 40}, {"land": "Paraguay", "ganz": 39, "halb": 26}, {"land": "Peru", "ganz": 52, "halb": 35}, {"land": "Philippinen", "ganz": 41, "halb": 28}, {"land": "Polen / Breslau", "ganz": 34, "halb": 23}, {"land": "Polen / Warschau", "ganz": 40, "halb": 27}, {"land": "Polen / im Übrigen", "ganz": 34, "halb": 23}, {"land": "Portugal", "ganz": 32, "halb": 21}, {"land": "Ruanda", "ganz": 44, "halb": 29}, {"land": "Rumänien", "ganz": 38, "halb": 25}, {"land": "Russische Föderation / Moskau", "ganz": 30, "halb": 20}, {"land": "Russische Föderation / St. Petersburg", "ganz": 28, "halb": 19}, {"land": "Russische Föderation / im Übrigen", "ganz": 28, "halb": 19}, {"land": "Sambia", "ganz": 38, "halb": 25}, {"land": "Samoa", "ganz": 39, "halb": 26}, {"land": "San Marino", "ganz": 34, "halb": 23}, {"land": "Saudi-Arabien / Djidda", "ganz": 57, "halb": 38}, {"land": "Saudi-Arabien / Riad", "ganz": 56, "halb": 37}, {"land": "Saudi-Arabien / im Übrigen", "ganz": 56, "halb": 37}, {"land": "Schweden", "ganz": 66, "halb": 44}, {"land": "Schweiz / Bern", "ganz": 82, "halb": 55}, {"land": "Schweiz / Genf", "ganz": 70, "halb": 47}, {"land": "Schweiz / im Übrigen", "ganz": 70, "halb": 47}, {"land": "Senegal", "ganz": 48, "halb": 32}, {"land": "Serbien", "ganz": 27, "halb": 18}, {"land": "Sierra Leone", "ganz": 57, "halb": 38}, {"land": "Simbabwe", "ganz": 63, "halb": 42}, {"land": "Singapur", "ganz": 71, "halb": 48}, {"land": "Slowakische Republik", "ganz": 33, "halb": 22}, {"land": "Slowenien", "ganz": 38, "halb": 25}, {"land": "Spanien / Barcelona", "ganz": 34, "halb": 23}, {"land": "Spanien / Kanarische Inseln", "ganz": 36, "halb": 24}, {"land": "Spanien / Madrid", "ganz": 42, "halb": 28}, {"land": "Spanien / Palma de Mallorca", "ganz": 44, "halb": 29}, {"land": "Spanien / im Übrigen", "ganz": 34, "halb": 23}, {"land": "Sri Lanka", "ganz": 36, "halb": 24}, {"land": "São Tomé – Príncipe", "ganz": 36, "halb": 24}, {"land": "Südafrika / Johannesburg", "ganz": 36, "halb": 24}, {"land": "Südafrika / Kapstadt", "ganz": 33, "halb": 22}, {"land": "Südafrika / im Übrigen", "ganz": 29, "halb": 20}, {"land": "Südsudan", "ganz": 51, "halb": 34}, {"land": "Tadschikistan", "ganz": 27, "halb": 18}, {"land": "Taiwan", "ganz": 51, "halb": 34}, {"land": "Tansania", "ganz": 44, "halb": 29}, {"land": "Thailand", "ganz": 36, "halb": 24}, {"land": "Togo", "ganz": 36, "halb": 24}, {"land": "Tonga", "ganz": 29, "halb": 20}, {"land": "Trinidad und Tobago", "ganz": 66, "halb": 44}, {"land": "Tschad", "ganz": 42, "halb": 28}, {"land": "Tschechische Republik", "ganz": 32, "halb": 21}, {"land": "Tunesien", "ganz": 40, "halb": 27}, {"land": "Turkmenistan", "ganz": 28, "halb": 19}, {"land": "Türkei / Ankara", "ganz": 32, "halb": 21}, {"land": "Türkei / Izmir", "ganz": 44, "halb": 29}, {"land": "Türkei / im Übrigen", "ganz": 24, "halb": 16}, {"land": "USA / Atlanta", "ganz": 77, "halb": 52}, {"land": "USA / Boston", "ganz": 63, "halb": 42}, {"land": "USA / Chicago", "ganz": 65, "halb": 44}, {"land": "USA / Houston", "ganz": 62, "halb": 41}, {"land": "USA / Los Angeles", "ganz": 64, "halb": 43}, {"land": "USA / Miami", "ganz": 65, "halb": 44}, {"land": "USA / New York City", "ganz": 66, "halb": 44}, {"land": "USA / San Francisco", "ganz": 59, "halb": 40}, {"land": "USA / Washington, D. C.", "ganz": 66, "halb": 44}, {"land": "USA / im Übrigen", "ganz": 59, "halb": 40}, {"land": "Uganda", "ganz": 45, "halb": 30}, {"land": "Ukraine", "ganz": 33, "halb": 22}, {"land": "Ungarn", "ganz": 32, "halb": 21}, {"land": "Uruguay", "ganz": 40, "halb": 27}, {"land": "Usbekistan", "ganz": 32, "halb": 21}, {"land": "Vatikanstaat", "ganz": 48, "halb": 32}, {"land": "Venezuela", "ganz": 51, "halb": 34}, {"land": "Vereinigte Arabische Emirate", "ganz": 81, "halb": 54}, {"land": "Vereinigtes Königreich / London", "ganz": 66, "halb": 44}, {"land": "Vereinigtes Königreich / im Übrigen", "ganz": 52, "halb": 35}, {"land": "Vietnam", "ganz": 36, "halb": 24}, {"land": "Weißrussland", "ganz": 21, "halb": 14}, {"land": "Zentralafrikanische Republik", "ganz": 53, "halb": 36}, {"land": "Zypern", "ganz": 42, "halb": 28}, {"land": "Ägypten", "ganz": 50, "halb": 33}, {"land": "Äquatorialguinea", "ganz": 42, "halb": 28}, {"land": "Äthiopien", "ganz": 44, "halb": 29}, {"land": "Österreich", "ganz": 50, "halb": 33}];
-const INCOME_TYPES_DEFAULT = ['Gehalt','Nebenjob','Verkauf','Steuerrückerstattung','Geschenk','Blutspende','Sonstiges'];
+const INCOME_TYPES_DEFAULT = ['Gehalt','Bonus / Sonderzahlung','Nebenjob','Freelance / Honorar','Verkauf','Zinsen & Dividenden','Miete / Untermiete','Steuerrückerstattung','Erstattung / Rückzahlung','Cashback / Payback','Pfand / Gutschrift','Trinkgeld','Geschenk','Blutspende','Sonstiges'];
 const EINKAUF_CATS_DEFAULT = ['Supermarkt','Drogerie','Bäcker/Metzger','Online'];
+const VERKAUF_CATS_DEFAULT = ['Kleinanzeigen','eBay','Vinted','Facebook Marketplace','Momox / reBuy / Ankauf','Refurbed / Back Market','Flohmarkt','Privat / an Bekannte','Fahrzeug / großes Teil','Sonstiges'];
 
 // Custom categories: stored grouped by domain  
 // state.customCats can be:
@@ -8728,7 +8733,7 @@ function switchQuickTab(type) {
   } else if (type === 'einnahme') {
     catSel.innerHTML = INCOME_TYPES.map(c => `<option value="${c}">${c}</option>`).join('');
   } else {
-    const verkaufCats = ['Kleinanzeigen','eBay','Vinted','Sonstiges'];
+    const verkaufCats = [...VERKAUF_CATS_DEFAULT];
     const seen = new Set(verkaufCats.map(c => c.toLowerCase()));
     getCustomCats('einnahme').forEach(c => { if (!seen.has(c.toLowerCase())) verkaufCats.push(c); });
     catSel.innerHTML = verkaufCats.map(c => `<option value="${c}">${c}</option>`).join('');
@@ -8777,6 +8782,9 @@ function switchQuickTab(type) {
       extraFields.innerHTML = '';
     }
   }
+  // Positionen-Bereich zurücksetzen (nur Ausgabe/Einkauf zeigen ihn)
+  qaPositions = [];
+  if (typeof qaRenderPositions === 'function') qaRenderPositions();
 }
 
 
@@ -8886,6 +8894,16 @@ async function saveQuickAdd(andClose) {
       return;
     }
 
+    // Positionen aus dem Modal übernehmen (nur Ausgabe/Einkauf)
+    if ((quickAddType === 'ausgabe' || quickAddType === 'einkauf') && saved && qaPositions.length) {
+      const posClean = qaPositions.map(p => ({ desc: (p.desc||'').trim(), amount: +p.amount||0 }))
+                                  .filter(p => p.desc || p.amount);
+      if (posClean.length) {
+        saved.positionen = posClean;
+        saved.amount = Math.round(posClean.reduce((s,p) => s + p.amount, 0) * 100) / 100;
+      }
+    }
+
     if (month !== currentMonth) { currentMonth = month; buildMonthSelector(); }
     // Bar/Konto-Abfrage für gerade erstellte Einnahme (nach Render)
     if (_pendingBarAsk) { const _p = _pendingBarAsk; _pendingBarAsk = null; setTimeout(() => askEinnahmeKonto(_p), 50); }
@@ -8896,6 +8914,7 @@ async function saveQuickAdd(andClose) {
 
     if (!andClose) {
       // Speichern & Weiter: keep modal open, clear fields
+      qaPositions = []; qaRenderPositions();
       amountEl.value = '';
       descEl.value = '';
       setTimeout(() => descEl.focus(), 50);
@@ -8914,6 +8933,58 @@ async function saveQuickAdd(andClose) {
 }
 
 function saveQuickAddClose() { saveQuickAdd(true); } // legacy compat
+
+// ── Positionen direkt im Quick-Add-Modal (nur Ausgabe & Einkauf) ────────────
+let qaPositions = [];
+function qaPosSum() { return qaPositions.reduce((s,p) => s + (+p.amount||0), 0); }
+function qaSyncAmount() {
+  const a = el('qa_amount'); if (!a) return;
+  if (qaPositions.length) { a.value = qaPosSum().toFixed(2); a.readOnly = true; a.style.opacity = '.7'; a.title = 'Ergibt sich aus der Summe der Positionen'; }
+  else { a.readOnly = false; a.style.opacity = ''; a.title = ''; }
+}
+function qaRenderPositions() {
+  const box = el('qa_pos_section'); if (!box) return;
+  if (quickAddType !== 'ausgabe' && quickAddType !== 'einkauf') { box.innerHTML = ''; qaPositions = []; qaSyncAmount(); return; }
+  if (!qaPositions.length) {
+    box.innerHTML = '<button type="button" class="btn btn-ghost btn-sm" onclick="qaAddPosition()">⊞ In Positionen aufteilen</button>';
+    qaSyncAmount(); return;
+  }
+  const rows = qaPositions.map((p, idx) =>
+    '<div style="display:flex;gap:6px;align-items:center;margin-bottom:6px">' +
+    '<input type="text" value="' + (p.desc||'').replace(/"/g,'&quot;') + '" oninput="qaUpdatePosition(' + idx + ',\'desc\',this.value)" placeholder="Position…" style="flex:1"/>' +
+    '<input type="number" step="0.01" value="' + (+p.amount||0) + '" oninput="qaUpdatePosition(' + idx + ',\'amount\',+this.value)" placeholder="0,00" style="width:100px;text-align:right"/>' +
+    '<span style="color:var(--muted);font-size:12px">' + currencySymbol() + '</span>' +
+    '<button type="button" class="btn-icon danger" onclick="qaDeletePosition(' + idx + ')" title="Position entfernen">×</button>' +
+    '</div>').join('');
+  box.innerHTML =
+    '<div style="border:1px solid var(--border);border-radius:8px;padding:10px 12px;background:var(--surface)">' +
+      '<div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px">Positionen</div>' +
+      rows +
+      '<div style="display:flex;gap:10px;align-items:center;margin-top:6px;flex-wrap:wrap">' +
+        '<button type="button" class="btn btn-ghost btn-sm" onclick="qaAddPosition()">+ Position</button>' +
+        '<span style="font-size:12px;color:var(--muted)">Summe: <strong id="qa_pos_sum">' + fmtEur(qaPosSum()) + '</strong></span>' +
+        '<button type="button" class="btn btn-ghost btn-sm" onclick="qaClearPositions()" style="margin-left:auto" title="Positionen entfernen">Zurücksetzen</button>' +
+      '</div>' +
+    '</div>';
+  qaSyncAmount();
+}
+function qaAddPosition() {
+  if (!qaPositions.length) {
+    const cur = Math.abs(parseFloat((el('qa_amount')||{}).value) || 0);
+    const d = ((el('qa_desc')||{}).value || '').trim();
+    qaPositions.push({ desc: d || '', amount: cur || 0 });
+  } else {
+    qaPositions.push({ desc: '', amount: 0 });
+  }
+  qaRenderPositions();
+}
+function qaUpdatePosition(idx, field, val) {
+  if (!qaPositions[idx]) return;
+  qaPositions[idx][field] = val;
+  if (field === 'amount') { const s = el('qa_pos_sum'); if (s) s.textContent = fmtEur(qaPosSum()); qaSyncAmount(); }
+}
+function qaDeletePosition(idx) { qaPositions.splice(idx, 1); qaRenderPositions(); }
+function qaClearPositions() { qaPositions = []; qaRenderPositions(); }
 
 // ── INIT ──────────────────────────────────────────────────────────────────
 // ════════════════════════════════════════════════════════════════════════════
@@ -9967,6 +10038,10 @@ window.closeQuickAdd     = closeQuickAdd;
 window.saveQuickAdd      = saveQuickAdd;
 window.saveQuickAddClose = saveQuickAddClose;
 window.switchQuickTab    = switchQuickTab;
+window.qaAddPosition     = qaAddPosition;
+window.qaUpdatePosition  = qaUpdatePosition;
+window.qaDeletePosition  = qaDeletePosition;
+window.qaClearPositions  = qaClearPositions;
 window.onMonthChange     = onMonthChange;
 window.showSetupScreen       = showSetupScreen;
 window.completeSetup         = completeSetup;
