@@ -162,6 +162,9 @@ let _snoozedReminders = {};
 // Format je Eintrag: { v: 'Version', date: 'YYYY-MM-DD', changes: ['...','...'] }
 // Änderungen dürfen mit **Fett** Markierung versehen werden.
 const CHANGELOG = [
+  { v: '1.0.45', date: '2026-09-12', changes: [
+    '**Ersteinrichtung mit mehreren Konten** – Im Willkommens-Dialog legst du jetzt direkt beliebig viele Konten an (z.B. Girokonto, Tagesgeld, Bargeld) und trägst je Konto den Anfangsstand ein. Pro Konto lässt sich festlegen, ob es zum monatlichen Cashflow zählt („CF") oder ein Reserve-/Sparkonto ist. Das Startguthaben ergibt sich automatisch aus der Summe.',
+  ]},
   { v: '1.0.44', date: '2026-09-11', changes: [
     '**Jahreswechsel-Assistent stark erweitert** – Beim Anlegen eines neuen Jahres kannst du jetzt zusätzlich übernehmen: **Konten** (mit Endständen), **Zählerstände** (letzter Stand je Typ als Startpunkt), **Sparen & Depot** (aktueller Bestand als Snapshot, zählt nicht als neuer Cashflow) und **wiederkehrende Umbuchungen**. Fixkosten und wiederkehrende Einnahmen wie gehabt.',
     '**Abfragen nach dem Jahreswechsel** – auf Wunsch: aktuelle **Zählerstände** direkt eintragen, je **Sparplan** bestätigen ob er weiterläuft, und am Ende die **Jahresübersicht des Vorjahres als PDF** erstellen.',
@@ -9719,12 +9722,11 @@ function showSetupScreen() {  const overlay = document.getElementById('setupOver
             ${[2024,2025,2026,2027,2028].map(y => '<option value="'+y+'" '+(y===new Date().getFullYear()?'selected':'')+'>'+y+'</option>').join('')}
           </select>
         </label>
-        <label style="display:flex;flex-direction:column;gap:6px;font-size:11px;font-weight:700;color:#64716d;text-transform:uppercase;letter-spacing:.08em">
-          Startgeld / Kontostand zu Jahresbeginn (${currencySymbol()})
-          <input id="setup_startgeld" type="number" placeholder="0,00" step="0.01" value="0"
-            style="padding:12px 14px;border:2px solid #dfe8e4;border-radius:8px;font-size:15px;font-family:inherit;outline:none;text-align:right"
-            onfocus="this.style.borderColor='#0f766e'" onblur="this.style.borderColor='#dfe8e4'" />
-        </label>
+        <div style="display:flex;flex-direction:column;gap:6px">
+          <span style="font-size:11px;font-weight:700;color:#64716d;text-transform:uppercase;letter-spacing:.08em">Konten & Kontostände zu Jahresbeginn (${currencySymbol()})</span>
+          <div id="setup_konten"></div>
+          <span style="font-size:11px;color:#64716d;line-height:1.4">„CF" = zählt zum monatlichen Cashflow (z.B. Girokonto). Reserve-/Sparkonten ohne Haken. Du kannst Konten auch später in den Einstellungen ändern.</span>
+        </div>
       </div>
       <button onclick="completeSetup()"
         style="margin-top:24px;width:100%;padding:14px;background:var(--accent);color:#fff;border:none;border-radius:8px;font-size:15px;font-weight:700;cursor:pointer;font-family:inherit;transition:opacity .15s"
@@ -9733,13 +9735,55 @@ function showSetupScreen() {  const overlay = document.getElementById('setupOver
       </button>
     </div>`;
   document.body.appendChild(div);
+  if (!setupKonten.length) setupKonten = [{ name: 'Girokonto', start: 0, cashflow: true }];
+  renderSetupKonten();
   setTimeout(() => { const n = document.getElementById('setup_name'); if(n) n.focus(); }, 100);
+}
+
+// ── Konten-Liste im Onboarding ──────────────────────────────────────────────
+let setupKonten = [{ name: 'Girokonto', start: 0, cashflow: true }];
+function renderSetupKonten() {
+  const box = document.getElementById('setup_konten'); if (!box) return;
+  box.innerHTML = setupKonten.map((k, i) =>
+    '<div style="display:flex;gap:6px;align-items:center;margin-bottom:8px">' +
+      '<input type="text" value="' + (k.name||'').replace(/"/g,'&quot;') + '" oninput="setupUpdateKonto(' + i + ',\'name\',this.value)" placeholder="Kontoname" ' +
+        'style="flex:1;min-width:0;padding:10px 12px;border:2px solid #dfe8e4;border-radius:8px;font-size:14px;font-family:inherit;outline:none;color:#1a1916" />' +
+      '<input type="number" step="0.01" value="' + (+k.start||0) + '" oninput="setupUpdateKonto(' + i + ',\'start\',+this.value)" placeholder="0,00" ' +
+        'style="width:105px;padding:10px 12px;border:2px solid #dfe8e4;border-radius:8px;font-size:14px;font-family:inherit;outline:none;text-align:right;color:#1a1916" />' +
+      '<label style="display:flex;align-items:center;gap:4px;font-size:11px;color:#64716d;white-space:nowrap;cursor:pointer" title="Zählt zum monatlichen Cashflow">' +
+        '<input type="checkbox" ' + (k.cashflow?'checked':'') + ' onchange="setupUpdateKonto(' + i + ',\'cashflow\',this.checked)" /> CF</label>' +
+      (setupKonten.length > 1 ? '<button type="button" onclick="setupRemoveKonto(' + i + ')" title="Konto entfernen" style="border:none;background:#fee2e2;color:#b42318;border-radius:6px;width:30px;height:30px;cursor:pointer;font-size:16px;flex-shrink:0">×</button>' : '') +
+    '</div>').join('') +
+    '<div style="display:flex;justify-content:space-between;align-items:center;margin-top:2px">' +
+      '<button type="button" onclick="setupAddKonto()" style="border:1px solid #dfe8e4;background:#f6f8f6;color:#0f766e;border-radius:8px;padding:8px 12px;font-size:13px;font-weight:600;cursor:pointer;font-family:inherit">+ Konto</button>' +
+      '<span style="font-size:12px;color:#64716d">Summe: <strong id="setup_konten_sum">' + fmtEur(setupKonten.reduce((s,k)=>s+(+k.start||0),0)) + '</strong></span>' +
+    '</div>';
+}
+function setupAddKonto() { setupKonten.push({ name: '', start: 0, cashflow: false }); renderSetupKonten(); }
+function setupUpdateKonto(i, f, v) {
+  if (!setupKonten[i]) return;
+  setupKonten[i][f] = v;
+  if (f === 'start') { const el2 = document.getElementById('setup_konten_sum'); if (el2) el2.textContent = fmtEur(setupKonten.reduce((s,k)=>s+(+k.start||0),0)); }
+}
+function setupRemoveKonto(i) {
+  setupKonten.splice(i, 1);
+  if (!setupKonten.length) setupKonten.push({ name: 'Girokonto', start: 0, cashflow: true });
+  renderSetupKonten();
 }
 
 function completeSetup() {
   const name = (document.getElementById('setup_name').value || '').trim();
   const year = +(document.getElementById('setup_year').value) || new Date().getFullYear();
-  const startgeld = +(document.getElementById('setup_startgeld').value) || 0;
+  // Konten aus dem Onboarding zusammenstellen (mind. eines, mind. ein Cashflow-Konto)
+  let konten = (setupKonten || []).map((k, i) => ({
+    id: i === 0 ? 'k_giro' : 'k_' + uid(),
+    name: (k.name || '').trim() || (i === 0 ? 'Girokonto' : 'Konto ' + (i + 1)),
+    start: +k.start || 0,
+    cashflow: !!k.cashflow,
+  }));
+  if (!konten.length) konten = [{ id: 'k_giro', name: 'Girokonto', start: 0, cashflow: true }];
+  if (!konten.some(k => k.cashflow)) konten[0].cashflow = true;
+  const startgeld = Math.round(konten.reduce((s, k) => s + (+k.start || 0), 0) * 100) / 100;
 
   if (!name) {
     const inp = document.getElementById('setup_name');
@@ -9756,7 +9800,7 @@ function completeSetup() {
   // Startgeld tatsächlich als Startguthaben des gewählten Jahres speichern
   // (sonst überschreibt saveData meta.startgeld wieder mit dem 0-Wert des Jahres)
   state.selectedYear = year; state.currentYear = year;
-  try { getYearData(String(year)).startBalance = startgeld; } catch(e) { console.error('Setup startBalance:', e); }
+  try { const yd = getYearData(String(year)); yd.startBalance = startgeld; yd.konten = konten; } catch(e) { console.error('Setup Konten:', e); }
 
   // Update displayed name
   const un = document.getElementById('userName');
@@ -10147,6 +10191,9 @@ window.qaClearPositions  = qaClearPositions;
 window.onMonthChange     = onMonthChange;
 window.showSetupScreen       = showSetupScreen;
 window.completeSetup         = completeSetup;
+window.setupAddKonto         = setupAddKonto;
+window.setupUpdateKonto      = setupUpdateKonto;
+window.setupRemoveKonto      = setupRemoveKonto;
 window.editUserName          = editUserName;
 window.updateSetting         = updateSetting;
 window.addKonto          = addKonto;
