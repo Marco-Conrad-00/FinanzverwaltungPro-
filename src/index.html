@@ -456,6 +456,10 @@
       <label class="field">Gültig bis
         <input type="month" id="fk_end" />
       </label>
+      <label class="field" style="grid-column:1/-1">Vertragsende / läuft aus (optional)
+        <input type="month" id="fk_laufzeitEnde" />
+        <span style="font-size:11px;color:var(--muted);font-weight:400;text-transform:none;letter-spacing:0">Echtes Vertragsende (z.B. Finanzierung). Wird beim Jahreswechsel übernommen und läuft automatisch aus. Leer = unbefristet.</span>
+      </label>
       <label class="field" style="grid-column:1/-1">Von Konto (woher das Geld abgeht)
         <select id="fk_konto"></select>
       </label>
@@ -568,6 +572,7 @@
     <button class="nav-item" onclick="navigate('zaehler')">⚡ Zählerstände</button>
     <button class="nav-item" id="navPv" onclick="navigate('pv')" style="display:none">☀️ PV-Anlage</button>
     <button class="nav-item" onclick="navigate('finanzprodukte')">📋 Finanzprodukte</button>
+    <button class="nav-item" onclick="navigate('versicherungen')">🛡️ Versicherungen</button>
     <button class="nav-item" id="navAnalyse" onclick="navigate('analyse')" style="display:none">📊 Analyse</button>
     <button class="nav-item" id="navTabellen" onclick="navigate('tabellen')" style="display:none">📝 Eigene Tabellen</button>
     <div class="sidebar-section">Verwaltung</div>

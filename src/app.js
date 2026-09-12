@@ -157,11 +157,83 @@ function reminderSnooze(id) {
 }
 let _snoozedReminders = {};
 
+// ── AUTO-ABLAUF: Versicherungen & befristete Fixkosten vor Ablauf erinnern ───
+// 'YYYY-MM' um delta Monate verschieben
+function monthShift(ym, delta) {
+  const [y, m] = ym.split('-').map(Number);
+  const idx = (y * 12 + (m - 1)) + delta;
+  return Math.floor(idx / 12) + '-' + String((idx % 12) + 1).padStart(2, '0');
+}
+// Beim App-Start: bald ablaufende Verträge finden und (einmal je Vertrag) eine
+// Erinnerung anlegen. Kennzeichen autoAblauf verhindert Duplikate.
+function checkAblaufReminders() {
+  const nowYm = new Date().toISOString().slice(0, 7);
+  const vorlauf = Math.max(1, +((state.config && state.config.ablaufVorlauf)) || 2);
+  const rems = getReminders();
+  const fix = (getYearData().fixkosten) || [];
+  fix.forEach(f => {
+    // Echtes Vertragsende bevorzugt (laufzeitEnde); sonst „Gültig bis", aber nicht die
+    // Dezember-Jahresgrenze (die ist kein echter Ablauf).
+    const real = (f.laufzeitEnde && /^\d{4}-\d{2}$/.test(f.laufzeitEnde)) ? f.laufzeitEnde
+               : ((f.end && /^\d{4}-\d{2}$/.test(f.end) && !f.end.endsWith('-12')) ? f.end : '');
+    if (!real) return;                               // kein echtes Enddatum → keine Erinnerung
+    if (real < nowYm) return;                         // bereits abgelaufen
+    if (nowYm < monthShift(real, -vorlauf)) return;   // Vorwarnzeit noch nicht erreicht
+    const istVers = (f.category === 'Versicherungen' || f.cat === 'Versicherungen' || f.category === 'Versicherung' || f.cat === 'Versicherung');
+    const marker = (istVers ? 'versicherung' : 'fixkosten') + ':' + f.id;
+    if (rems.some(r => r.autoAblauf === marker)) return; // schon angelegt
+    rems.push({
+      id: uid(),
+      title: '⏳ ' + (istVers ? 'Versicherung' : 'Vertrag') + ' läuft aus: ' + (f.name || 'Unbenannt') + ' (Ende ' + monthLabel(real) + ')',
+      when: 'monthStart', day: 1, repeatMonths: 1, active: true, notify: true,
+      lastDone: '', anchorYm: nowYm, autoAblauf: marker, autoEnd: real,
+    });
+  });
+  // Auch die eigenständig verwalteten Versicherungen/Verträge prüfen
+  (state.versicherungen || []).forEach(v => {
+    const end = (v.end || '').trim();
+    if (!/^\d{4}-\d{2}$/.test(end)) return;
+    if (end.endsWith('-12')) return;
+    if (end < nowYm) return;
+    if (nowYm < monthShift(end, -vorlauf)) return;
+    const marker = 'police:' + v.id;
+    if (rems.some(r => r.autoAblauf === marker)) return;
+    rems.push({
+      id: uid(),
+      title: '⏳ Versicherung läuft aus: ' + (v.name || 'Unbenannt') + ' (Ende ' + monthLabel(end) + ')',
+      when: 'monthStart', day: 1, repeatMonths: 1, active: true, notify: true,
+      lastDone: '', anchorYm: nowYm, autoAblauf: marker, autoEnd: end,
+    });
+  });
+  // Aufräumen: abgelaufene Auto-Erinnerungen entfernen
+  state.reminders = rems.filter(r => !(r.autoAblauf && r.autoEnd && r.autoEnd < nowYm));
+  saveData();
+}
+function setAblaufVorlauf(v) {
+  state.config = state.config || {};
+  state.config.ablaufVorlauf = Math.max(1, +v || 2);
+  saveData();
+  try { checkAblaufReminders(); } catch (e) { console.error('checkAblaufReminders:', e); }
+  renderPage();
+}
+
 // ── "WAS IST NEU" / CHANGELOG ───────────────────────────────────────────────
 // ▼▼▼ CHANGELOG – wird bei jedem Update gepflegt. Neueste Version ZUERST. ▼▼▼
 // Format je Eintrag: { v: 'Version', date: 'YYYY-MM-DD', changes: ['...','...'] }
 // Änderungen dürfen mit **Fett** Markierung versehen werden.
 const CHANGELOG = [
+  { v: '1.0.48', date: '2026-09-12', changes: [
+    '**Vertragsende bei Fixkosten** – Fixkosten haben jetzt ein optionales Feld „Vertragsende / läuft aus" (z.B. Finanzierung über 2 Jahre). Dieses echte Enddatum wird beim **Jahreswechsel übernommen**, der Vertrag bleibt bis dahin aktiv und **läuft danach automatisch aus** – du musst nicht mehr daran denken. Verträge, deren Ende bereits vorbei ist, werden beim Jahreswechsel nicht mehr mitgenommen.',
+    '**Ablauf-Erinnerung** nutzt jetzt dieses Vertragsende, sodass du rechtzeitig gewarnt wirst. Beim Verknüpfen einer Versicherung mit Fixkosten wird das Enddatum automatisch übernommen. (Behebt zugleich, dass beim Jahreswechsel bisher jedes Enddatum auf Dezember gesetzt wurde.)',
+  ]},
+  { v: '1.0.47', date: '2026-09-12', changes: [
+    '**Neuer Bereich „Versicherungen & Verträge"** – Verwalte deine Versicherungen und Verträge mit Name, Typ (z.B. Zusatzversicherung), Anbieter, Policennummer, Betrag, Zahlweise (monatlich/vierteljährlich/halbjährlich/jährlich/einmalig), Beginn und Ende. Zu jedem Vertrag lässt sich ein **PDF-Dokument** hinterlegen: rechts erscheint eine **Vorschau direkt in der App** (Split-Screen), zusätzlich „Extern öffnen" im Standardprogramm.',
+    '**Verknüpfung mit Fixkosten** – Beim „Verknüpfen" prüft die App, ob es bereits eine Fixkost mit gleichem Namen gibt (dann wird verbunden) oder bietet an, sie direkt als Fixkost anzulegen (Betrag automatisch auf Monatsbasis umgerechnet).',
+    '**Ablauf-Erinnerung** greift auch für diese Verträge: Läuft ein befristeter Vertrag bald aus, legt die App rechtzeitig eine Erinnerung an (Vorlaufzeit wie bei den Fixkosten einstellbar).',
+  ]},
+  { v: '1.0.46', date: '2026-09-12', changes: [
+    '**Ablauf-Erinnerung für Verträge** – Beim Start prüft die App, welche Versicherungen und befristeten Fixkosten bald enden, und legt automatisch rechtzeitig eine Erinnerung an (je Vertrag nur eine). Die Vorwarnzeit ist in den Einstellungen wählbar (1/2/3/6 Monate, Standard 2). Fixkosten mit Ende im Dezember gelten als Jahresgrenze und lösen bewusst keine Erinnerung aus. Der Hinweis erscheint als In-App-Banner und – wenn aktiviert – als Windows-Benachrichtigung (nur bei laufender App).',
+  ]},
   { v: '1.0.45', date: '2026-09-12', changes: [
     '**Ersteinrichtung mit mehreren Konten** – Im Willkommens-Dialog legst du jetzt direkt beliebig viele Konten an (z.B. Girokonto, Tagesgeld, Bargeld) und trägst je Konto den Anfangsstand ein. Pro Konto lässt sich festlegen, ob es zum monatlichen Cashflow zählt („CF") oder ein Reserve-/Sparkonto ist. Das Startguthaben ergibt sich automatisch aus der Summe.',
   ]},
@@ -622,6 +694,7 @@ const DEFAULT_DATA_RAW = {
   yearEditUnlocked: false,
   backupHistory: [],
   reminders: [],
+  versicherungen: [],
 };
 
 // Year-data accessors
@@ -1121,9 +1194,10 @@ async function loadData() {
   // ── Merge into state (preserves proxy properties) ───────────────────────
   const fields = ['meta','config','customCats','trash','imports','etfKurse','transactions',
                    'years','dataVersion','currentYear','selectedYear','backupHistory','yearEditUnlocked','reminders',
-                   'pv','pvConfig','spesenSaetze'];
+                   'versicherungen','pv','pvConfig','spesenSaetze'];
   fields.forEach(f => { if (saved[f] !== undefined) state[f] = saved[f]; });
   if (!Array.isArray(state.reminders)) state.reminders = [];
+  if (!Array.isArray(state.versicherungen)) state.versicherungen = [];
 
   if (state.meta.email  === undefined) state.meta.email  = '';
   if (state.meta.paypal === undefined) state.meta.paypal = '';
@@ -1895,7 +1969,8 @@ function navigate(page) {
     zaehler: ['Planung', 'Zählerstände'],
     pv: ['Planung', 'PV-Anlage'],
     analyse: ['Auswertung', 'Analyse'],
-    finanzprodukte: ['Planung', 'Finanzprodukte'],  
+    finanzprodukte: ['Planung', 'Finanzprodukte'],
+    versicherungen: ['Planung', 'Versicherungen & Verträge'],
     einstellungen: ['App', 'Einstellungen'],
     tabellen: ['Planung', 'Eigene Tabellen'],
     einstellungen: ['App', 'Einstellungen'],
@@ -2040,7 +2115,14 @@ async function confirmNewYear() {
   if (prevYr) {
     if (takeBalance) state.years[ny].startBalance = prevEnd;
     if (takeFixkosten) {
-      state.years[ny].fixkosten = (prevYr.fixkosten || []).map(f => ({ ...f, id: uid(), start: ny + '-01', end: ny + '-12' }));
+      state.years[ny].fixkosten = (prevYr.fixkosten || [])
+        // Verträge mit echtem Vertragsende VOR dem neuen Jahr laufen automatisch aus
+        .filter(f => !(f.laufzeitEnde && f.laufzeitEnde < ny + '-01'))
+        .map(f => {
+          // Endet der Vertrag IM neuen Jahr, gilt er nur bis dahin; sonst ganzjährig aktiv.
+          const perYearEnd = (f.laufzeitEnde && f.laufzeitEnde <= ny + '-12') ? f.laufzeitEnde : (ny + '-12');
+          return { ...f, id: uid(), start: ny + '-01', end: perYearEnd };
+        });
     }
     if (takeRegel) {
       state.years[ny].regelEinnahmen = (prevYr.regelEinnahmen || []).map(r => ({ ...r, id: uid(), startMonth: ny + '-01', endMonth: '' }));
@@ -2261,10 +2343,159 @@ function reminderBannerHtml() {
     </div>`).join('');
 }
 
+// ── PAGE: VERSICHERUNGEN & VERTRÄGE ─────────────────────────────────────────
+let selectedVersId = null;
+function getVersicherungen() { return state.versicherungen || (state.versicherungen = []); }
+const ZAHLWEISEN = ['monatlich', 'vierteljährlich', 'halbjährlich', 'jährlich', 'einmalig'];
+function versMonthly(v) {
+  const a = +v.amount || 0;
+  return v.zahlweise === 'monatlich' ? a : v.zahlweise === 'vierteljährlich' ? a/3
+       : v.zahlweise === 'halbjährlich' ? a/6 : v.zahlweise === 'jährlich' ? a/12 : a;
+}
+function versFixLinked(v) { return v.fixId ? ((getYearData().fixkosten||[]).find(f => f.id === v.fixId) || null) : null; }
+
+function versicherungen() {
+  const list = getVersicherungen();
+  const sel = list.find(v => v.id === selectedVersId) || null;
+  const listHtml = list.length ? list.map(v => {
+    const aktiv = v.id === selectedVersId;
+    return '<button onclick="selectVers(\'' + v.id + '\')" style="display:block;width:100%;text-align:left;border:1px solid ' + (aktiv?'var(--accent)':'var(--border)') + ';background:' + (aktiv?'var(--accent-light)':'var(--paper)') + ';border-radius:10px;padding:10px 12px;margin-bottom:8px;cursor:pointer">' +
+      '<div style="display:flex;justify-content:space-between;gap:8px;align-items:center">' +
+        '<strong style="font-size:14px">' + (v.name||'Unbenannt').replace(/</g,'&lt;') + '</strong>' +
+        (v.docPath ? '<span title="Dokument hinterlegt">📎</span>' : '') + '</div>' +
+      '<div style="font-size:12px;color:var(--muted);margin-top:2px">' + ((v.typ||'') + (v.typ&&v.anbieter?' · ':'') + (v.anbieter||'')).replace(/</g,'&lt;') + '</div>' +
+      '<div style="font-size:12px;margin-top:4px">' + fmtEur(+v.amount||0) + ' <span style="color:var(--muted)">/ ' + (v.zahlweise||'') + '</span>' +
+        (v.end ? ' · <span style="color:var(--muted)">Ende ' + monthLabel(v.end) + '</span>' : '') + '</div>' +
+    '</button>';
+  }).join('') : '<div class="empty-state" style="padding:24px"><div class="empty-icon">🛡️</div><p>Noch keine Versicherungen/Verträge.</p></div>';
+
+  let detailHtml;
+  if (!sel) {
+    detailHtml = '<div class="empty-state" style="padding:40px"><div class="empty-icon">👈</div><p>Wähle links einen Eintrag oder lege einen neuen an.</p></div>';
+  } else {
+    const fixLinked = versFixLinked(sel);
+    const zwOpts = ZAHLWEISEN.map(z => '<option value="' + z + '"' + (z===sel.zahlweise?' selected':'') + '>' + z + '</option>').join('');
+    const docArea = sel.docPath
+      ? '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:8px 0">' +
+          '<span class="badge badge-muted">📎 ' + (sel.docName||'Dokument').replace(/</g,'&lt;') + '</span>' +
+          '<button class="btn btn-ghost btn-sm" onclick="versOpenDoc(\'' + sel.id + '\')">Extern öffnen</button>' +
+          '<button class="btn btn-ghost btn-sm" onclick="versPickDoc(\'' + sel.id + '\')">Ersetzen</button>' +
+          '<button class="btn btn-ghost btn-sm" onclick="versRemoveDoc(\'' + sel.id + '\')">Entfernen</button>' +
+        '</div>' +
+        (/\.pdf$/i.test(sel.docPath)
+          ? '<div id="versDocPreview" style="border:1px solid var(--border);border-radius:8px;background:var(--surface);max-height:62vh;overflow:auto;padding:8px;text-align:center"><p style="color:var(--muted);font-size:12px">Vorschau wird geladen…</p></div>'
+          : '<p style="font-size:12px;color:var(--muted)">Vorschau nur für PDF – „Extern öffnen" nutzt das Standardprogramm.</p>')
+      : '<button class="btn btn-primary btn-sm" onclick="versPickDoc(\'' + sel.id + '\')">📎 PDF anhängen</button>';
+    const F = (label, field, type, val, extra) => '<label class="field">' + label +
+      '<input type="' + (type||'text') + '" value="' + String(val==null?'':val).replace(/"/g,'&quot;') + '" onchange="updateVers(\'' + sel.id + '\',\'' + field + '\',' + (type==='number'?'+this.value':'this.value') + ')" ' + (extra||'') + '/></label>';
+    detailHtml =
+      '<div class="card">' +
+        '<div class="card-header"><h3>' + (sel.name||'Versicherung').replace(/</g,'&lt;') + '</h3>' +
+          '<button class="btn-icon danger" onclick="deleteVersicherung(\'' + sel.id + '\')" title="Löschen">×</button></div>' +
+        '<div class="form-grid form-grid-2">' +
+          F('Name','name','text',sel.name) +
+          F('Typ (z.B. Zusatzversicherung)','typ','text',sel.typ) +
+          F('Anbieter','anbieter','text',sel.anbieter) +
+          F('Policennummer','police','text',sel.police) +
+          F('Betrag (' + currencySymbol() + ')','amount','number',(+sel.amount||0)) +
+          '<label class="field">Zahlweise<select onchange="updateVers(\'' + sel.id + '\',\'zahlweise\',this.value)">' + zwOpts + '</select></label>' +
+          '<label class="field">Beginn<input type="month" value="' + (sel.start||'') + '" onchange="updateVers(\'' + sel.id + '\',\'start\',this.value)"/></label>' +
+          '<label class="field">Ende (leer = unbefristet)<input type="month" value="' + (sel.end||'') + '" onchange="updateVers(\'' + sel.id + '\',\'end\',this.value)"/></label>' +
+          '<label class="field" style="grid-column:1/-1">Notiz<input type="text" value="' + (sel.note||'').replace(/"/g,'&quot;') + '" onchange="updateVers(\'' + sel.id + '\',\'note\',this.value)"/></label>' +
+        '</div>' +
+        '<div style="margin-top:10px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">' +
+          (fixLinked
+            ? '<span class="badge badge-green">🔗 verknüpft mit Fixkosten: ' + (fixLinked.name||'').replace(/</g,'&lt;') + '</span>'
+            : '<button class="btn btn-ghost btn-sm" onclick="versLinkFixkost(\'' + sel.id + '\')">🔗 Mit Fixkosten verknüpfen / anlegen</button>') +
+          '<span style="font-size:11px;color:var(--muted)">≈ ' + fmtEur(versMonthly(sel)) + ' / Monat</span>' +
+        '</div>' +
+        '<div style="margin-top:14px">' +
+          '<p style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px">Dokument</p>' + docArea +
+        '</div>' +
+      '</div>';
+  }
+
+  return '<div>' +
+    '<div style="display:flex;justify-content:flex-end;margin-bottom:14px"><button class="btn btn-primary" onclick="addVersicherung()">+ Versicherung / Vertrag</button></div>' +
+    '<div style="display:grid;grid-template-columns:320px 1fr;gap:16px;align-items:start">' +
+      '<div>' + listHtml + '</div><div>' + detailHtml + '</div>' +
+    '</div></div>';
+}
+function selectVers(id) { selectedVersId = id; renderPage(); }
+function addVersicherung() {
+  const v = { id: uid(), name: 'Neue Versicherung', typ: '', anbieter: '', police: '', amount: 0,
+    zahlweise: 'jährlich', start: (currentMonth || new Date().toISOString().slice(0,7)), end: '', note: '', docName: '', docPath: '', fixId: '' };
+  getVersicherungen().push(v); selectedVersId = v.id; saveData(); renderPage();
+}
+function updateVers(id, f, v) {
+  const o = getVersicherungen().find(x => x.id === id); if (!o) return;
+  o[f] = v; saveData();
+  if (['name','amount','zahlweise','end'].includes(f)) renderPage();
+}
+async function deleteVersicherung(id) {
+  const o = getVersicherungen().find(x => x.id === id); if (!o) return;
+  if (!await uiConfirm({ title: 'Eintrag löschen', icon: '🗑', message: '„' + (o.name||'') + '" wirklich löschen? (Verknüpfte Fixkosten bleiben bestehen.)' })) return;
+  state.versicherungen = getVersicherungen().filter(x => x.id !== id);
+  if (selectedVersId === id) selectedVersId = null;
+  saveData(); renderPage();
+}
+async function versPickDoc(id) {
+  const o = getVersicherungen().find(x => x.id === id); if (!o) return;
+  if (!(window.EA && window.EA.openFiles)) { await uiAlert({ title:'Nicht verfügbar', icon:'⚠', message:'Datei-Auswahl benötigt die Desktop-App.' }); return; }
+  try { const r = await window.EA.openFiles(); if (r && r[0]) { o.docName = r[0].name; o.docPath = r[0].path; saveData(); renderPage(); } }
+  catch(e) { console.error('versPickDoc', e); }
+}
+function versRemoveDoc(id) { const o = getVersicherungen().find(x => x.id === id); if (!o) return; o.docName = ''; o.docPath = ''; saveData(); renderPage(); }
+async function versOpenDoc(id) {
+  const o = getVersicherungen().find(x => x.id === id); if (!o || !o.docPath) return;
+  try { if (window.EA && window.EA.openFolder) await window.EA.openFolder(o.docPath); } catch(e) { console.error('versOpenDoc', e); }
+}
+async function versLinkFixkost(id) {
+  const o = getVersicherungen().find(x => x.id === id); if (!o) return;
+  const nm = (o.name||'').trim().toLowerCase();
+  const match = nm ? (getYearData().fixkosten||[]).find(f => (f.name||'').trim().toLowerCase() === nm) : null;
+  if (match) { o.fixId = match.id; saveData(); renderPage(); showToast('Mit vorhandener Fixkost verknüpft', 'info'); return; }
+  const ok = await uiConfirm({ title: 'Fixkosten anlegen?', icon: '🔁',
+    message: 'Es gibt keine Fixkost namens „' + (o.name||'') + '". Als Fixkost anlegen (≈ ' + fmtEur(versMonthly(o)) + ' / Monat)?',
+    okLabel: 'Anlegen', cancelLabel: 'Abbrechen' });
+  if (!ok) return;
+  const nf = { id: uid(), name: o.name || 'Versicherung', category: 'Versicherungen', cat: 'Versicherungen',
+    amount: Math.round(versMonthly(o) * 100) / 100, day: 1, start: o.start || currentMonth, end: o.end || '',
+    laufzeitEnde: o.end || '', kontoId: (typeof defaultKontoId === 'function' ? defaultKontoId() : undefined) };
+  getYearData().fixkosten.push(nf); o.fixId = nf.id; saveData(); renderPage(); showToast('Fixkost angelegt & verknüpft', 'info');
+}
+async function renderVersDocPreview() {
+  const box = document.getElementById('versDocPreview'); if (!box) return;
+  const o = getVersicherungen().find(x => x.id === selectedVersId);
+  if (!o || !o.docPath || !/\.pdf$/i.test(o.docPath)) return;
+  if (!(window.EA && window.EA.readFile)) { box.innerHTML = '<p style="color:var(--muted);font-size:12px">Vorschau benötigt die Desktop-App.</p>'; return; }
+  try {
+    const res = await window.EA.readFile(o.docPath);
+    if (res.type !== 'base64' || typeof pdfjsLib === 'undefined') { box.innerHTML = '<p style="color:var(--muted);font-size:12px">Keine PDF-Vorschau möglich.</p>'; return; }
+    const buf = Uint8Array.from(atob(res.data), c => c.charCodeAt(0));
+    const pdf = await pdfjsLib.getDocument({ data: buf }).promise;
+    box.innerHTML = '';
+    const maxP = Math.min(pdf.numPages, 10);
+    for (let i = 1; i <= maxP; i++) {
+      const page = await pdf.getPage(i);
+      const vp = page.getViewport({ scale: 1.2 });
+      const canvas = document.createElement('canvas');
+      canvas.width = vp.width; canvas.height = vp.height;
+      canvas.style.cssText = 'max-width:100%;height:auto;margin:0 auto 10px;display:block;box-shadow:0 1px 4px rgba(0,0,0,.2)';
+      box.appendChild(canvas);
+      await page.render({ canvasContext: canvas.getContext('2d'), viewport: vp }).promise;
+    }
+    if (pdf.numPages > maxP) {
+      const p = document.createElement('p'); p.style.cssText = 'color:var(--muted);font-size:12px';
+      p.textContent = '… ' + (pdf.numPages - maxP) + ' weitere Seiten – „Extern öffnen" zeigt alle.'; box.appendChild(p);
+    }
+  } catch(e) { console.error('PDF-Vorschau', e); box.innerHTML = '<p style="color:var(--muted);font-size:12px">Vorschau fehlgeschlagen.</p>'; }
+}
+
 function renderPage() {
   Object.values(chartInstances).forEach(c => { try { c.destroy(); } catch {} });
   chartInstances = {};
-  const pages = { dashboard, jahresuebersicht, suche, buchungen, einkaeufe, ausgaben, einnahmen, spesen, fixkosten, sparen, umbuchungen, zaehler, pv, analyse, finanzprodukte, tabellen, einstellungen, importPage };
+  const pages = { dashboard, jahresuebersicht, suche, buchungen, einkaeufe, ausgaben, einnahmen, spesen, fixkosten, sparen, umbuchungen, zaehler, pv, analyse, finanzprodukte, versicherungen, tabellen, einstellungen, importPage };
   const fn = pages[currentPage === 'import' ? 'importPage' : currentPage];
   const banner = reminderBannerHtml();
   if (fn) el('pageContent').innerHTML = banner + fn();
@@ -2283,6 +2514,7 @@ function afterRender() {
   if (currentPage === 'zaehler') renderZaehlerCharts();
   if (currentPage === 'pv') renderPvCharts();
   if (currentPage === 'jahresuebersicht') renderJahresCharts();
+  if (currentPage === 'versicherungen') renderVersDocPreview();
 }
 
 // ── PAGE: DASHBOARD ───────────────────────────────────────────────────────
@@ -4083,7 +4315,7 @@ function fixkosten() {
         ${alleKats.map(c => filterChip(c, c)).join('')}
       </div>
       <div class="table-wrap"><table>
-        <thead><tr><th>Bezeichnung</th><th>Kategorie</th><th>Rhythmus</th><th>Gültig von</th><th>Gültig bis</th><th>Fällig am</th><th style="text-align:right">Betrag</th><th></th></tr></thead>
+        <thead><tr><th>Bezeichnung</th><th>Kategorie</th><th>Rhythmus</th><th>Gültig von</th><th>Gültig bis</th><th>Vertragsende</th><th>Fällig am</th><th style="text-align:right">Betrag</th><th></th></tr></thead>
         <tbody>
           ${gefiltert.map(f => {
             const active = fixkostenAktivImMonat(f, currentMonth);
@@ -4109,6 +4341,7 @@ function fixkosten() {
               <td><select onchange="updateFixk('${f.id}','interval',+this.value)" title="Wie oft wird abgebucht? Voller Betrag im ersten Monat des Intervalls.">${[[1,'monatlich'],[2,'alle 2 Monate'],[3,'alle 3 Monate'],[6,'alle 6 Monate'],[12,'jährlich']].map(([v,l])=>`<option value="${v}" ${(+f.interval||1)===v?'selected':''}>${l}</option>`).join('')}</select></td>
               <td><input type="month" value="${f.start}" onchange="updateFixk('${f.id}','start',this.value)" style="width:145px"/></td>
               <td><input type="month" value="${f.end}" onchange="updateFixk('${f.id}','end',this.value)" style="width:145px"/></td>
+              <td><input type="month" value="${f.laufzeitEnde||''}" onchange="updateFixk('${f.id}','laufzeitEnde',this.value)" style="width:145px" title="Echtes Vertragsende – wird beim Jahreswechsel übernommen; leer = unbefristet"/></td>
               <td><input type="number" value="${f.day||1}" onchange="updateFixk('${f.id}','day',+this.value)" style="width:60px;text-align:center" min="1" max="31"/></td>
               <td><input type="number" value="${(+f.amount||0).toFixed(2)}" onchange="updateFixk('${f.id}','amount',+this.value)" step="0.01" style="width:90px;text-align:right"/> ${currencySymbol()}</td>
               <td style="white-space:nowrap">${_vonBtn}${_zielBtn}<button class="btn-icon danger" onclick="deleteFixk('${f.id}')">×</button></td>
@@ -4135,6 +4368,7 @@ function openFixkostenModal() {
   // Auto-set end to December of current year
   const yr = getSelectedYear();
   document.getElementById('fk_end').value = yr + '-12';
+  if (document.getElementById('fk_laufzeitEnde')) document.getElementById('fk_laufzeitEnde').value = '';
   // Zielkonto-Dropdown füllen (alle Konten + Extern; Default = erstes Reserve-Konto)
   const fkz = document.getElementById('fk_spar_zielkonto');
   if (fkz) {
@@ -4173,6 +4407,9 @@ async function saveFixkostenModal() {
     return;
   }
   const f = { id: uid(), name, category: cat, cat, amount, day, interval, start, end };
+  // Echtes Vertragsende (optional) – wird beim Jahreswechsel übernommen
+  const lze = (document.getElementById('fk_laufzeitEnde')?.value || '').trim();
+  if (lze) f.laufzeitEnde = lze;
   // Von-Konto (Quelle der Fixkost)
   f.kontoId = document.getElementById('fk_konto')?.value || defaultKontoId();
 
@@ -5913,6 +6150,13 @@ function einstellungen() {
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px">
           <span style="font-size:13px;color:var(--muted-text)">Erinnere dich an wiederkehrende Aufgaben (z.B. Zählerstände erfassen). Fällige Erinnerungen erscheinen als Banner in der App.</span>
           <button class="btn btn-primary btn-sm" onclick="addReminder()">+ Erinnerung</button>
+        </div>
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;padding:10px 12px;background:var(--surface);border:1px solid var(--border);border-radius:8px;flex-wrap:wrap">
+          <span style="font-size:13px;color:var(--text)">⏳ Ablauf-Vorwarnung für Versicherungen &amp; befristete Fixkosten:</span>
+          <select onchange="setAblaufVorlauf(this.value)">
+            ${[1,2,3,6].map(v=>`<option value="${v}" ${(Math.max(1,+((state.config&&state.config.ablaufVorlauf))||2))===v?'selected':''}>${v} Monat${v>1?'e':''} vorher</option>`).join('')}
+          </select>
+          <span style="font-size:11px;color:var(--muted-text);flex-basis:100%;line-height:1.4">Beim Start prüft die App, welche befristeten Verträge bald enden, und legt automatisch eine Erinnerung an (Fixkosten mit Ende im Dezember zählen als Jahresgrenze, nicht als Ablauf).</span>
         </div>
         ${getReminders().length ? `<div class="table-wrap"><table>
           <thead><tr><th>Bezeichnung</th><th>Zeitpunkt</th><th>Tag</th><th>Wiederholung</th><th>System-Hinweis</th><th>Aktiv</th><th></th></tr></thead>
@@ -10177,6 +10421,14 @@ function getEtfKursInfo(s) {
 
 // ── GLOBAL EXPORTS für onclick Handler in dynamisch gerenderten Tabellen ──
 window.navigate          = navigate;
+window.selectVers        = selectVers;
+window.addVersicherung   = addVersicherung;
+window.updateVers        = updateVers;
+window.deleteVersicherung = deleteVersicherung;
+window.versPickDoc       = versPickDoc;
+window.versRemoveDoc     = versRemoveDoc;
+window.versOpenDoc       = versOpenDoc;
+window.versLinkFixkost   = versLinkFixkost;
 window.updateSuche       = updateSuche;
 window.resetSuche        = resetSuche;
 window.openQuickAdd      = openQuickAdd;
@@ -10274,6 +10526,7 @@ window.toggleConfig          = toggleConfig;
 window.updateSparzielSumme   = updateSparzielSumme;
 window.openUpdateManager     = openUpdateManager;
 window.addReminder           = addReminder;
+window.setAblaufVorlauf      = setAblaufVorlauf;
 window.updateReminder        = updateReminder;
 window.deleteReminder        = deleteReminder;
 window.reminderDone          = reminderDone;
@@ -10477,6 +10730,8 @@ window.deleteRegelEinnahme   = deleteRegelEinnahme;
   checkAutoBackup();
   // Auto-create sparen entries from linked fixkosten (silent)
   setTimeout(() => runSparenAutoEintragung().catch(e => console.error('autoEintragung:', e)), 1000);
+  // ── Ablaufende Verträge prüfen und Erinnerungen anlegen (vor initReminders) ──
+  try { checkAblaufReminders(); } catch (e) { console.error('checkAblaufReminders:', e); }
   // ── Erinnerungen: Tray-Betrieb + System-Benachrichtigungen ──────────────
   setTimeout(() => initReminders(), 1500);
   // ── "Was ist neu" nach einem Update anzeigen ────────────────────────────
@@ -10533,7 +10788,7 @@ window.deleteRegelEinnahme   = deleteRegelEinnahme;
     showTermsModal(() => {});
   }
   // Apply saved startPage from settings
-  const validPages = ['dashboard','jahresuebersicht','buchungen','einkaeufe','ausgaben','einnahmen','spesen','fixkosten','sparen','zaehler','pv','analyse','finanzprodukte','tabellen','einstellungen'];
+  const validPages = ['dashboard','jahresuebersicht','buchungen','einkaeufe','ausgaben','einnahmen','spesen','fixkosten','sparen','zaehler','pv','analyse','finanzprodukte','versicherungen','tabellen','einstellungen'];
   const savedStart = state.config?.startPage;
   const startPage = (savedStart && validPages.includes(savedStart)) ? savedStart : 'dashboard';
   navigate(startPage);
