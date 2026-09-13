@@ -222,6 +222,9 @@ function setAblaufVorlauf(v) {
 // Format je Eintrag: { v: 'Version', date: 'YYYY-MM-DD', changes: ['...','...'] }
 // Änderungen dürfen mit **Fett** Markierung versehen werden.
 const CHANGELOG = [
+  { v: '1.0.49', date: '2026-09-13', changes: [
+    '**Positionen bei Spesen** – Die aus Einkäufen/Ausgaben bekannte Aufteilung in Unterpositionen gibt es jetzt auch bei Geschäftsreisen: Sowohl die Spalte „Ausgaben" (Kosten für mich auf Reise, +/−) als auch „Auslagen" lassen sich pro Reise über das ⊞-Symbol in einzelne Positionen mit Beschreibung, Datum und Betrag aufteilen. Die Spalte zeigt dann die Summe und lässt sich auf-/zuklappen (▸/▾); Saldo, „Zu überweisen" und alle Summen bleiben automatisch korrekt. Positionen dürfen auch negativ sein (z.B. eine Erstattung gegenrechnen). Über „Aufteilung entfernen" wird wieder ein einzelner Betrag daraus.',
+  ]},
   { v: '1.0.48', date: '2026-09-12', changes: [
     '**Vertragsende bei Fixkosten** – Fixkosten haben jetzt ein optionales Feld „Vertragsende / läuft aus" (z.B. Finanzierung über 2 Jahre). Dieses echte Enddatum wird beim **Jahreswechsel übernommen**, der Vertrag bleibt bis dahin aktiv und **läuft danach automatisch aus** – du musst nicht mehr daran denken. Verträge, deren Ende bereits vorbei ist, werden beim Jahreswechsel nicht mehr mitgenommen.',
     '**Ablauf-Erinnerung** nutzt jetzt dieses Vertragsende, sodass du rechtzeitig gewarnt wirst. Beim Verknüpfen einer Versicherung mit Fixkosten wird das Enddatum automatisch übernommen. (Behebt zugleich, dass beim Jahreswechsel bisher jedes Enddatum auf Dezember gesetzt wurde.)',
@@ -3897,11 +3900,96 @@ function deleteEinnahme(id) {
   if (moveToTrash('einnahmen', id, 'Einnahme')) { renderPage(); showToast('In Papierkorb verschoben','info'); }
 }
 
+// ── SPESEN: POSITIONEN je Betragsfeld (Ausgaben ± und Auslagen) ─────────────
+// Jede Reise kann die Felder "ausgaben" (Kosten für mich auf Reise, darf +/−
+// sein) und "auslagen" in Unterpositionen aufteilen. Das Array liegt in
+// s[key+'Pos']; solange es gefüllt ist, ist s[key] die (gesperrte) Summe der
+// Positionen – so bleiben Saldo, Zu-überweisen und die Monats-/Jahressummen
+// automatisch korrekt. Auf-/Zuklappen ist rein visuell (expandedRows).
+const SPESE_POS_LABEL = { ausgaben: 'Kosten für mich auf Reise', auslagen: 'Auslagen' };
+function spesePosKey(key) { return key + 'Pos'; }
+function spesePosArr(s, key) { const a = s[spesePosKey(key)]; return Array.isArray(a) ? a : []; }
+function spesePosSum(s, key) { return spesePosArr(s, key).reduce((sum, p) => sum + (+p.amount || 0), 0); }
+function spesePosSync(s, key) { const a = s[spesePosKey(key)]; if (Array.isArray(a) && a.length) s[key] = Math.round(spesePosSum(s, key) * 100) / 100; }
+function findSpese(id) { return (state.spesen || []).find(x => String(x.id) === String(id)); }
+function speseTogglePos(id, key) { const k = 'sp:' + id + ':' + key; expandedRows[k] = !expandedRows[k]; renderPage(); }
+function speseSplitStart(id, key) {
+  if (!requireUnlocked()) return;
+  const s = findSpese(id); if (!s) return;
+  s[spesePosKey(key)] = [{ desc: 'Position 1', amount: +s[key] || 0 }];
+  spesePosSync(s, key); expandedRows['sp:' + id + ':' + key] = true; saveData(); renderPage();
+}
+function speseAddPos(id, key) {
+  if (!requireUnlocked()) return;
+  const s = findSpese(id); if (!s) return;
+  s[spesePosKey(key)] = s[spesePosKey(key)] || [];
+  s[spesePosKey(key)].push({ desc: '', amount: 0 });
+  spesePosSync(s, key); expandedRows['sp:' + id + ':' + key] = true; saveData(); renderPage();
+}
+function speseUpdatePos(id, key, idx, field, val) {
+  if (!requireUnlocked()) return;
+  const s = findSpese(id); const a = s && s[spesePosKey(key)]; if (!a || !a[idx]) return;
+  a[idx][field] = val; spesePosSync(s, key); saveData();
+  if (field === 'amount') renderPage();
+}
+function speseDeletePos(id, key, idx) {
+  if (!requireUnlocked()) return;
+  const s = findSpese(id); const a = s && s[spesePosKey(key)]; if (!a) return;
+  a.splice(idx, 1);
+  if (a.length) { spesePosSync(s, key); }
+  else { s[key] = Math.round(spesePosSum(s, key) * 100) / 100; delete s[spesePosKey(key)]; expandedRows['sp:' + id + ':' + key] = false; }
+  saveData(); renderPage();
+}
+function speseRemoveSplit(id, key) {
+  if (!requireUnlocked()) return;
+  const s = findSpese(id); if (!s) return;
+  s[key] = Math.round(spesePosSum(s, key) * 100) / 100; delete s[spesePosKey(key)]; expandedRows['sp:' + id + ':' + key] = false;
+  saveData(); renderPage();
+}
+// Betrag-Zelle für ein Spese-Feld: mit Positionen -> Summe + Toggle; ohne -> Eingabe + 🧮 + ⊞
+function speseAmountCell(s, key, inputId) {
+  const arr = spesePosArr(s, key);
+  if (arr.length) {
+    const sum = spesePosSum(s, key);
+    const open = expandedRows['sp:' + s.id + ':' + key];
+    return '<td style="white-space:nowrap"><button class="btn-icon" onclick="speseTogglePos(\'' + s.id + '\',\'' + key + '\')" title="Positionen ein-/ausklappen" style="width:auto;min-width:0;padding:0 6px;font-size:12px;gap:5px">' +
+      (open ? '▾' : '▸') + ' <span style="font-weight:600">' + fmtEur(sum) + '</span> <span style="color:var(--muted);font-size:11px">(' + arr.length + ')</span></button></td>';
+  }
+  return '<td style="white-space:nowrap"><input id="' + inputId + '" type="number" value="' + (+s[key] || 0).toFixed(2) + '" onchange="updateSpese(\'' + s.id + '\',\'' + key + '\',+this.value);recalcSpeseRow(\'' + s.id + '\')" step="0.01" style="width:75px;text-align:right"/> ' + currencySymbol() +
+    ' <button type="button" class="btn-icon" title="Taschenrechner" onclick="openCalc(\'' + inputId + '\')">🧮</button>' +
+    ' <button type="button" class="btn-icon" title="In Positionen aufteilen" onclick="speseSplitStart(\'' + s.id + '\',\'' + key + '\')" style="width:24px;height:24px;padding:0;font-size:12px">⊞</button></td>';
+}
+// Editor-Zeile(n) unter einer Reise – je aufgeklapptem Feld eine Zeile (colspan über die ganze Tabelle)
+function speseEditorRows(s) {
+  let html = '';
+  ['ausgaben', 'auslagen'].forEach(key => {
+    const arr = spesePosArr(s, key);
+    if (!arr.length || !expandedRows['sp:' + s.id + ':' + key]) return;
+    const rows = arr.map((p, idx) =>
+      '<tr>' +
+      '<td style="padding:3px 6px"><input type="date" value="' + (p.date || '') + '" onchange="speseUpdatePos(\'' + s.id + '\',\'' + key + '\',' + idx + ',\'date\',this.value)" style="width:135px" title="Datum (optional)"/></td>' +
+      '<td style="padding:3px 6px"><input type="text" value="' + (p.desc || '').replace(/"/g, '&quot;') + '" onchange="speseUpdatePos(\'' + s.id + '\',\'' + key + '\',' + idx + ',\'desc\',this.value)" placeholder="Position…" style="width:240px"/></td>' +
+      '<td style="padding:3px 6px;white-space:nowrap"><input type="number" value="' + (+p.amount || 0).toFixed(2) + '" step="0.01" onchange="speseUpdatePos(\'' + s.id + '\',\'' + key + '\',' + idx + ',\'amount\',+this.value)" style="width:90px;text-align:right"/> ' + currencySymbol() + '</td>' +
+      '<td style="padding:3px 6px"><button class="btn-icon danger" onclick="speseDeletePos(\'' + s.id + '\',\'' + key + '\',' + idx + ')" title="Position löschen">×</button></td>' +
+      '</tr>').join('');
+    html += '<tr class="pos-editor"><td colspan="14" style="background:var(--surface);padding:6px 14px 10px 30px">' +
+      '<div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px">Positionen – ' + SPESE_POS_LABEL[key] + (s.kunde ? ' · ' + String(s.kunde).replace(/"/g, '&quot;') : '') + '</div>' +
+      '<table style="width:auto;border:none"><tbody>' + rows + '</tbody></table>' +
+      '<div style="margin-top:8px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">' +
+        '<button class="btn btn-ghost btn-sm" onclick="speseAddPos(\'' + s.id + '\',\'' + key + '\')">+ Position</button>' +
+        '<span style="font-size:12px;color:var(--muted)">Summe: <strong>' + fmtEur(spesePosSum(s, key)) + '</strong></span>' +
+        '<button class="btn btn-ghost btn-sm" onclick="speseRemoveSplit(\'' + s.id + '\',\'' + key + '\')" style="margin-left:auto" title="Positionen entfernen, Summe als einen Betrag behalten">Aufteilung entfernen</button>' +
+      '</div>' +
+    '</td></tr>';
+  });
+  return html;
+}
+
 // ── PAGE: SPESEN ──────────────────────────────────────────────────────────
 function spesen() {
   const showAll = document.getElementById('spesenShowAll')?.checked;
   const items = [...state.spesen].filter(s => showAll || s.month === currentMonth).sort((a,b)=>(a.dateFrom||'').localeCompare(b.dateFrom||''));
-  items.forEach(s => calcSpesen(s));
+  items.forEach(s => { spesePosSync(s,'ausgaben'); spesePosSync(s,'auslagen'); calcSpesen(s); });
 
   const totalSpesen   = items.reduce((s,t)=>s+(t.allowance||0),0);
   const totalAusgaben = items.reduce((s,t)=>s+(+t.ausgaben||0),0);
@@ -3941,7 +4029,7 @@ function spesen() {
         <th style="text-align:right">Zu überweisen</th><th></th>
       </tr></thead>
       <tbody id="spesenTable">
-        ${items.map(s => speseRow(s)).join('')}
+        ${items.map(s => speseRow(s) + speseEditorRows(s)).join('')}
         <tr style="background:var(--surface)">
           <td colspan="8" style="padding:8px 12px;font-weight:700">Gesamt</td>
           <td class="amount negative">${fmtEur(totalAusgaben)}</td>
@@ -4136,6 +4224,7 @@ function calcSpesen(s) {
 }
 
 function speseRow(s) {
+  spesePosSync(s, 'ausgaben'); spesePosSync(s, 'auslagen');
   calcSpesen(s);
   // An-/Abreise Tage und Vor-Ort Tage berechnen
   const from = s.dateFrom||''; const to = s.dateTo||'';
@@ -4162,10 +4251,10 @@ function speseRow(s) {
     <td style="text-align:center"><input type="number" value="${s.fruehstueck||0}" min="0" onchange="updateSpese('${s.id}','fruehstueck',+this.value);recalcSpeseRow('${s.id}')" style="width:45px;text-align:center"/></td>
     <td style="text-align:center"><input type="number" value="${s.mittagessen||0}" min="0" onchange="updateSpese('${s.id}','mittagessen',+this.value);recalcSpeseRow('${s.id}')" style="width:45px;text-align:center"/></td>
     <td style="text-align:center"><input type="number" value="${s.abendessen||0}" min="0" onchange="updateSpese('${s.id}','abendessen',+this.value);recalcSpeseRow('${s.id}')" style="width:45px;text-align:center"/></td>
-    <td style="white-space:nowrap"><input id="sp_ausg_${s.id}" type="number" value="${(+s.ausgaben||0).toFixed(2)}" onchange="updateSpese('${s.id}','ausgaben',+this.value);recalcSpeseRow('${s.id}')" step="0.01" style="width:75px;text-align:right"/> ${currencySymbol()} <button type="button" class="btn-icon" title="Taschenrechner" onclick="openCalc('sp_ausg_${s.id}')">🧮</button></td>
+    ${speseAmountCell(s,'ausgaben','sp_ausg_'+s.id)}
     <td class="amount positive">${fmtEur(s.allowance||0)}</td>
     <td class="amount ${saldo>=0?'positive':'negative'}">${saldo>=0?'+':''}${fmtEur(saldo)}</td>
-    <td style="white-space:nowrap"><input id="sp_ausl_${s.id}" type="number" value="${(+s.auslagen||0).toFixed(2)}" onchange="updateSpese('${s.id}','auslagen',+this.value);recalcSpeseRow('${s.id}')" step="0.01" style="width:75px;text-align:right"/> ${currencySymbol()} <button type="button" class="btn-icon" title="Taschenrechner" onclick="openCalc('sp_ausl_${s.id}')">🧮</button></td>
+    ${speseAmountCell(s,'auslagen','sp_ausl_'+s.id)}
     <td class="amount ${zuUeberweisen>=0?'positive':'negative'}" style="font-weight:700">${fmtEur(zuUeberweisen)}</td>
     <td style="white-space:nowrap">${(() => { const _k=kontoById(s.kontoId||defaultKontoId()); const _kn=_k?_k.name:'Konto'; const _cf=_k?_k.cashflow:true; return `<button class="btn-icon" title="Konto (Spesen-Saldo): ${_kn} – klicken zum Ändern" onclick="pickSpeseKonto('${s.id}')" style="width:auto;min-width:0;padding:0 8px;font-size:12px;white-space:nowrap;gap:4px">${_cf?'🏦':'📈'} ${_kn}</button>`; })()}<button class="btn-icon danger" onclick="deleteSpese('${s.id}')">×</button></td>
   </tr>`;
@@ -10588,6 +10677,12 @@ window.updatePosition    = updatePosition;
 window.deletePosition    = deletePosition;
 window.removeSplit       = removeSplit;
 window.unmergeRow        = unmergeRow;
+window.speseTogglePos    = speseTogglePos;
+window.speseSplitStart   = speseSplitStart;
+window.speseAddPos       = speseAddPos;
+window.speseUpdatePos    = speseUpdatePos;
+window.speseDeletePos    = speseDeletePos;
+window.speseRemoveSplit  = speseRemoveSplit;
 window.mergeSelected     = mergeSelected;
 window.pickEinnahmeKonto = pickEinnahmeKonto;
 window.pickFixkZielkonto = pickFixkZielkonto;
