@@ -222,6 +222,10 @@ function setAblaufVorlauf(v) {
 // Format je Eintrag: { v: 'Version', date: 'YYYY-MM-DD', changes: ['...','...'] }
 // Änderungen dürfen mit **Fett** Markierung versehen werden.
 const CHANGELOG = [
+  { v: '1.0.50', date: '2026-09-14', changes: [
+    '**Reise-Zusammenfassung in der Gesamt-Zeile** – Die Gesamt-Zeile der Spesen-Tabelle zeigt jetzt zusätzlich, wie viele Reisen erfasst sind und wie viele Tage du insgesamt unterwegs warst (Summe der An-/Abreise- und Vor-Ort-Tage; die beiden Tagesspalten werden zusätzlich einzeln aufsummiert).',
+    '**Kennzahl „Unterwegs" mit % der Arbeitstage** – Eine neue Kachel oben zeigt die Tage unterwegs, die Anzahl der Reisen und wie viel Prozent der Arbeitstage das sind. Die Arbeitstage werden für Baden-Württemberg berechnet (Mo–Fr ohne die gesetzlichen BW-Feiertage inkl. der beweglichen Oster-Feiertage). Im Monats-Ansicht bezieht sich der Wert auf den Monat, mit „Alle anzeigen" auf das ganze Jahr.',
+  ]},
   { v: '1.0.49', date: '2026-09-13', changes: [
     '**Positionen bei Spesen** – Die aus Einkäufen/Ausgaben bekannte Aufteilung in Unterpositionen gibt es jetzt auch bei Geschäftsreisen: Sowohl die Spalte „Ausgaben" (Kosten für mich auf Reise, +/−) als auch „Auslagen" lassen sich pro Reise über das ⊞-Symbol in einzelne Positionen mit Beschreibung, Datum und Betrag aufteilen. Die Spalte zeigt dann die Summe und lässt sich auf-/zuklappen (▸/▾); Saldo, „Zu überweisen" und alle Summen bleiben automatisch korrekt. Positionen dürfen auch negativ sein (z.B. eine Erstattung gegenrechnen). Über „Aufteilung entfernen" wird wieder ein einzelner Betrag daraus.',
   ]},
@@ -3985,6 +3989,53 @@ function speseEditorRows(s) {
   return html;
 }
 
+// ── ARBEITSTAGE (Baden-Württemberg) ─────────────────────────────────────────
+// Werktage Mo–Fr abzüglich der gesetzlichen Feiertage in BW (inkl. der
+// beweglichen Oster-Feiertage). Dient nur zur groben Einordnung „wie viel %
+// der Arbeitstage war ich unterwegs" in der Spesen-Übersicht.
+function _ymdLocal(d) { return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0'); }
+function osterSonntag(year) {
+  // Gauß/Butcher (Anonymous Gregorian algorithm)
+  const a=year%19, b=Math.floor(year/100), c=year%100, d=Math.floor(b/4), e=b%4,
+        f=Math.floor((b+8)/25), g=Math.floor((b-f+1)/3), h=(19*a+b-d-g+15)%30,
+        i=Math.floor(c/4), k=c%4, l=(32+2*e+2*i-h-k)%7, m=Math.floor((a+11*h+22*l)/451),
+        month=Math.floor((h+l-7*m+114)/31), day=((h+l-7*m+114)%31)+1;
+  return new Date(year, month-1, day);
+}
+function bwFeiertageSet(year) {
+  const o = osterSonntag(year);
+  const add = (base, n) => { const x = new Date(base); x.setDate(x.getDate()+n); return x; };
+  const list = [
+    new Date(year,0,1),   // Neujahr
+    new Date(year,0,6),   // Heilige Drei Könige (BW)
+    add(o,-2),            // Karfreitag
+    add(o,1),             // Ostermontag
+    new Date(year,4,1),   // Tag der Arbeit
+    add(o,39),            // Christi Himmelfahrt
+    add(o,50),            // Pfingstmontag
+    add(o,60),            // Fronleichnam (BW)
+    new Date(year,9,3),   // Tag der Deutschen Einheit
+    new Date(year,10,1),  // Allerheiligen (BW)
+    new Date(year,11,25), // 1. Weihnachtsfeiertag
+    new Date(year,11,26), // 2. Weihnachtsfeiertag
+  ];
+  return new Set(list.map(_ymdLocal));
+}
+// Arbeitstage (Mo–Fr ohne BW-Feiertage) im Zeitraum [fromYmd, toYmd] inklusive
+function arbeitstageZeitraum(fromYmd, toYmd) {
+  const start = new Date(fromYmd + 'T00:00:00'), end = new Date(toYmd + 'T00:00:00');
+  if (isNaN(start) || isNaN(end) || end < start) return 0;
+  const feier = new Set();
+  for (let y = start.getFullYear(); y <= end.getFullYear(); y++) bwFeiertageSet(y).forEach(x => feier.add(x));
+  let n = 0; const d = new Date(start);
+  while (d <= end) {
+    const wd = d.getDay();
+    if (wd !== 0 && wd !== 6 && !feier.has(_ymdLocal(d))) n++;
+    d.setDate(d.getDate() + 1);
+  }
+  return n;
+}
+
 // ── PAGE: SPESEN ──────────────────────────────────────────────────────────
 function spesen() {
   const showAll = document.getElementById('spesenShowAll')?.checked;
@@ -3996,6 +4047,28 @@ function spesen() {
   const totalAuslagen = items.reduce((s,t)=>s+(t.auslagen||0),0);
   const totalSaldo    = totalSpesen - totalAusgaben;
   const totalNetto    = totalSpesen + totalAuslagen;
+  // Anzahl Reisen und Tage unterwegs (An-/Abreise- + Vor-Ort-Tage, gleiche Fallback-Logik wie speseRow)
+  const anzReisen = items.length;
+  let sumAnreise = 0, sumVorOrt = 0;
+  items.forEach(s => {
+    const from = s.dateFrom || ''; const to = s.dateTo || '';
+    const td = from && to ? Math.round((new Date(to) - new Date(from)) / (1000*60*60*24)) + 1 : 0;
+    const anAb = td <= 1 ? 1 : 2; const vo = Math.max(0, td - 2);
+    sumAnreise += (+(s.anreise || anAb) || 0);
+    sumVorOrt  += (+(s.vorOrt  || vo)  || 0);
+  });
+  const tageGesamt = sumAnreise + sumVorOrt;
+  // Arbeitstage (BW) im betrachteten Zeitraum: Gesamtjahr oder aktueller Monat
+  const jahr = (currentMonth || '').slice(0,4) || String(new Date().getFullYear());
+  let atFrom, atTo;
+  if (showAll) { atFrom = jahr + '-01-01'; atTo = jahr + '-12-31'; }
+  else {
+    const [jy, jm] = (currentMonth || (jahr + '-01')).split('-').map(Number);
+    atFrom = currentMonth + '-01';
+    atTo = currentMonth + '-' + String(new Date(jy, jm, 0).getDate()).padStart(2,'0');
+  }
+  const arbeitstage = arbeitstageZeitraum(atFrom, atTo);
+  const unterwegsPct = arbeitstage > 0 ? Math.round((tageGesamt / arbeitstage) * 100) : 0;
 
   return `${lockBanner()}
     <div class="card">
@@ -4013,6 +4086,7 @@ function spesen() {
       <div class="kpi"><div class="kpi-label">Spesen gesamt</div><div class="kpi-value positive">${fmtEur(totalSpesen)}</div></div>
       <div class="kpi"><div class="kpi-label">Ausgaben gesamt</div><div class="kpi-value negative">${fmtEur(totalAusgaben)}</div></div>
       <div class="kpi"><div class="kpi-label">Auslagen gesamt</div><div class="kpi-value neutral">${fmtEur(totalAuslagen)}</div></div>
+      <div class="kpi"><div class="kpi-label">Unterwegs${showAll?'':' ('+monthLabel(currentMonth)+')'}</div><div class="kpi-value neutral">${tageGesamt} ${tageGesamt===1?'Tag':'Tage'}</div><div style="font-size:11px;color:var(--muted);margin-top:2px">${anzReisen} ${anzReisen===1?'Reise':'Reisen'} · ${unterwegsPct}% der Arbeitstage (${arbeitstage} AT, BW)</div></div>
     </div>
 
     <div style="font-size:11px;color:var(--muted);margin:-8px 0 14px">
@@ -4031,7 +4105,10 @@ function spesen() {
       <tbody id="spesenTable">
         ${items.map(s => speseRow(s) + speseEditorRows(s)).join('')}
         <tr style="background:var(--surface)">
-          <td colspan="8" style="padding:8px 12px;font-weight:700">Gesamt</td>
+          <td colspan="3" style="padding:8px 12px;font-weight:700">Gesamt · ${anzReisen} ${anzReisen===1?'Reise':'Reisen'} · ${tageGesamt} ${tageGesamt===1?'Tag':'Tage'} unterwegs</td>
+          <td style="text-align:center;font-weight:700" title="Summe An-/Abreisetage">${sumAnreise}</td>
+          <td style="text-align:center;font-weight:700" title="Summe Vor-Ort-Tage">${sumVorOrt}</td>
+          <td colspan="3"></td>
           <td class="amount negative">${fmtEur(totalAusgaben)}</td>
           <td class="amount positive">${fmtEur(totalSpesen)}</td>
           <td class="amount ${totalSaldo>=0?'positive':'negative'}">${totalSaldo>=0?'+':''}${fmtEur(totalSaldo)}</td>
