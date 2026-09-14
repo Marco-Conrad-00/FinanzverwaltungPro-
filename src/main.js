@@ -620,6 +620,25 @@ ipcMain.handle('read-file', (_, fp) => {
   return fp.toLowerCase().endsWith('.pdf') ? { type:'base64', data:buf.toString('base64') } : { type:'text', data:buf.toString('utf8') };
 });
 
+// Beliebige Datei über Speichern-Dialog ablegen (z.B. CSV-Vorlagen/Exporte).
+// Inhalt wird als UTF-8 geschrieben; ein evtl. vorangestelltes BOM im content
+// bleibt erhalten (wichtig für Umlaute im deutschen Excel).
+ipcMain.handle('save-file', async (_e, payload) => {
+  try {
+    const { defaultName, content, filters } = payload || {};
+    const result = await dialog.showSaveDialog(win, {
+      title: 'Speichern unter',
+      defaultPath: path.join(require('os').homedir(), 'Documents', defaultName || 'export.csv'),
+      filters: (filters && filters.length) ? filters : [{ name: 'CSV', extensions: ['csv'] }]
+    });
+    if (result.canceled || !result.filePath) return { ok: false, canceled: true };
+    fs.writeFileSync(result.filePath, content != null ? String(content) : '', 'utf8');
+    return { ok: true, path: result.filePath };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+});
+
 ipcMain.handle('get-version', () => app.getVersion());
 
 // User data lives ONLY in userData/data.json - never hardcoded in app code.

@@ -6,6 +6,7 @@ window.EA = {
   saveData:   (d) => ipcRenderer.invoke('save-data', d),
   openFiles:  ()  => ipcRenderer.invoke('open-files'),
   readFile:   (p) => ipcRenderer.invoke('read-file', p),
+  saveFile:   (opts) => ipcRenderer.invoke('save-file', opts),
   getVersion: ()  => ipcRenderer.invoke('get-version'),
   createShortcut: () => ipcRenderer.invoke('create-shortcut'),
   printToPdf: (opts) => ipcRenderer.invoke('print-to-pdf', opts),

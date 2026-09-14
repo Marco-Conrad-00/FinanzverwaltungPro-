@@ -222,6 +222,10 @@ function setAblaufVorlauf(v) {
 // Format je Eintrag: { v: 'Version', date: 'YYYY-MM-DD', changes: ['...','...'] }
 // Änderungen dürfen mit **Fett** Markierung versehen werden.
 const CHANGELOG = [
+  { v: '1.0.51', date: '2026-09-14', changes: [
+    '**Vorlagen & CSV-Import** – Unter Einstellungen → „Daten & Sicherheit" gibt es jetzt „Vorlagen & CSV-Import" für Fixkosten, Finanzprodukte und Versicherungen. Du kannst eine leere Vorlage erzeugen, sie in Excel pflegen (Semikolon-getrennt, UTF-8 – Umlaute bleiben korrekt) und wieder importieren. „Export" lädt bestehende Daten herunter, damit du sie außerhalb bearbeiten und zurückspielen kannst. Beim Import werden neue Einträge hinzugefügt (vorhandene bleiben unverändert) und du siehst vorher eine Vorschau.',
+    '**Versicherung aus PDF anlegen** – Auf der Seite „Versicherungen" gibt es „📄 Aus PDF anlegen": Du wählst das PDF und die App füllt Name, Anbieter, Policennummer, Beginn/Ende, Betrag und Zahlweise so gut wie möglich vor (läuft komplett lokal, ohne Internet). Du prüfst und korrigierst nur noch – das Dokument wird gleich mit angehängt. Manuelles Anlegen bleibt natürlich weiter möglich. Hinweis: eingescannte PDFs ohne Textebene können nicht ausgelesen werden.',
+  ]},
   { v: '1.0.50', date: '2026-09-14', changes: [
     '**Reise-Zusammenfassung in der Gesamt-Zeile** – Die Gesamt-Zeile der Spesen-Tabelle zeigt jetzt zusätzlich, wie viele Reisen erfasst sind und wie viele Tage du insgesamt unterwegs warst (Summe der An-/Abreise- und Vor-Ort-Tage; die beiden Tagesspalten werden zusätzlich einzeln aufsummiert).',
     '**Kennzahl „Unterwegs" mit % der Arbeitstage** – Eine neue Kachel oben zeigt die Tage unterwegs, die Anzahl der Reisen und wie viel Prozent der Arbeitstage das sind. Die Arbeitstage werden für Baden-Württemberg berechnet (Mo–Fr ohne die gesetzlichen BW-Feiertage inkl. der beweglichen Oster-Feiertage). Im Monats-Ansicht bezieht sich der Wert auf den Monat, mit „Alle anzeigen" auf das ganze Jahr.',
@@ -2423,7 +2427,10 @@ function versicherungen() {
   }
 
   return '<div>' +
-    '<div style="display:flex;justify-content:flex-end;margin-bottom:14px"><button class="btn btn-primary" onclick="addVersicherung()">+ Versicherung / Vertrag</button></div>' +
+    '<div style="display:flex;justify-content:flex-end;gap:8px;margin-bottom:14px">' +
+      '<button class="btn btn-ghost" onclick="versAusPdf()" title="PDF wählen – Name, Police, Beginn/Ende usw. werden aus dem Dokument vorausgefüllt (bitte prüfen)">📄 Aus PDF anlegen</button>' +
+      '<button class="btn btn-primary" onclick="addVersicherung()">+ Versicherung / Vertrag</button>' +
+    '</div>' +
     '<div style="display:grid;grid-template-columns:320px 1fr;gap:16px;align-items:start">' +
       '<div>' + listHtml + '</div><div>' + detailHtml + '</div>' +
     '</div></div>';
@@ -5868,6 +5875,323 @@ function setKontoIstStand(kontoId) {
   });
 }
 
+// ── CSV: VORLAGEN, EXPORT & IMPORT ──────────────────────────────────────────
+// Erzeugt CSV-Vorlagen (Semikolon-getrennt, UTF-8 mit BOM für deutsches Excel),
+// exportiert bestehende Daten und importiert wieder – mit Vorschau vor dem
+// Übernehmen. Import fügt NEUE Einträge hinzu; vorhandene bleiben unverändert.
+const CSV_SEP = ';';
+function csvCell(v) {
+  v = (v == null ? '' : String(v));
+  return /[";\n\r]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v;
+}
+function buildCSV(headers, rows) {
+  const lines = [headers.map(csvCell).join(CSV_SEP)];
+  (rows || []).forEach(r => lines.push(r.map(csvCell).join(CSV_SEP)));
+  return '﻿' + lines.join('\r\n') + '\r\n'; // BOM + CRLF -> Excel/Umlaute OK
+}
+function parseCSV(text) {
+  if (!text) return [];
+  if (text.charCodeAt(0) === 0xFEFF) text = text.slice(1); // BOM entfernen
+  const firstLine = text.split(/\r?\n/)[0] || '';
+  const sep = (firstLine.split(';').length >= firstLine.split(',').length) ? ';' : ',';
+  const rows = []; let row = [], cur = '', inQ = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (inQ) {
+      if (c === '"') { if (text[i + 1] === '"') { cur += '"'; i++; } else inQ = false; }
+      else cur += c;
+    } else {
+      if (c === '"') inQ = true;
+      else if (c === sep) { row.push(cur); cur = ''; }
+      else if (c === '\n') { row.push(cur); rows.push(row); row = []; cur = ''; }
+      else if (c === '\r') { /* ignorieren */ }
+      else cur += c;
+    }
+  }
+  if (cur.length || row.length) { row.push(cur); rows.push(row); }
+  return rows;
+}
+function csvToObjects(text) {
+  const rows = parseCSV(text).filter(r => r.some(c => (c || '').trim() !== ''));
+  if (!rows.length) return { headers: [], objects: [] };
+  const headers = rows[0].map(h => (h || '').trim());
+  const objects = rows.slice(1).map(r => {
+    const o = {};
+    headers.forEach((h, idx) => { o[h] = (r[idx] != null ? String(r[idx]).trim() : ''); });
+    return o;
+  });
+  return { headers, objects };
+}
+function csvNum(v) {
+  if (v == null) return 0;
+  let s = String(v).trim().replace(/[€\s]/g, '');
+  if (s === '') return 0;
+  if (s.indexOf(',') > -1 && s.indexOf('.') > -1) s = s.replace(/\./g, '').replace(',', '.');
+  else if (s.indexOf(',') > -1) s = s.replace(',', '.');
+  const n = parseFloat(s);
+  return isNaN(n) ? 0 : n;
+}
+function csvNormMonat(v) {
+  const m = String(v || '').trim().match(/(\d{4})[-.\/](\d{1,2})/);
+  return m ? m[1] + '-' + String(+m[2]).padStart(2, '0') : '';
+}
+function csvNormDatum(v) {
+  v = String(v || '').trim(); if (!v) return '';
+  let m = v.match(/(\d{4})[-.\/](\d{1,2})[-.\/](\d{1,2})/);
+  if (m) return m[1] + '-' + String(+m[2]).padStart(2, '0') + '-' + String(+m[3]).padStart(2, '0');
+  m = v.match(/(\d{1,2})[-.\/](\d{1,2})[-.\/](\d{4})/);
+  if (m) return m[3] + '-' + String(+m[2]).padStart(2, '0') + '-' + String(+m[1]).padStart(2, '0');
+  return v;
+}
+const CSV_ZW_INTERVAL = { 'monatlich':1, 'monat':1, 'vierteljährlich':3, 'vierteljahrlich':3, 'quartalsweise':3, 'quartal':3, 'halbjährlich':6, 'halbjahrlich':6, 'jährlich':12, 'jahrlich':12, 'jahr':12 };
+function csvZwToInterval(v) { const k = String(v || '').toLowerCase().trim(); return CSV_ZW_INTERVAL[k] || (parseInt(v, 10) || 1); }
+function csvIntervalToZw(n) { return ({ 1:'monatlich', 3:'vierteljährlich', 6:'halbjährlich', 12:'jährlich' })[+n] || 'monatlich'; }
+function csvNormZwVers(v) {
+  const k = String(v || '').toLowerCase().trim();
+  if (/einmal/.test(k)) return 'einmalig';
+  if (/monat/.test(k)) return 'monatlich';
+  if (/viertel|quartal/.test(k)) return 'vierteljährlich';
+  if (/halb/.test(k)) return 'halbjährlich';
+  if (/jähr|jahr/.test(k)) return 'jährlich';
+  return '';
+}
+function kontoByName(name) {
+  const n = String(name || '').trim().toLowerCase(); if (!n) return null;
+  return (getKonten() || []).find(k => String(k.name || '').trim().toLowerCase() === n) || null;
+}
+
+const CSV_DEFS = {
+  fixkosten: {
+    label: 'Fixkosten', coll: 'fixkosten',
+    headers: ['Name','Betrag','Kategorie','Zahlweise','Fälligkeitstag','Start (JJJJ-MM)','Gültig bis (JJJJ-MM)','Vertragsende (JJJJ-MM)','Konto'],
+    example: [
+      ['Netflix','12,99','Abo','monatlich','1','2026-01','2026-12','','Girokonto'],
+      ['KFZ-Versicherung','480,00','Versicherung','jährlich','1','2026-01','2026-12','','Girokonto'],
+    ],
+    toRow: f => [ f.name||'', f.amount!=null?f.amount:'', f.category||f.cat||'', csvIntervalToZw(f.interval), f.day||1, f.start||'', f.end||'', f.laufzeitEnde||'', (kontoById(f.kontoId)?.name)||'' ],
+    fromObj: o => {
+      const name = (o['Name']||'').trim(); if (!name) return null;
+      const f = { id: uid(), name,
+        category: (o['Kategorie']||'Sonstiges').trim() || 'Sonstiges',
+        amount: csvNum(o['Betrag']),
+        day: Math.min(31, Math.max(1, parseInt(o['Fälligkeitstag'],10) || 1)),
+        interval: csvZwToInterval(o['Zahlweise']),
+        start: csvNormMonat(o['Start (JJJJ-MM)']) || currentMonth,
+        end: csvNormMonat(o['Gültig bis (JJJJ-MM)']) || (getSelectedYear()+'-12') };
+      f.cat = f.category;
+      const lze = csvNormMonat(o['Vertragsende (JJJJ-MM)']); if (lze) f.laufzeitEnde = lze;
+      const k = kontoByName(o['Konto']); f.kontoId = k ? k.id : defaultKontoId();
+      if (!f.amount) return null;
+      return f;
+    },
+  },
+  sparen: {
+    label: 'Finanzprodukte', coll: 'sparen',
+    headers: ['Datum (JJJJ-MM-TT)','Typ','Kategorie','Depot/Anbieter','Wertpapier','Symbol','ISIN','WKN','Stückzahl','Kurs','Gebühren','Betrag','Notiz'],
+    example: [
+      ['2026-01-15','Kauf','ETF','Trade Republic','MSCI World','EUNL','IE00B4L5Y983','','10','85,50','1,00','','Sparplan'],
+      ['2026-01-31','Bestand','Bargeld','Tagesgeld','','','','','','','','5000,00','Rücklage'],
+    ],
+    toRow: s => {
+      const typ = s.txType ? ({ kauf:'Kauf', verkauf:'Verkauf', bestand:'Bestand' }[s.txType] || s.txType) : '';
+      return [ s.date||'', typ, s.kategorie||'', s.depot||'',
+        s.wertpapier?.name||s.etf?.name||'', s.wertpapier?.symbol||s.etf?.ticker||'',
+        s.wertpapier?.isin||s.etf?.isin||'', s.wertpapier?.wkn||s.etf?.wkn||'',
+        s.units!=null?Math.abs(s.units):'', s.price!=null?s.price:'', s.fees!=null?s.fees:'',
+        Math.abs(+s.amount||0), s.note||'' ];
+    },
+    fromObj: o => {
+      const typRaw = (o['Typ']||'').toLowerCase().trim();
+      const txType = typRaw.startsWith('verk') ? 'verkauf' : typRaw.startsWith('best') ? 'bestand' : typRaw.startsWith('kauf') ? 'kauf' : '';
+      const wpName = (o['Wertpapier']||'').trim(), symbol = (o['Symbol']||'').trim(), isin = (o['ISIN']||'').trim(), wkn = (o['WKN']||'').trim();
+      const hasWp = !!(wpName || symbol || isin);
+      let units = csvNum(o['Stückzahl']), price = csvNum(o['Kurs']), fees = csvNum(o['Gebühren']);
+      let amount = csvNum(o['Betrag']);
+      if (hasWp && !amount && units && price) amount = +(units * price + fees).toFixed(2);
+      if (!hasWp && !amount) return null;
+      const entry = { id: uid(), date: csvNormDatum(o['Datum (JJJJ-MM-TT)']) || today(),
+        note: (o['Notiz']||'').trim(),
+        kategorie: (o['Kategorie']||'Sonstiges').trim() || 'Sonstiges',
+        depot: (o['Depot/Anbieter']||'Sonstiges').trim() || 'Sonstiges',
+        amount: (txType === 'verkauf' ? -Math.abs(amount) : amount) };
+      if (hasWp) {
+        const wp = { name: wpName || symbol || isin, symbol, isin, wkn };
+        entry.wertpapier = wp; entry.txType = txType || 'kauf';
+        entry.units = (entry.txType === 'verkauf' ? -Math.abs(units) : units);
+        entry.price = price; entry.fees = fees;
+        if (entry.txType === 'bestand') entry.skipCashflow = true;
+        entry.etf = { name: wp.name, ticker: wp.symbol, isin: wp.isin, wkn: wp.wkn };
+      }
+      return entry;
+    },
+  },
+  versicherungen: {
+    label: 'Versicherungen', coll: 'versicherungen',
+    headers: ['Name','Typ','Anbieter','Policennummer','Betrag','Zahlweise','Beginn (JJJJ-MM-TT)','Ende (JJJJ-MM-TT)','Notiz'],
+    example: [
+      ['Privathaftpflicht','Haftpflicht','HUK24','HP-12345678','79,90','jährlich','2024-05-01','','']
+    ],
+    toRow: v => [ v.name||'', v.typ||'', v.anbieter||'', v.police||'', v.amount!=null?v.amount:'', v.zahlweise||'', v.start||'', v.end||'', v.note||'' ],
+    fromObj: o => {
+      const name = (o['Name']||'').trim(); if (!name) return null;
+      return { id: uid(), name, typ: (o['Typ']||'').trim(), anbieter: (o['Anbieter']||'').trim(),
+        police: (o['Policennummer']||'').trim(), amount: csvNum(o['Betrag']),
+        zahlweise: csvNormZwVers(o['Zahlweise']) || 'jährlich',
+        start: csvNormDatum(o['Beginn (JJJJ-MM-TT)']) || '', end: csvNormDatum(o['Ende (JJJJ-MM-TT)']) || '',
+        note: (o['Notiz']||'').trim(), docName: '', docPath: '', fixId: '' };
+    },
+  },
+};
+
+async function csvSave(content, defaultName) {
+  if (!(window.EA && EA.saveFile)) {
+    await uiAlert({ title: 'Nicht verfügbar', icon: '⚠', message: 'Das Speichern von Dateien wird von dieser App-Version noch nicht unterstützt. Bitte App aktualisieren.' });
+    return false;
+  }
+  const r = await EA.saveFile({ defaultName, content, filters: [{ name: 'CSV', extensions: ['csv'] }] });
+  if (r && r.ok) { showToast('Gespeichert: ' + (r.path ? r.path.split(/[\\/]/).pop() : defaultName)); return true; }
+  if (r && r.canceled) return false;
+  await uiAlert({ title: 'Fehler', icon: '⚠', message: 'Speichern fehlgeschlagen: ' + ((r && r.error) || 'unbekannt') });
+  return false;
+}
+async function csvVorlage(key) {
+  const d = CSV_DEFS[key]; if (!d) return;
+  await csvSave(buildCSV(d.headers, d.example || []), d.label + '-Vorlage.csv');
+}
+async function csvExport(key) {
+  const d = CSV_DEFS[key]; if (!d) return;
+  const arr = state[d.coll] || [];
+  if (!arr.length) { showToast('Keine ' + d.label + ' zum Exportieren', 'info'); return; }
+  await csvSave(buildCSV(d.headers, arr.map(d.toRow)), d.label + '-Export.csv');
+}
+async function csvImport(key) {
+  if (!requireUnlocked()) return;
+  const d = CSV_DEFS[key]; if (!d) return;
+  if (!(window.EA && EA.openFiles && EA.readFile)) {
+    await uiAlert({ title: 'Nicht verfügbar', icon: '⚠', message: 'Der Datei-Import wird von dieser App-Version nicht unterstützt.' });
+    return;
+  }
+  const files = await EA.openFiles(); if (!files || !files.length) return;
+  const file = files.find(f => /\.(csv|txt)$/i.test(f.name)) || files[0];
+  const res = await EA.readFile(file.path);
+  const text = (res && res.type === 'text') ? res.data : '';
+  if (!text) { await uiAlert({ title: 'Datei leer', icon: '⚠', message: 'Die Datei konnte nicht als Text gelesen werden. Bitte eine CSV-Datei wählen.' }); return; }
+  const { objects } = csvToObjects(text);
+  const parsed = [], errors = [];
+  objects.forEach((o, i) => {
+    try { const e = d.fromObj(o); if (e) parsed.push(e); else errors.push('Zeile ' + (i + 2) + ': übersprungen (Name/Betrag fehlt)'); }
+    catch (err) { errors.push('Zeile ' + (i + 2) + ': ' + err.message); }
+  });
+  if (!parsed.length) {
+    await uiAlert({ title: 'Nichts importiert', icon: '⚠', message: 'Keine gültigen Zeilen gefunden.' + (errors.length ? '<br><br>' + errors.slice(0, 8).join('<br>') : '') });
+    return;
+  }
+  const esc = s => String(s == null ? '' : s).replace(/</g, '&lt;');
+  const preview = parsed.slice(0, 12).map(d.toRow);
+  const tbl = '<div style="max-height:280px;overflow:auto;border:1px solid var(--border);border-radius:8px">' +
+    '<table style="width:100%;font-size:11px;border-collapse:collapse">' +
+    '<thead><tr>' + d.headers.map(h => '<th style="text-align:left;padding:4px 6px;border-bottom:1px solid var(--border);white-space:nowrap;background:var(--surface-2)">' + esc(h) + '</th>').join('') + '</tr></thead>' +
+    '<tbody>' + preview.map(r => '<tr>' + r.map(c => '<td style="padding:3px 6px;border-bottom:1px solid var(--border);white-space:nowrap">' + esc(c) + '</td>').join('') + '</tr>').join('') + '</tbody></table></div>' +
+    (parsed.length > 12 ? '<div style="font-size:11px;color:var(--muted);margin-top:6px">… und ' + (parsed.length - 12) + ' weitere</div>' : '') +
+    (errors.length ? '<div style="font-size:11px;color:var(--red);margin-top:8px">' + errors.length + ' Zeile(n) übersprungen</div>' : '');
+  const ok = await uiConfirm({ title: 'Import prüfen', icon: '📥',
+    okLabel: 'Importieren (' + parsed.length + ')', cancelLabel: 'Abbrechen',
+    message: '<strong>' + parsed.length + ' ' + d.label + '</strong> werden hinzugefügt (vorhandene bleiben unverändert). Vorschau:', html: tbl });
+  if (!ok) return;
+  state[d.coll] = state[d.coll] || [];
+  parsed.forEach(e => state[d.coll].push(e));
+  saveData(); renderPage();
+  showToast(parsed.length + ' ' + d.label + ' importiert');
+}
+function csvImportUiRows() {
+  return ['fixkosten', 'sparen', 'versicherungen'].map(k => {
+    const label = CSV_DEFS[k].label;
+    return '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:10px 0;border-top:1px solid var(--border)">' +
+      '<strong style="font-size:13px;min-width:130px">' + label + '</strong>' +
+      '<button class="btn btn-ghost btn-sm" onclick="csvVorlage(\'' + k + '\')" title="Leere Vorlage mit Beispielzeilen erzeugen">📄 Vorlage</button>' +
+      '<button class="btn btn-ghost btn-sm" onclick="csvExport(\'' + k + '\')" title="Aktuelle Daten als CSV exportieren">⬇ Export</button>' +
+      '<button class="btn btn-primary btn-sm" onclick="csvImport(\'' + k + '\')" title="CSV-Datei importieren (mit Vorschau)">📥 Import…</button>' +
+      '</div>';
+  }).join('');
+}
+
+// ── VERSICHERUNG AUS PDF VORAUSFÜLLEN (lokal, Best-Effort) ───────────────────
+async function extractPdfText(fp) {
+  const res = await EA.readFile(fp);
+  if (!res || res.type !== 'base64' || !res.data) return '';
+  const raw = atob(res.data);
+  const arr = new Uint8Array(raw.length);
+  for (let i = 0; i < raw.length; i++) arr[i] = raw.charCodeAt(i);
+  const pdf = await pdfjsLib.getDocument({ data: arr }).promise;
+  let out = '';
+  const maxP = Math.min(pdf.numPages, 6);
+  for (let p = 1; p <= maxP; p++) {
+    const page = await pdf.getPage(p);
+    const tc = await page.getTextContent();
+    out += tc.items.map(it => it.str).join(' ') + '\n';
+  }
+  return out;
+}
+function guessVersFromText(text) {
+  const g = {};
+  const t = String(text || '').replace(/\s+/g, ' ');
+  let m = t.match(/(?:Versicherungsschein(?:nummer)?|Versicherungsnummer|Policen?nummer|Police|Vertragsnummer|Schein-?Nr\.?)[^0-9A-Za-z]{0,12}([0-9][0-9A-Za-z\/\.\-]{3,24}[0-9A-Za-z])/i);
+  if (m) g.police = m[1].trim();
+  m = t.match(/(?:Jahresbeitrag|Gesamtbeitrag|Beitrag pro Jahr|Beitrag|Prämie|Praemie)[^0-9]{0,15}([0-9][0-9\.]*,[0-9]{2})/i);
+  if (m) g.amount = csvNum(m[1]);
+  if (/monatlich/i.test(t)) g.zahlweise = 'monatlich';
+  else if (/vierteljährlich|quartal/i.test(t)) g.zahlweise = 'vierteljährlich';
+  else if (/halbjährlich/i.test(t)) g.zahlweise = 'halbjährlich';
+  else if (/jährlich|jahresbeitrag/i.test(t)) g.zahlweise = 'jährlich';
+  m = t.match(/(?:Versicherungsbeginn|Vertragsbeginn|Beginn)[^0-9]{0,12}(\d{1,2}[.\/]\d{1,2}[.\/]\d{4})/i);
+  if (m) g.start = csvNormDatum(m[1]);
+  m = t.match(/(?:Ablauf|Vertragsende|Versicherungsende|Ende)[^0-9]{0,12}(\d{1,2}[.\/]\d{1,2}[.\/]\d{4})/i);
+  if (m) g.end = csvNormDatum(m[1]);
+  const anb = ['Allianz','AXA','HUK-COBURG','HUK24','HUK','ERGO','DEVK','R+V','Generali','Zurich','VHV','LVM','Debeka','Signal Iduna','Gothaer','Barmenia','Continentale','Provinzial','Württembergische','Alte Leipziger','Nürnberger','CosmosDirekt','DA Direkt','Verti','HanseMerkur','Techniker Krankenkasse','Barmer','DAK','AOK'];
+  for (const a of anb) { if (new RegExp('\\b' + a.replace(/[+]/g, '\\+') + '\\b', 'i').test(t)) { g.anbieter = a; break; } }
+  if (/Privathaftpflicht|Haftpflicht/i.test(t)) g.typ = 'Haftpflicht';
+  else if (/Hausrat/i.test(t)) g.typ = 'Hausrat';
+  else if (/Kfz|Kraftfahrt|Autoversicherung/i.test(t)) g.typ = 'Kfz';
+  else if (/Rechtsschutz/i.test(t)) g.typ = 'Rechtsschutz';
+  else if (/Zusatzversicherung|Zahnzusatz|Krankenzusatz/i.test(t)) g.typ = 'Zusatzversicherung';
+  else if (/Berufsunfähigkeit/i.test(t)) g.typ = 'Berufsunfähigkeit';
+  else if (/Unfall/i.test(t)) g.typ = 'Unfall';
+  else if (/Risikoleben|Lebensversicherung|Leben/i.test(t)) g.typ = 'Leben';
+  else if (/Kranken/i.test(t)) g.typ = 'Kranken';
+  if (g.anbieter || g.typ) g.name = [g.anbieter, g.typ].filter(Boolean).join(' ');
+  return g;
+}
+async function versAusPdf() {
+  if (!requireUnlocked()) return;
+  if (!(window.EA && EA.openFiles && EA.readFile)) {
+    await uiAlert({ title: 'Nicht verfügbar', icon: '⚠', message: 'Das Auslesen wird von dieser App-Version nicht unterstützt.' });
+    return;
+  }
+  const files = await EA.openFiles(); if (!files || !files.length) return;
+  const file = files.find(f => /\.pdf$/i.test(f.name)) || files[0];
+  if (!/\.pdf$/i.test(file.name)) { await uiAlert({ title: 'Kein PDF', icon: '⚠', message: 'Bitte eine PDF-Datei wählen.' }); return; }
+  showToast('Lese Dokument…', 'info');
+  let text = '';
+  try { text = await extractPdfText(file.path); } catch (e) { text = ''; }
+  const g = (text && text.trim()) ? guessVersFromText(text) : {};
+  const v = { id: uid(),
+    name: g.name || file.name.replace(/\.pdf$/i, ''),
+    typ: g.typ || '', anbieter: g.anbieter || '', police: g.police || '',
+    amount: g.amount || 0, zahlweise: g.zahlweise || 'jährlich',
+    start: g.start || (currentMonth || new Date().toISOString().slice(0, 7)), end: g.end || '',
+    note: '', docName: file.name, docPath: file.path, fixId: '' };
+  state.versicherungen = state.versicherungen || [];
+  state.versicherungen.push(v);
+  selectedVersId = v.id;
+  saveData();
+  if (typeof currentPage !== 'undefined' && currentPage !== 'versicherungen') navigate('versicherungen'); else renderPage();
+  const found = [];
+  if (g.anbieter) found.push('Anbieter'); if (g.typ) found.push('Typ'); if (g.police) found.push('Police');
+  if (g.start) found.push('Beginn'); if (g.end) found.push('Ende'); if (g.amount) found.push('Betrag');
+  if (!text || !text.trim()) showToast('Kein Text im PDF gefunden (evtl. Scan) – bitte manuell ausfüllen', 'info');
+  else showToast(found.length ? ('Erkannt: ' + found.join(', ') + ' – bitte prüfen') : 'Dokument angehängt – bitte Felder prüfen', 'info');
+}
+
 // ── Einstellungen: Tab-Verwaltung ───────────────────────────────────────────
 // Der zuletzt geöffnete Tab wird in config.settingsTab gemerkt.
 const SETTINGS_TABS = ['profil','konten','design','funktionen','daten','ueber'];
@@ -6434,6 +6758,19 @@ function einstellungen() {
           samt Kategorie vor. Übernommen wird nichts ohne deine Bestätigung –
           eingescannte Auszüge ohne Textebene können nicht gelesen werden.
         </div>
+      </div>
+
+      <div class="settings-section-header">📄 Vorlagen & CSV-Import</div>
+      <div class="card mb-2">
+        <div style="font-size:12px;color:var(--muted);margin-bottom:4px">
+          Erzeuge eine CSV-Vorlage, pflege sie bequem in Excel (Semikolon-getrennt,
+          UTF-8 – Umlaute bleiben korrekt) und importiere sie wieder. Beim Import
+          werden neue Einträge <strong>hinzugefügt</strong> – vorhandene bleiben
+          unverändert. Vor dem Übernehmen siehst du eine Vorschau. Mit „Export"
+          kannst du bestehende Daten herunterladen, außerhalb bearbeiten und
+          wieder importieren.
+        </div>
+        ${csvImportUiRows()}
       </div>
 
       <div class="settings-section-header">🔄 Updates</div>
@@ -10760,6 +11097,10 @@ window.speseAddPos       = speseAddPos;
 window.speseUpdatePos    = speseUpdatePos;
 window.speseDeletePos    = speseDeletePos;
 window.speseRemoveSplit  = speseRemoveSplit;
+window.csvVorlage        = csvVorlage;
+window.csvExport         = csvExport;
+window.csvImport         = csvImport;
+window.versAusPdf        = versAusPdf;
 window.mergeSelected     = mergeSelected;
 window.pickEinnahmeKonto = pickEinnahmeKonto;
 window.pickFixkZielkonto = pickFixkZielkonto;
