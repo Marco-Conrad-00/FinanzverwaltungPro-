@@ -222,6 +222,9 @@ function setAblaufVorlauf(v) {
 // Format je Eintrag: { v: 'Version', date: 'YYYY-MM-DD', changes: ['...','...'] }
 // Änderungen dürfen mit **Fett** Markierung versehen werden.
 const CHANGELOG = [
+  { v: '1.0.53', date: '2026-09-15', changes: [
+    '**Versicherung manuell mit Fixkost verknüpfen** – Beim „Verknüpfen" einer Versicherung sucht die App weiterhin automatisch eine gleichnamige Fixkost. Findet sie keine, kannst du jetzt aus einer Liste **eine bestehende Fixkost auswählen** und manuell verknüpfen – oder wie gehabt eine neue anlegen. So lassen sich Versicherungen auch mit anders benannten Fixkosten verbinden.',
+  ]},
   { v: '1.0.52', date: '2026-09-15', changes: [
     '**Lohn erst nach Bestätigung** – Gehalt und Nebenjob zählen jetzt erst dann zum Kontostand und Cashflow, wenn du sie als „erhalten" markierst. Im Einnahmen-Bereich gibt es dafür je einen Schalter „Gehalt erhalten?" und „Nebenjob erhalten?" für den laufenden Monat. Vergangene Monate gelten automatisch als erhalten. So steht das Geld nicht schon am Monatsanfang im Saldo, obwohl es noch gar nicht da ist (besonders praktisch für den Nebenjob, der oft erst Anfang des Folgemonats kommt).',
   ]},
@@ -2481,15 +2484,57 @@ async function versOpenDoc(id) {
   const o = getVersicherungen().find(x => x.id === id); if (!o || !o.docPath) return;
   try { if (window.EA && window.EA.openFolder) await window.EA.openFolder(o.docPath); } catch(e) { console.error('versOpenDoc', e); }
 }
+// Auswahl-Dialog: bestehende Fixkost zum Verknüpfen wählen, neue anlegen oder abbrechen.
+// Liefert eine Fixkost-ID, den Sentinel '__new__' oder null (Abbruch).
+function askFixkostWahl(opts) {
+  return new Promise((resolve) => {
+    const o = opts || {};
+    const fks = (getYearData().fixkosten || []).slice().sort((a, b) => (a.name||'').localeCompare(b.name||''));
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-overlay';
+    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:99999;display:flex;align-items:center;justify-content:center;padding:20px;backdrop-filter:blur(4px)';
+    const listHtml = fks.length ? fks.map(f =>
+      '<button class="fixk-wahl-btn" data-fid="' + f.id + '" style="display:flex;justify-content:space-between;align-items:center;width:100%;text-align:left;padding:11px 14px;margin:5px 0;border:1px solid var(--border);border-radius:8px;background:transparent;color:var(--text);cursor:pointer;font-size:14px">' +
+        '<span><strong>' + String(f.name||'Fixkost').replace(/</g,'&lt;') + '</strong> <span style="color:var(--muted);font-size:11px">' + String(f.category||f.cat||'').replace(/</g,'&lt;') + '</span></span>' +
+        '<span style="color:var(--muted)">' + fmtEur(+f.amount||0) + '</span>' +
+      '</button>'
+    ).join('') : '<p style="color:var(--muted);font-size:13px;margin:6px 0">Noch keine Fixkosten vorhanden.</p>';
+    overlay.innerHTML =
+      '<div style="background:var(--surface);color:var(--text);border:1px solid var(--border);border-radius:12px;max-width:480px;width:100%;box-shadow:0 20px 60px rgba(0,0,0,.5);max-height:82vh;display:flex;flex-direction:column">' +
+        '<div style="padding:18px 22px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:12px">' +
+          '<div style="font-size:26px;line-height:1">🔁</div><h3 style="margin:0;font-size:16px;font-weight:600;color:var(--text)">' + (o.title||'Mit welcher Fixkost verknüpfen?') + '</h3>' +
+        '</div>' +
+        '<div style="padding:14px 22px;overflow:auto">' +
+          (o.message ? '<p style="margin:0 0 10px;font-size:13px;color:var(--muted)">' + o.message + '</p>' : '') +
+          listHtml +
+          '<button class="fixk-wahl-btn" data-fid="__new__" style="display:flex;align-items:center;gap:8px;width:100%;text-align:left;padding:11px 14px;margin:12px 0 2px;border:1px dashed var(--border);border-radius:8px;background:transparent;color:var(--text);cursor:pointer;font-size:14px"><strong>➕ Neue Fixkost anlegen</strong></button>' +
+        '</div>' +
+        '<div style="padding:12px 22px;border-top:1px solid var(--border);display:flex;justify-content:flex-end;background:var(--surface-2);border-radius:0 0 12px 12px">' +
+          '<button class="btn btn-ghost" data-fid="__cancel__">Abbrechen</button>' +
+        '</div>' +
+      '</div>';
+    document.body.appendChild(overlay);
+    function cleanup(v) { overlay.remove(); resolve(v); }
+    overlay.querySelectorAll('[data-fid]').forEach(b => b.addEventListener('click', () => { const v = b.getAttribute('data-fid'); cleanup(v === '__cancel__' ? null : v); }));
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) cleanup(null); });
+  });
+}
 async function versLinkFixkost(id) {
   const o = getVersicherungen().find(x => x.id === id); if (!o) return;
   const nm = (o.name||'').trim().toLowerCase();
   const match = nm ? (getYearData().fixkosten||[]).find(f => (f.name||'').trim().toLowerCase() === nm) : null;
   if (match) { o.fixId = match.id; saveData(); renderPage(); showToast('Mit vorhandener Fixkost verknüpft', 'info'); return; }
-  const ok = await uiConfirm({ title: 'Fixkosten anlegen?', icon: '🔁',
-    message: 'Es gibt keine Fixkost namens „' + (o.name||'') + '". Als Fixkost anlegen (≈ ' + fmtEur(versMonthly(o)) + ' / Monat)?',
-    okLabel: 'Anlegen', cancelLabel: 'Abbrechen' });
-  if (!ok) return;
+  // Kein Namens-Treffer → bestehende Fixkost manuell wählen ODER neue anlegen
+  const wahl = await askFixkostWahl({
+    message: 'Keine Fixkost namens „' + (o.name||'') + '" gefunden. Wähle eine bestehende Fixkost zum Verknüpfen – oder lege eine neue an (≈ ' + fmtEur(versMonthly(o)) + ' / Monat).'
+  });
+  if (!wahl) return;
+  if (wahl !== '__new__') {
+    o.fixId = wahl; saveData(); renderPage();
+    const f = (getYearData().fixkosten||[]).find(x => x.id === wahl);
+    showToast('Verknüpft mit „' + (f ? (f.name||'Fixkost') : 'Fixkost') + '"', 'info');
+    return;
+  }
   const nf = { id: uid(), name: o.name || 'Versicherung', category: 'Versicherungen', cat: 'Versicherungen',
     amount: Math.round(versMonthly(o) * 100) / 100, day: 1, start: o.start || currentMonth, end: o.end || '',
     laufzeitEnde: o.end || '', kontoId: (typeof defaultKontoId === 'function' ? defaultKontoId() : undefined) };
