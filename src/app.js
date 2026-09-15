@@ -222,6 +222,9 @@ function setAblaufVorlauf(v) {
 // Format je Eintrag: { v: 'Version', date: 'YYYY-MM-DD', changes: ['...','...'] }
 // Änderungen dürfen mit **Fett** Markierung versehen werden.
 const CHANGELOG = [
+  { v: '1.0.52', date: '2026-09-15', changes: [
+    '**Lohn erst nach Bestätigung** – Gehalt und Nebenjob zählen jetzt erst dann zum Kontostand und Cashflow, wenn du sie als „erhalten" markierst. Im Einnahmen-Bereich gibt es dafür je einen Schalter „Gehalt erhalten?" und „Nebenjob erhalten?" für den laufenden Monat. Vergangene Monate gelten automatisch als erhalten. So steht das Geld nicht schon am Monatsanfang im Saldo, obwohl es noch gar nicht da ist (besonders praktisch für den Nebenjob, der oft erst Anfang des Folgemonats kommt).',
+  ]},
   { v: '1.0.51', date: '2026-09-14', changes: [
     '**Vorlagen & CSV-Import** – Unter Einstellungen → „Daten & Sicherheit" gibt es jetzt „Vorlagen & CSV-Import" für Fixkosten, Finanzprodukte und Versicherungen. Du kannst eine leere Vorlage erzeugen, sie in Excel pflegen (Semikolon-getrennt, UTF-8 – Umlaute bleiben korrekt) und wieder importieren. „Export" lädt bestehende Daten herunter, damit du sie außerhalb bearbeiten und zurückspielen kannst. Beim Import werden neue Einträge hinzugefügt (vorhandene bleiben unverändert) und du siehst vorher eine Vorschau.',
     '**Versicherung aus PDF anlegen** – Auf der Seite „Versicherungen" gibt es „📄 Aus PDF anlegen": Du wählst das PDF und die App füllt Name, Anbieter, Policennummer, Beginn/Ende, Betrag und Zahlweise so gut wie möglich vor (läuft komplett lokal, ohne Internet). Du prüfst und korrigierst nur noch – das Dokument wird gleich mit angehängt. Manuelles Anlegen bleibt natürlich weiter möglich. Hinweis: eingescannte PDFs ohne Textebene können nicht ausgelesen werden.',
@@ -1605,6 +1608,18 @@ function istCashflowBuchung(b, yr) {
   return ids.includes(kid);
 }
 // Netto-Bewegung eines Kontos im Jahr bis einschl. month (Einnahmen − Ausgaben).
+// Ist Gehalt/Nebenjob eines Monats bereits "erhalten"? Steuert, ob es zum
+// Kontostand/Cashflow zählt. Explizites Flag (gehaltErhalten/nebenjobErhalten)
+// gewinnt; ohne Flag gilt: vergangene Monate = erhalten, laufender/künftiger
+// Monat = erst nach Bestätigung (Schalter im Einnahmen-Bereich).
+function incomeReceived(m, field) {
+  const inc = state.incomeByMonth && state.incomeByMonth[m];
+  if (!inc) return false;
+  const flag = inc[field + 'Erhalten'];
+  if (flag === true) return true;
+  if (flag === false) return false;
+  return m < thisMonth();
+}
 function kontoNetBis(kontoId, month) {
   const ausg = (state.ausgaben||[]).filter(a => (a.kontoId||defaultKontoId()) === kontoId && !a._korrektur && (!month || a.month <= month))
     .reduce((s,a) => s + (+a.amount||0), 0);
@@ -1678,8 +1693,8 @@ function kontoNetBis(kontoId, month) {
   const months = monthsBetween(yr + '-01', grenze);
   months.forEach(m => {
     const inc = state.incomeByMonth[m] || { gehalt: 0, nebenjob: 0 };
-    if (getGehaltKonto(yr) === kontoId)   sonst += (+inc.gehalt||0);
-    if (getNebenjobKonto(yr) === kontoId) sonst += (+inc.nebenjob||0);
+    if (getGehaltKonto(yr) === kontoId   && incomeReceived(m, 'gehalt'))   sonst += (+inc.gehalt||0);
+    if (getNebenjobKonto(yr) === kontoId && incomeReceived(m, 'nebenjob')) sonst += (+inc.nebenjob||0);
     // Fixkosten mindern ihr zugeordnetes Konto (Default für Altbestand ohne kontoId).
     // Tagesgenau: zählt im laufenden Monat erst ab dem Fälligkeitstag (f.day).
     (state.fixkosten||[]).forEach(f => {
@@ -1878,7 +1893,9 @@ function monthFinancials(month, includeVormonat = true) {
   const regelIncome = (state.regelEinnahmen||[])
     .filter(r => (!r.startMonth || r.startMonth <= month) && (!r.endMonth || r.endMonth >= month) && istCashflowBuchung(r))
     .reduce((s,r) => s + r.amount, 0);
-  const totalIncome = inc.gehalt + inc.nebenjob + extraIncome + regelIncome;
+  const gehaltEff   = incomeReceived(month, 'gehalt')   ? (+inc.gehalt||0)   : 0;
+  const nebenjobEff = incomeReceived(month, 'nebenjob') ? (+inc.nebenjob||0) : 0;
+  const totalIncome = gehaltEff + nebenjobEff + extraIncome + regelIncome;
   // For display: combine extra + regel so columns show correct totals
   const extraIncomeTotal = extraIncome + regelIncome;
 
@@ -1944,8 +1961,8 @@ function kontoCashflowMonat(kontoId, month) {
 
   // Gehalt/Nebenjob fließen dem zugeordneten Konto zu.
   const inc = state.incomeByMonth[month] || { gehalt: 0, nebenjob: 0 };
-  if (getGehaltKonto() === kontoId)   cf += (+inc.gehalt||0);
-  if (getNebenjobKonto() === kontoId) cf += (+inc.nebenjob||0);
+  if (getGehaltKonto() === kontoId   && incomeReceived(month, 'gehalt'))   cf += (+inc.gehalt||0);
+  if (getNebenjobKonto() === kontoId && incomeReceived(month, 'nebenjob')) cf += (+inc.nebenjob||0);
 
   // Einkäufe + Spesen-Saldo dieses Kontos (Default für Altbestand)
   const eink = (state.einkaeufe||[])
@@ -3683,11 +3700,11 @@ function einnahmen() {
     <div class="kpi-grid kpi-grid-4 mb-2">
       <div class="kpi"><div class="kpi-label">Gehalt</div>
         <div class="kpi-value positive">${fmtEur(inc.gehalt)}</div>
-        <div class="kpi-sub">Hauptjob</div>
+        <div class="kpi-sub">${incomeReceived(currentMonth,'gehalt') ? 'Hauptjob' : '<span style="color:#d97706">⏳ noch nicht erhalten</span>'}</div>
       </div>
       <div class="kpi"><div class="kpi-label">Nebenjob</div>
         <div class="kpi-value positive">${fmtEur(inc.nebenjob)}</div>
-        <div class="kpi-sub">Nebenjob</div>
+        <div class="kpi-sub">${incomeReceived(currentMonth,'nebenjob') ? 'Nebenjob' : '<span style="color:#d97706">⏳ noch nicht erhalten</span>'}</div>
       </div>
       <div class="kpi"><div class="kpi-label">🔁 Wiederkehrend</div>
         <div class="kpi-value positive">${fmtEur(totalRegel)}</div>
@@ -3721,6 +3738,17 @@ function einnahmen() {
           </select>
         </label>
       </div>
+      <div style="display:flex;gap:22px;flex-wrap:wrap;margin-top:14px;padding-top:14px;border-top:1px solid var(--border)">
+        <div style="display:flex;align-items:center;gap:10px">
+          <div class="div-switch ${incomeReceived(currentMonth,'gehalt')?'div-switch-on':''}" onclick="toggleIncomeReceived('${currentMonth}','gehalt')" style="cursor:pointer"><div class="div-switch-thumb"></div></div>
+          <span style="font-size:13px">Gehalt erhalten? ${incomeReceived(currentMonth,'gehalt')?'<strong style="color:#16a34a">✓ ja</strong>':'<span style="color:#d97706">noch nicht</span>'}</span>
+        </div>
+        <div style="display:flex;align-items:center;gap:10px">
+          <div class="div-switch ${incomeReceived(currentMonth,'nebenjob')?'div-switch-on':''}" onclick="toggleIncomeReceived('${currentMonth}','nebenjob')" style="cursor:pointer"><div class="div-switch-thumb"></div></div>
+          <span style="font-size:13px">Nebenjob erhalten? ${incomeReceived(currentMonth,'nebenjob')?'<strong style="color:#16a34a">✓ ja</strong>':'<span style="color:#d97706">noch nicht</span>'}</span>
+        </div>
+      </div>
+      <p style="font-size:11px;color:var(--muted);margin-top:8px">Erst wenn „erhalten" aktiv ist, zählt das Geld zum Kontostand und Cashflow. Vergangene Monate gelten automatisch als erhalten.</p>
     </div>
 
     <div class="card mb-2">
@@ -3788,6 +3816,16 @@ function updateFixedIncome(month, field, val) {
   if (!state.incomeByMonth[month]) state.incomeByMonth[month] = { gehalt: 0, nebenjob: 0 };
   state.incomeByMonth[month][field] = val;
   saveData();
+}
+// Schaltet "Gehalt/Nebenjob erhalten?" für einen Monat um. Erst wenn erhalten,
+// zählt der Betrag zum Kontostand/Cashflow (siehe incomeReceived).
+function toggleIncomeReceived(month, field) {
+  if (!requireUnlocked()) return;
+  if (!state.incomeByMonth[month]) state.incomeByMonth[month] = { gehalt: 0, nebenjob: 0 };
+  const cur = incomeReceived(month, field);
+  state.incomeByMonth[month][field + 'Erhalten'] = !cur;
+  saveData(); if (typeof updateBadges === 'function') updateBadges(); renderPage();
+  showToast((field === 'gehalt' ? 'Gehalt' : 'Nebenjob') + (!cur ? ' als erhalten markiert' : ' als noch nicht erhalten markiert'), 'info');
 }
 function updateIncomeKonto(field, kontoId) {
   if (!requireUnlocked()) return;
@@ -5732,8 +5770,8 @@ function saldoBreakdown(kontoId) {
   // Gehalt/Nebenjob/Fixkosten/Einkäufe/Spesen
   months.forEach(m => {
     const inc = state.incomeByMonth[m] || { gehalt:0, nebenjob:0 };
-    if (getGehaltKonto(yr)===kontoId)   b.gehalt   += (+inc.gehalt||0);
-    if (getNebenjobKonto(yr)===kontoId) b.nebenjob += (+inc.nebenjob||0);
+    if (getGehaltKonto(yr)===kontoId   && incomeReceived(m,'gehalt'))   b.gehalt   += (+inc.gehalt||0);
+    if (getNebenjobKonto(yr)===kontoId && incomeReceived(m,'nebenjob')) b.nebenjob += (+inc.nebenjob||0);
     (state.fixkosten||[]).forEach(f => {
       if ((f.kontoId||def)!==kontoId) return;
       if (fixkostenAktivImMonat(f, m) && faelligkeitstagErreicht(f.day, m, grenze)) b.fixkosten -= (+f.amount||0);
@@ -11115,6 +11153,7 @@ window.deleteEinnahme    = deleteEinnahme;
 window.toggleEinnahmeBar     = toggleEinnahmeBar;
 window.updateFixedIncome = updateFixedIncome;
 window.updateIncomeKonto = updateIncomeKonto;
+window.toggleIncomeReceived = toggleIncomeReceived;
 
 // Spesen
 window.addSpese          = addSpese;
