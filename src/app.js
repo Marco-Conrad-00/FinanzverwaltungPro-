@@ -222,6 +222,11 @@ function setAblaufVorlauf(v) {
 // Format je Eintrag: { v: 'Version', date: 'YYYY-MM-DD', changes: ['...','...'] }
 // Änderungen dürfen mit **Fett** Markierung versehen werden.
 const CHANGELOG = [
+  { v: '1.0.54', date: '2026-09-16', changes: [
+    '**Sparplan mit Depot verknüpfen** – Wertpapier-Sparpläne (Fixkosten der Kategorie „Sparen") haben in der Fixkosten-Tabelle jetzt einen 🎯-Knopf, mit dem du ein **Ziel-Depot in „Sparen & Depot"** zuordnest. Dann wird zum Fälligkeitstag automatisch das Geld vom Konto abgebucht und der Sparbetrag (z.B. 50 €) landet in genau diesem Depot – statt in einem separaten „Auto (…)"-Eintrag. Bestehende Auto-Einträge werden beim Zuordnen ins gewählte Depot umgehängt.',
+    '**Versicherung kündigen** – Sind Name, Anbieter und Policennummer gepflegt, gibt es auf der Versicherungs-Seite einen Knopf „✉️ Kündigen": Er erzeugt ein fertiges Kündigungsschreiben (ordentliche Kündigung zum nächstmöglichen Zeitpunkt, hilfsweise zum Vertragsende) – als **PDF**, zum **Kopieren** oder direkt als **E-Mail** (wenn eine Kontakt-Mail hinterlegt ist). Den Text kannst du vor dem Speichern noch anpassen.',
+    '**Kontaktfelder & Absender** – Versicherungen haben jetzt Felder für **Kontakt Telefon und E-Mail**. Im Profil kannst du **Straße, PLZ und Ort** hinterlegen – diese werden als Absender im Kündigungsschreiben verwendet.',
+  ]},
   { v: '1.0.53', date: '2026-09-15', changes: [
     '**Versicherung manuell mit Fixkost verknüpfen** – Beim „Verknüpfen" einer Versicherung sucht die App weiterhin automatisch eine gleichnamige Fixkost. Findet sie keine, kannst du jetzt aus einer Liste **eine bestehende Fixkost auswählen** und manuell verknüpfen – oder wie gehabt eine neue anlegen. So lassen sich Versicherungen auch mit anders benannten Fixkosten verbinden.',
   ]},
@@ -2432,6 +2437,8 @@ function versicherungen() {
           '<label class="field">Zahlweise<select onchange="updateVers(\'' + sel.id + '\',\'zahlweise\',this.value)">' + zwOpts + '</select></label>' +
           '<label class="field">Beginn<input type="month" value="' + (sel.start||'') + '" onchange="updateVers(\'' + sel.id + '\',\'start\',this.value)"/></label>' +
           '<label class="field">Ende (leer = unbefristet)<input type="month" value="' + (sel.end||'') + '" onchange="updateVers(\'' + sel.id + '\',\'end\',this.value)"/></label>' +
+          F('Kontakt Telefon','kontaktTel','text',sel.kontaktTel) +
+          F('Kontakt E-Mail','kontaktMail','text',sel.kontaktMail) +
           '<label class="field" style="grid-column:1/-1">Notiz<input type="text" value="' + (sel.note||'').replace(/"/g,'&quot;') + '" onchange="updateVers(\'' + sel.id + '\',\'note\',this.value)"/></label>' +
         '</div>' +
         '<div style="margin-top:10px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">' +
@@ -2439,6 +2446,9 @@ function versicherungen() {
             ? '<span class="badge badge-green">🔗 verknüpft mit Fixkosten: ' + (fixLinked.name||'').replace(/</g,'&lt;') + '</span>'
             : '<button class="btn btn-ghost btn-sm" onclick="versLinkFixkost(\'' + sel.id + '\')">🔗 Mit Fixkosten verknüpfen / anlegen</button>') +
           '<span style="font-size:11px;color:var(--muted)">≈ ' + fmtEur(versMonthly(sel)) + ' / Monat</span>' +
+          ((sel.name && sel.anbieter && sel.police)
+            ? '<button class="btn btn-ghost btn-sm" onclick="versKuendigen(\'' + sel.id + '\')" title="Kündigungsschreiben erzeugen (PDF / E-Mail-Vorlage)" style="margin-left:auto">✉️ Kündigen</button>'
+            : '<span style="font-size:11px;color:var(--muted);margin-left:auto" title="Für die Kündigung Name, Anbieter und Policennummer ausfüllen">✉️ Kündigen (Name/Anbieter/Police nötig)</span>') +
         '</div>' +
         '<div style="margin-top:14px">' +
           '<p style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px">Dokument</p>' + docArea +
@@ -2458,7 +2468,8 @@ function versicherungen() {
 function selectVers(id) { selectedVersId = id; renderPage(); }
 function addVersicherung() {
   const v = { id: uid(), name: 'Neue Versicherung', typ: '', anbieter: '', police: '', amount: 0,
-    zahlweise: 'jährlich', start: (currentMonth || new Date().toISOString().slice(0,7)), end: '', note: '', docName: '', docPath: '', fixId: '' };
+    zahlweise: 'jährlich', start: (currentMonth || new Date().toISOString().slice(0,7)), end: '', note: '',
+    kontaktTel: '', kontaktMail: '', docName: '', docPath: '', fixId: '' };
   getVersicherungen().push(v); selectedVersId = v.id; saveData(); renderPage();
 }
 function updateVers(id, f, v) {
@@ -2539,6 +2550,81 @@ async function versLinkFixkost(id) {
     amount: Math.round(versMonthly(o) * 100) / 100, day: 1, start: o.start || currentMonth, end: o.end || '',
     laufzeitEnde: o.end || '', kontoId: (typeof defaultKontoId === 'function' ? defaultKontoId() : undefined) };
   getYearData().fixkosten.push(nf); o.fixId = nf.id; saveData(); renderPage(); showToast('Fixkost angelegt & verknüpft', 'info');
+}
+// ── VERSICHERUNG KÜNDIGEN (Schreiben als Text / PDF / E-Mail-Vorlage) ────────
+function versKuendigungText(o) {
+  const m = state.meta || {};
+  const abName = m.userName || '[Name]';
+  const abStr  = m.strasse  || '[Straße & Nr.]';
+  const abOrt  = ((m.plz||'') + ' ' + (m.ort||'')).trim() || '[PLZ Ort]';
+  const heute  = new Date().toLocaleDateString('de-DE', { day:'2-digit', month:'2-digit', year:'numeric' });
+  const ortDat = (m.ort || '[Ort]') + ', ' + heute;
+  const betreff = 'Kündigung ' + [o.typ, o.name].filter(Boolean).join(' ') + ' – Versicherungsnummer ' + (o.police || '');
+  const endeSatz = o.end
+    ? ' fristgerecht zum nächstmöglichen Zeitpunkt, hilfsweise zum ' + monthLabel(o.end)
+    : ' fristgerecht zum nächstmöglichen Zeitpunkt';
+  return [
+    abName, abStr, abOrt, '',
+    (o.anbieter || '[Anbieter]'), '',
+    ortDat, '',
+    betreff, '',
+    'Sehr geehrte Damen und Herren,', '',
+    'hiermit kündige ich den oben genannten Vertrag (Versicherungsnummer ' + (o.police || '') + ')' + endeSatz + '.', '',
+    'Bitte bestätigen Sie mir die Kündigung sowie das genaue Vertragsende schriftlich. Etwaige Lastschrifteinzüge stellen Sie bitte zum Vertragsende ein.', '',
+    'Mit freundlichen Grüßen', '', abName,
+  ].join('\n');
+}
+function kuendigungHtml(text) {
+  return '<!doctype html><html><head><meta charset="utf-8"><style>body{font-family:Arial,Helvetica,sans-serif;font-size:12pt;line-height:1.55;margin:2.5cm 2cm;color:#111}pre{font-family:inherit;white-space:pre-wrap;margin:0}</style></head><body><pre>' +
+    String(text).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;') + '</pre></body></html>';
+}
+async function versKuendigen(id) {
+  const o = getVersicherungen().find(x => x.id === id); if (!o) return;
+  if (!(o.name && o.anbieter && o.police)) {
+    await uiAlert({ title: 'Angaben fehlen', icon: '⚠', message: 'Für die Kündigung bitte Name, Anbieter und Policennummer ausfüllen.' });
+    return;
+  }
+  const m = state.meta || {};
+  const missing = (!m.userName || !m.strasse || !m.plz || !m.ort);
+  const txt = versKuendigungText(o);
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:99999;display:flex;align-items:center;justify-content:center;padding:20px;backdrop-filter:blur(4px)';
+  overlay.innerHTML =
+    '<div style="background:var(--surface);color:var(--text);border:1px solid var(--border);border-radius:12px;max-width:640px;width:100%;box-shadow:0 20px 60px rgba(0,0,0,.5);max-height:88vh;display:flex;flex-direction:column">' +
+      '<div style="padding:16px 20px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px"><div style="font-size:24px;line-height:1">✉️</div><h3 style="margin:0;font-size:16px;color:var(--text)">Kündigung – ' + String(o.name||'').replace(/</g,'&lt;') + '</h3></div>' +
+      '<div style="padding:16px 20px;overflow:auto">' +
+        (missing ? '<p style="font-size:12px;color:#d97706;margin:0 0 10px">Hinweis: Für einen vollständigen Absender bitte Name & Adresse im Profil ausfüllen – noch fehlende Angaben stehen als Platzhalter [ ] im Text.</p>' : '') +
+        '<p style="font-size:12px;color:var(--muted);margin:0 0 8px">Du kannst den Text unten noch anpassen, bevor du ihn als PDF speicherst, kopierst oder per E-Mail öffnest.</p>' +
+        '<textarea id="kuendText" style="width:100%;height:320px;font-family:monospace;font-size:12px;border:1px solid var(--border);border-radius:8px;padding:10px;background:var(--paper);color:var(--text);box-sizing:border-box">' + txt.replace(/</g,'&lt;') + '</textarea>' +
+      '</div>' +
+      '<div style="padding:12px 20px;border-top:1px solid var(--border);display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end;background:var(--surface-2);border-radius:0 0 12px 12px">' +
+        '<button class="btn btn-ghost" data-act="copy">📋 Text kopieren</button>' +
+        (o.kontaktMail ? '<button class="btn btn-ghost" data-act="mail">✉️ E-Mail öffnen</button>' : '') +
+        '<button class="btn btn-primary" data-act="pdf">📄 Als PDF speichern</button>' +
+        '<button class="btn btn-ghost" data-act="close">Schließen</button>' +
+      '</div>' +
+    '</div>';
+  document.body.appendChild(overlay);
+  const close = () => overlay.remove();
+  const getTxt = () => overlay.querySelector('#kuendText').value;
+  overlay.addEventListener('click', e => { if (e.target === overlay) close(); });
+  overlay.querySelector('[data-act="close"]').addEventListener('click', close);
+  overlay.querySelector('[data-act="copy"]').addEventListener('click', async () => {
+    try { await navigator.clipboard.writeText(getTxt()); showToast('Text kopiert', 'info'); }
+    catch (e) { overlay.querySelector('#kuendText').select(); showToast('Bitte mit Strg+C kopieren', 'info'); }
+  });
+  const mailBtn = overlay.querySelector('[data-act="mail"]');
+  if (mailBtn) mailBtn.addEventListener('click', () => {
+    const subject = 'Kündigung ' + [o.typ, o.name].filter(Boolean).join(' ') + ' – Vers.-Nr. ' + (o.police || '');
+    const url = 'mailto:' + encodeURIComponent(o.kontaktMail) + '?subject=' + encodeURIComponent(subject) + '&body=' + encodeURIComponent(getTxt());
+    if (window.EA && window.EA.openExternal) window.EA.openExternal(url); else window.open(url);
+  });
+  overlay.querySelector('[data-act="pdf"]').addEventListener('click', async () => {
+    if (!(window.EA && window.EA.printToPdf)) { await uiAlert({ title: 'Nicht verfügbar', icon: '⚠', message: 'Der PDF-Export benötigt die Desktop-App.' }); return; }
+    try { await window.EA.printToPdf({ html: kuendigungHtml(getTxt()), filename: 'Kuendigung_' + String(o.name||'Vertrag').replace(/[^\w\-]+/g,'_') + '.pdf' }); showToast('PDF gespeichert', 'info'); }
+    catch (e) { showToast('PDF-Export fehlgeschlagen', 'error'); }
+  });
 }
 async function renderVersDocPreview() {
   const box = document.getElementById('versDocPreview'); if (!box) return;
@@ -4587,6 +4673,12 @@ function fixkosten() {
                 _zielBtn = `<button class="btn-icon" title="Zielkonto (wohin gespart wird): ${_zkn} – klicken zum Ändern" onclick="pickFixkZielkonto('${f.id}')" style="width:auto;min-width:0;padding:0 8px;font-size:12px;white-space:nowrap;gap:4px">💸 ${_zkn}</button>`;
               }
             }
+            // Ziel-Depot-Button (nur Wertpapier-Sparpläne): wohin in „Sparen & Depot" gebucht wird
+            let _depotBtn = '';
+            if (_istSparen && !_istBargeld) {
+              const _dp = (f.sparenLink.zielDepot || '— Depot —');
+              _depotBtn = `<button class="btn-icon" title="Ziel-Depot in „Sparen & Depot": ${String(_dp).replace(/"/g,'&quot;')} – klicken zum Zuordnen" onclick="linkSparplanDepot('${f.id}')" style="width:auto;min-width:0;padding:0 8px;font-size:12px;white-space:nowrap;gap:4px">🎯 ${String(_dp).replace(/</g,'&lt;')}</button>`;
+            }
             // Von-Konto-Button (Quelle der Fixkost)
             const _vk = kontoById(f.kontoId || defaultKontoId());
             const _vkn = _vk ? _vk.name : 'Default';
@@ -4600,12 +4692,60 @@ function fixkosten() {
               <td><input type="month" value="${f.laufzeitEnde||''}" onchange="updateFixk('${f.id}','laufzeitEnde',this.value)" style="width:145px" title="Echtes Vertragsende – wird beim Jahreswechsel übernommen; leer = unbefristet"/></td>
               <td><input type="number" value="${f.day||1}" onchange="updateFixk('${f.id}','day',+this.value)" style="width:60px;text-align:center" min="1" max="31"/></td>
               <td><input type="number" value="${(+f.amount||0).toFixed(2)}" onchange="updateFixk('${f.id}','amount',+this.value)" step="0.01" style="width:90px;text-align:right"/> ${currencySymbol()}</td>
-              <td style="white-space:nowrap">${_vonBtn}${_zielBtn}<button class="btn-icon danger" onclick="deleteFixk('${f.id}')">×</button></td>
+              <td style="white-space:nowrap">${_vonBtn}${_zielBtn}${_depotBtn}<button class="btn-icon danger" onclick="deleteFixk('${f.id}')">×</button></td>
             </tr>`;
           }).join('')}
         </tbody>
       </table></div>
     </div>`;
+}
+
+// Auswahl-Dialog: Ziel-Depot für einen Wertpapier-Sparplan wählen. Liefert einen
+// Depotnamen, den Sentinel '__new__' oder null (Abbruch).
+function askDepotWahl(opts) {
+  return new Promise((resolve) => {
+    const o = opts || {};
+    const depots = [...new Set((state.sparen||[]).map(s => s.depot).filter(dp => dp && !/^Auto \(/.test(dp)))].sort((a,b)=>String(a).localeCompare(b));
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-overlay';
+    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:99999;display:flex;align-items:center;justify-content:center;padding:20px;backdrop-filter:blur(4px)';
+    const listHtml = depots.length ? depots.map(dp =>
+      '<button class="depot-wahl-btn" data-dp="' + String(dp).replace(/"/g,'&quot;') + '" style="display:flex;justify-content:space-between;align-items:center;width:100%;text-align:left;padding:11px 14px;margin:5px 0;border:1px solid ' + (dp===o.current?'var(--accent)':'var(--border)') + ';border-radius:8px;background:transparent;color:var(--text);cursor:pointer;font-size:14px"><strong>' + String(dp).replace(/</g,'&lt;') + '</strong>' + (dp===o.current?'<span style="color:var(--accent);font-size:11px">aktuell</span>':'') + '</button>'
+    ).join('') : '<p style="color:var(--muted);font-size:13px;margin:6px 0">Noch keine Depots in „Sparen & Depot" gefunden – lege unten eines an.</p>';
+    overlay.innerHTML =
+      '<div style="background:var(--surface);color:var(--text);border:1px solid var(--border);border-radius:12px;max-width:460px;width:100%;box-shadow:0 20px 60px rgba(0,0,0,.5);max-height:82vh;display:flex;flex-direction:column">' +
+        '<div style="padding:18px 22px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:12px"><div style="font-size:26px;line-height:1">🎯</div><h3 style="margin:0;font-size:16px;color:var(--text)">Ziel-Depot wählen</h3></div>' +
+        '<div style="padding:14px 22px;overflow:auto"><p style="margin:0 0 10px;font-size:13px;color:var(--muted)">In welches Depot in „Sparen &amp; Depot" soll dieser Sparplan gebucht werden?</p>' + listHtml +
+          '<button class="depot-wahl-btn" data-dp="__new__" style="display:flex;align-items:center;gap:8px;width:100%;text-align:left;padding:11px 14px;margin:12px 0 2px;border:1px dashed var(--border);border-radius:8px;background:transparent;color:var(--text);cursor:pointer;font-size:14px"><strong>➕ Neues Depot (Name eingeben)</strong></button>' +
+        '</div>' +
+        '<div style="padding:12px 22px;border-top:1px solid var(--border);display:flex;justify-content:flex-end;background:var(--surface-2);border-radius:0 0 12px 12px"><button class="btn btn-ghost" data-dp="__cancel__">Abbrechen</button></div>' +
+      '</div>';
+    document.body.appendChild(overlay);
+    function cleanup(v) { overlay.remove(); resolve(v); }
+    overlay.querySelectorAll('[data-dp]').forEach(b => b.addEventListener('click', () => { const v = b.getAttribute('data-dp'); cleanup(v === '__cancel__' ? null : v); }));
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) cleanup(null); });
+  });
+}
+// Sparplan (Wertpapier-Fixkost) mit einem Depot in „Sparen & Depot" verknüpfen.
+// Setzt sparenLink.zielDepot, hängt bestehende Auto-Einträge um und trägt fehlende nach.
+async function linkSparplanDepot(id) {
+  if (!requireUnlocked()) return;
+  const f = (getYearData().fixkosten||[]).find(x => x.id === id); if (!f || !f.sparenLink) return;
+  const wahl = await askDepotWahl({ current: f.sparenLink.zielDepot || '' });
+  if (wahl === null) return;
+  let depot = wahl;
+  if (wahl === '__new__') {
+    const nm = await uiPrompt({ title: 'Neues Depot', icon: '🎯', message: 'Name des Depots (z.B. „Trade Republic" oder „ebase Depot"):', value: '', placeholder: 'Depotname' });
+    if (nm === null || !String(nm).trim()) return;
+    depot = String(nm).trim();
+  }
+  f.sparenLink.zielDepot = depot;
+  let moved = 0;
+  (state.sparen||[]).forEach(s => { if (s.autoFromFixkostenId === f.id) { s.depot = depot; if (s.depotQuelle) delete s.depotQuelle; moved++; } });
+  saveData();
+  if (typeof runSparenAutoEintragung === 'function') { try { await runSparenAutoEintragung(); } catch (e) {} }
+  renderPage();
+  showToast('Sparplan → Depot „' + depot + '"' + (moved ? (' · ' + moved + ' Einträge umgehängt') : ''), 'info');
 }
 
 function addFixkosten(){
@@ -4742,7 +4882,7 @@ async function runSparenAutoEintragung() {
                    sparTyp === 'etf' ? 'ETF' :
                    sparTyp === 'fonds' ? 'Fonds' :
                    sparTyp === 'aktie' ? 'Aktien' : 'Krypto',
-        depot: 'Auto (' + f.name + ')',
+        depot: (f.sparenLink && f.sparenLink.zielDepot) ? f.sparenLink.zielDepot : ('Auto (' + f.name + ')'),
         note: 'Automatisch aus Fixkosten „' + f.name + '"',
         autoFromFixkostenId: f.id,
       };
@@ -6315,6 +6455,15 @@ function einstellungen() {
         <div class="form-grid form-grid-2">
           <label class="field">Name
             <input type="text" value="${meta.userName||''}" onchange="updateSetting('userName',this.value)" placeholder="Dein Name"/>
+          </label>
+          <label class="field">Straße & Nr. (für Kündigungen)
+            <input type="text" value="${(meta.strasse||'').replace(/"/g,'&quot;')}" onchange="updateSetting('strasse',this.value)" placeholder="Musterstraße 1"/>
+          </label>
+          <label class="field">PLZ
+            <input type="text" value="${(meta.plz||'').replace(/"/g,'&quot;')}" onchange="updateSetting('plz',this.value)" placeholder="72116"/>
+          </label>
+          <label class="field">Ort
+            <input type="text" value="${(meta.ort||'').replace(/"/g,'&quot;')}" onchange="updateSetting('ort',this.value)" placeholder="Mössingen"/>
           </label>
           <label class="field">Startjahr
             <input type="number" value="${meta.year || new Date().getFullYear()}" min="2020" max="2040" onchange="updateSetting('year',+this.value)"/>
@@ -11015,6 +11164,7 @@ window.versPickDoc       = versPickDoc;
 window.versRemoveDoc     = versRemoveDoc;
 window.versOpenDoc       = versOpenDoc;
 window.versLinkFixkost   = versLinkFixkost;
+window.versKuendigen     = versKuendigen;
 window.updateSuche       = updateSuche;
 window.resetSuche        = resetSuche;
 window.openQuickAdd      = openQuickAdd;
@@ -11223,6 +11373,7 @@ window.openFixkostenModal   = openFixkostenModal;
 window.closeFixkostenModal  = closeFixkostenModal;
 window.saveFixkostenModal   = saveFixkostenModal;
 window.updateFixk        = updateFixk;
+window.linkSparplanDepot = linkSparplanDepot;
 window.deleteFixk        = deleteFixk;
 
 // Sparen
