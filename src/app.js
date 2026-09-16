@@ -222,6 +222,9 @@ function setAblaufVorlauf(v) {
 // Format je Eintrag: { v: 'Version', date: 'YYYY-MM-DD', changes: ['...','...'] }
 // Änderungen dürfen mit **Fett** Markierung versehen werden.
 const CHANGELOG = [
+  { v: '1.0.55', date: '2026-09-16', changes: [
+    '**Depotwerte in Euro (Währungsumrechnung)** – Kurse von US-Aktien (USD), australischen Werten (AUD) usw. werden jetzt automatisch in **Euro** umgerechnet. Bisher wurde z.B. der USD-Kurs direkt genommen, wodurch Positionen wie NVIDIA, Take-Two oder SpaceX zu hoch angezeigt wurden. Der Wechselkurs wird live geholt (EZB-Referenzkurs) mit Fallback auf einen hinterlegten Standardkurs. In der Depot-Karte steht bei Fremdwährungen ein kleines Kürzel (z.B. „USD") am Kurs. Euro-Positionen bleiben unverändert.',
+  ]},
   { v: '1.0.54', date: '2026-09-16', changes: [
     '**Sparplan mit Depot verknüpfen** – Wertpapier-Sparpläne (Fixkosten der Kategorie „Sparen") haben in der Fixkosten-Tabelle jetzt einen 🎯-Knopf, mit dem du ein **Ziel-Depot in „Sparen & Depot"** zuordnest. Dann wird zum Fälligkeitstag automatisch das Geld vom Konto abgebucht und der Sparbetrag (z.B. 50 €) landet in genau diesem Depot – statt in einem separaten „Auto (…)"-Eintrag. Bestehende Auto-Einträge werden beim Zuordnen ins gewählte Depot umgehängt.',
     '**Versicherung kündigen** – Sind Name, Anbieter und Policennummer gepflegt, gibt es auf der Versicherungs-Seite einen Knopf „✉️ Kündigen": Er erzeugt ein fertiges Kündigungsschreiben (ordentliche Kündigung zum nächstmöglichen Zeitpunkt, hilfsweise zum Vertragsende) – als **PDF**, zum **Kopieren** oder direkt als **E-Mail** (wenn eine Kontakt-Mail hinterlegt ist). Den Text kannst du vor dem Speichern noch anpassen.',
@@ -2097,7 +2100,7 @@ function buildDepotSnapshot(prev, ny) {
   Object.values(secs).forEach(p => {
     if (Math.abs(p.units) < 1e-9) return;
     const k = kurse[p.wp.symbol];
-    const price = (k && k.kurs) ? k.kurs : (p.units ? p.invested / p.units : 0);
+    const price = (k && k.kurs) ? kursEUR(k) : (p.units ? p.invested / p.units : 0);
     out.push({ id: uid(), month: m, date: d, kategorie: p.kategorie, depot: p.depot,
       wertpapier: p.wp, etf: { name: p.wp.name, ticker: p.wp.symbol, isin: p.wp.isin, wkn: p.wp.wkn },
       txType: 'bestand', skipCashflow: true, units: Math.round(p.units * 1e6) / 1e6,
@@ -5162,7 +5165,7 @@ function depotUebersichtHtml(list, kurse) {
     if (!gruppen[dep]) gruppen[dep] = { name: dep, invest: 0, wert: 0, offen: 0, pos: [] };
     const g = gruppen[dep];
     const k = kurse[p.symbol];
-    const wert = (k && k.kurs && p.units) ? p.units * k.kurs : null;
+    const wert = (k && k.kurs && p.units) ? p.units * kursEUR(k) : null;
     g.invest += p.invested;
     if (wert !== null) g.wert += wert; else g.offen++;
     g.pos.push({ ...p, wert });
@@ -5261,7 +5264,9 @@ function buildEtfLiveSection() {
     const k = kurse[p.symbol];
     const hasLive = !!(k && k.kurs);
     const change = hasLive && k.vortag ? ((k.kurs - k.vortag) / k.vortag * 100) : null;
-    const aktuellerWert = hasLive ? p.units * k.kurs : null;
+    const kursInEur = hasLive ? kursEUR(k) : null;
+    const fremdWaehrung = hasLive && k.waehrung && String(k.waehrung).toUpperCase() !== 'EUR' ? String(k.waehrung).toUpperCase() : '';
+    const aktuellerWert = hasLive ? p.units * kursInEur : null;
     const gv = (aktuellerWert !== null) ? (aktuellerWert - p.invested) : null;
     const gvPct = (gv !== null && p.invested > 0) ? (gv / p.invested * 100) : null;
     const tradesCount = p.trades.length;
@@ -5284,7 +5289,7 @@ function buildEtfLiveSection() {
           '<div style="font-size:14px;font-weight:700">' + (p.units ? p.units.toFixed(4) : '–') + '</div></div>' +
         (hasLive ? (
           '<div><div style="font-size:10px;color:var(--muted);font-weight:700;text-transform:uppercase">Aktueller Kurs</div>' +
-            '<div style="font-size:14px;font-weight:700">' + fmtEur(k.kurs) + (change !== null ? ' <span style="font-size:11px;color:' + (change >= 0 ? 'var(--green)' : 'var(--red)') + '">' + (change >= 0 ? '+' : '') + change.toFixed(2) + '%</span>' : '') + '</div></div>' +
+            '<div style="font-size:14px;font-weight:700">' + fmtEur(kursInEur) + (fremdWaehrung ? ' <span style="font-size:10px;color:var(--muted)" title="Kurs in ' + fremdWaehrung + ': ' + k.kurs + '">(' + fremdWaehrung + ')</span>' : '') + (change !== null ? ' <span style="font-size:11px;color:' + (change >= 0 ? 'var(--green)' : 'var(--red)') + '">' + (change >= 0 ? '+' : '') + change.toFixed(2) + '%</span>' : '') + '</div></div>' +
           '<div><div style="font-size:10px;color:var(--muted);font-weight:700;text-transform:uppercase">Wert</div>' +
             '<div style="font-size:14px;font-weight:700">' + fmtEur(aktuellerWert) + '</div></div>'
         ) : '') +
@@ -7709,7 +7714,7 @@ function fpFondswert(fp) {
   let wert = 0, fehlend = 0;
   fp.fonds.forEach(f => {
     const k = kurse[f.symbol] || kurse[f.isin];
-    if (k && k.kurs && f.anteile) wert += f.anteile * k.kurs;
+    if (k && k.kurs && f.anteile) wert += f.anteile * kursEUR(k);
     else fehlend++;
   });
   if (fehlend) return null;                      // lieber nichts als halb gerechnet
@@ -8364,7 +8369,7 @@ function analyseDepot() {
   });
   const liste = Object.values(pos).map(p => {
     const k = kurse[p.symbol];
-    const kurs = k && k.kurs ? k.kurs : null;
+    const kurs = kursEUR(k);
     const wert = (kurs !== null && p.units) ? p.units * kurs : null;
     const gv = (wert !== null) ? wert - p.invested : null;
     const gvPct = (gv !== null && p.invested > 0) ? (gv / p.invested) * 100 : null;
@@ -11154,6 +11159,50 @@ function getEtfKursInfo(s) {
   return state.etfKurse[s.etf.ticker] || null;
 }
 
+// ── WÄHRUNGSUMRECHNUNG (Depotwerte in EUR) ──────────────────────────────────
+// Börsenkurse kommen je nach Handelsplatz in Fremdwährung (z.B. US-Aktien in
+// USD, ASX in AUD). Für den Depotwert in Euro wird mit dem Wechselkurs
+// (EUR je 1 Einheit Fremdwährung) multipliziert. Kurse werden live geholt
+// (refreshFxKurse, ECB via frankfurter.app), Fallback = FX_DEFAULT.
+const FX_DEFAULT = { EUR:1, USD:0.92, CHF:1.06, GBP:1.17, JPY:0.0060, AUD:0.60, CAD:0.68, SEK:0.088, NOK:0.086, DKK:0.134, PLN:0.23, HKD:0.118 };
+function fxToEur(waehrung) {
+  const w = String(waehrung || 'EUR').toUpperCase();
+  if (!w || w === 'EUR') return 1;
+  const live = state.fxKurse && state.fxKurse[w];
+  if (typeof live === 'number' && live > 0) return live;
+  return (typeof FX_DEFAULT[w] === 'number') ? FX_DEFAULT[w] : 1;
+}
+// Kurs eines Wertpapiers in EUR (oder null, wenn kein Kurs vorhanden).
+function kursEUR(kInfo) {
+  if (!kInfo || !kInfo.kurs) return null;
+  return kInfo.kurs * fxToEur(kInfo.waehrung);
+}
+async function refreshFxKurse(silent) {
+  try {
+    if (!(window.EA && window.EA.fetchUrl)) return;
+    const need = new Set();
+    Object.values(state.etfKurse || {}).forEach(k => {
+      const w = (k && k.waehrung) ? String(k.waehrung).toUpperCase() : '';
+      if (w && w !== 'EUR') need.add(w);
+    });
+    if (!need.size) return;
+    state.fxKurse = state.fxKurse || {};
+    for (const w of need) {
+      try {
+        const r = await window.EA.fetchUrl('https://api.frankfurter.app/latest?from=' + encodeURIComponent(w) + '&to=EUR');
+        if (r && r.ok && r.body) {
+          const j = JSON.parse(r.body);
+          const rate = j && j.rates && j.rates.EUR;
+          if (typeof rate === 'number' && rate > 0) state.fxKurse[w] = rate;
+        }
+      } catch (e) { /* Fallback FX_DEFAULT bleibt */ }
+    }
+    state.fxKurse._stand = new Date().toISOString().slice(0,10);
+    saveData();
+    if (!silent && currentPage === 'sparen') renderPage();
+  } catch (e) { /* ignore */ }
+}
+
 // ── GLOBAL EXPORTS für onclick Handler in dynamisch gerenderten Tabellen ──
 window.navigate          = navigate;
 window.selectVers        = selectVers;
@@ -11900,6 +11949,10 @@ async function maybeAutoRefreshKurse() {
   // Skip wenn keine Wertpapiere im Depot
   const hasWp = (state.sparen||[]).some(s => s.wertpapier?.symbol || s.etf?.ticker);
   if (!hasWp) return;
+  // Wechselkurse mindestens einmal beschaffen (auch wenn Kurs-Refresh noch aussteht)
+  if (!state.fxKurse || !Object.keys(state.fxKurse).some(k => k !== '_stand')) {
+    await refreshFxKurse(true);
+  }
   // Nur einmal pro 8 Stunden (verhindert Spam bei häufigem Start)
   const last = state.meta?._lastKursRefresh || 0;
   const now = Date.now();
@@ -11912,6 +11965,7 @@ async function maybeAutoRefreshKurse() {
   saveData();
   // Silent refresh (kein Toast für leere Liste)
   await refreshAllWertpapierKurseSilent();
+  await refreshFxKurse(true);
 }
 
 async function refreshAllWertpapierKurseSilent() {
