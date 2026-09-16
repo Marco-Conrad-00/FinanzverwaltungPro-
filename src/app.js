@@ -255,6 +255,9 @@ async function checkGeldEingang() {
 // Format je Eintrag: { v: 'Version', date: 'YYYY-MM-DD', changes: ['...','...'] }
 // Änderungen dürfen mit **Fett** Markierung versehen werden.
 const CHANGELOG = [
+  { v: '1.0.60', date: '2026-09-16', changes: [
+    '**Spesen-Schalter präzisiert: Ausgaben zählen sofort, nur die Pauschale wartet auf „erhalten".** Deine (privaten) Ausgaben auf einer Reise mindern jetzt sofort dein Konto – unabhängig vom Schalter. Erst die Spesen-**Pauschale** (z.B. 47 €) kommt hinzu, sobald du die Reise auf „✓ erhalten" stellst. Beispiel: Kontostand 1.427,58 €, Ausgaben 1,83 € → sofort 1.425,75 €; nach Erhalt der Pauschale (47 €) → 1.472,75 €.',
+  ]},
   { v: '1.0.59', date: '2026-09-16', changes: [
     '**Spesen: „erhalten"-Schalter je Reise** – Wie beim Gehalt kannst du jetzt pro Reise festlegen, ob die Spesen schon ausgezahlt wurden. Erst wenn du auf „✓ erhalten" stellst, zählt der Spesen-Saldo zum ausgewählten Konto. Bis dahin steht die Reise auf „⏳ offen" und beeinflusst deinen Kontostand nicht (der Saldo wird ausgegraut). Standard: vergangene Monate gelten als erhalten, der laufende/kommende Monat erst nach deiner Bestätigung – so stimmen die Kontostände, obwohl die Spesen meist erst zum Monatsende kommen.',
     '**Auslagen & Erstattungen jetzt voll abgebildet** – Verauslagtes Geld wirkt sich jetzt auf deinen Kontostand aus: Die Auslage mindert ab ihrem Datum das zugeordnete Konto, und sobald du sie auf „🟢 erstattet" stellst, kommt der Betrag am Erstattungsdatum wieder herein. So siehst du die Delle im Kontostand, bis dir das Geld zurückgezahlt wurde. Neu: pro Eintrag ein Konto wählbar (🏦-Knopf). Hinweis: Bereits erfasste offene Auslagen mindern damit rückwirkend den Kontostand – für schon längst erledigte Posten einfach auf „erstattet" mit Datum setzen.',
@@ -1785,12 +1788,14 @@ function kontoNetBis(kontoId, month) {
       if (e.month !== m) return;
       if ((e.kontoId||def) === kontoId) sonst -= (+e.amount||0);
     });
-    // Spesen-Saldo (Spesen − Ausgaben) auf zugeordnetes Konto (Default für Altbestand).
-    // Zählt erst, wenn die Reise als „erhalten" markiert ist (speseReceived).
+    // Reise-Wirkung aufs zugeordnete Konto: Die (privaten) Ausgaben mindern das
+    // Konto sofort; die Spesen-Pauschale kommt erst hinzu, wenn die Reise als
+    // „erhalten" markiert ist (speseReceived) – Auszahlung meist erst zum Monatsende.
     (state.spesen||[]).forEach(t => {
       if (t.month !== m) return;
-      if (!speseReceived(t)) return;
-      if ((t.kontoId||def) === kontoId) sonst += (+(t.allowance||0) - +(t.ausgaben||0));
+      if ((t.kontoId||def) !== kontoId) return;
+      sonst -= (+t.ausgaben||0);
+      if (speseReceived(t)) sonst += (+t.allowance||0);
     });
     // Auslagen & Erstattungen (voll abgebildet): Die Auslage mindert das Konto ab
     // ihrem Datum; bei Status „erstattet" kommt der Betrag ab dem Erstattungs-
@@ -2000,8 +2005,8 @@ function monthFinancials(month, includeVormonat = true) {
   const ausgTotal = state.ausgaben.filter(a => a.month === month && !a._korrektur && istCashflowBuchung(a)).reduce((s, a) => s + a.amount, 0);
 
   const spesen = state.spesen.filter(s => s.month === month);
-  // Nur „erhaltene" Reisen zählen zum Cashflow/Kontostand (analog Gehalt).
-  const spesenSaldo = spesen.reduce((s, t) => s + (speseReceived(t) ? (+(t.allowance||0) - +(t.ausgaben||0)) : 0), 0);
+  // Ausgaben zählen sofort; die Pauschale erst bei „erhalten" (analog Gehalt).
+  const spesenSaldo = spesen.reduce((s, t) => s - (+t.ausgaben||0) + (speseReceived(t) ? (+t.allowance||0) : 0), 0);
   // Auslagen & Erstattungen (voll abgebildet): Auslage raus im Monat des Datums,
   // Erstattung rein im Monat des Erstattungsdatums.
   let erstattungSaldo = 0;
@@ -2074,8 +2079,8 @@ function kontoCashflowMonat(kontoId, month) {
     .filter(e => (e.kontoId||def) === kontoId && e.month === month)
     .reduce((s,e) => s + (+e.amount||0), 0);
   const spesen = (state.spesen||[])
-    .filter(t => (t.kontoId||def) === kontoId && t.month === month && speseReceived(t))
-    .reduce((s,t) => s + (+(t.allowance||0) - +(t.ausgaben||0)), 0);
+    .filter(t => (t.kontoId||def) === kontoId && t.month === month)
+    .reduce((s,t) => s - (+t.ausgaben||0) + (speseReceived(t) ? (+t.allowance||0) : 0), 0);
   // Auslagen & Erstattungen dieses Kontos (voll abgebildet).
   let erst = 0;
   (state.erstattungen||[]).forEach(e => {
@@ -4738,11 +4743,11 @@ function speseRow(s) {
     <td style="text-align:center"><input type="number" value="${s.abendessen||0}" min="0" onchange="updateSpese('${s.id}','abendessen',+this.value);recalcSpeseRow('${s.id}')" style="width:45px;text-align:center"/></td>
     ${speseAmountCell(s,'ausgaben','sp_ausg_'+s.id)}
     <td class="amount positive">${fmtEur(s.allowance||0)}</td>
-    <td class="amount ${rec?(saldo>=0?'positive':'negative'):''}"${rec?'':' style="opacity:.5" title="Noch nicht erhalten – zählt noch nicht zum Konto"'}>${saldo>=0?'+':''}${fmtEur(saldo)}</td>
+    <td class="amount ${rec?(saldo>=0?'positive':'negative'):''}"${rec?'':' style="opacity:.5" title="Pauschale noch nicht erhalten – bis dahin zählen nur die Ausgaben zum Konto, die Pauschale kommt erst mit „✓ erhalten" hinzu"'}>${saldo>=0?'+':''}${fmtEur(saldo)}</td>
     ${speseAmountCell(s,'auslagen','sp_ausl_'+s.id)}
     <td class="amount ${zuUeberweisen>=0?'positive':'negative'}" style="font-weight:700">${fmtEur(zuUeberweisen)}</td>
     <td style="white-space:nowrap">
-      <button class="btn-icon" onclick="toggleSpeseReceived('${s.id}')" title="${rec?'Reise ist ausgezahlt – Saldo zählt zum Konto. Klicken = auf „offen" setzen.':'Reise noch nicht ausgezahlt – Saldo zählt noch nicht. Klicken = als „erhalten" markieren.'}" style="width:auto;min-width:0;padding:0 8px;font-size:12px;white-space:nowrap;gap:4px;color:${rec?'var(--green)':'#d97706'}">${rec?'✓ erhalten':'⏳ offen'}</button>
+      <button class="btn-icon" onclick="toggleSpeseReceived('${s.id}')" title="${rec?'Pauschale ist ausgezahlt – zählt zum Konto. Klicken = auf „offen" setzen.':'Pauschale noch nicht ausgezahlt – aktuell zählen nur die Ausgaben zum Konto. Klicken = als „erhalten" markieren.'}" style="width:auto;min-width:0;padding:0 8px;font-size:12px;white-space:nowrap;gap:4px;color:${rec?'var(--green)':'#d97706'}">${rec?'✓ erhalten':'⏳ offen'}</button>
       ${(() => { const _k=kontoById(s.kontoId||defaultKontoId()); const _kn=_k?_k.name:'Konto'; const _cf=_k?_k.cashflow:true; return `<button class="btn-icon" title="Konto (Spesen-Saldo): ${_kn} – klicken zum Ändern" onclick="pickSpeseKonto('${s.id}')" style="width:auto;min-width:0;padding:0 8px;font-size:12px;white-space:nowrap;gap:4px">${_cf?'🏦':'📈'} ${_kn}</button>`; })()}<button class="btn-icon danger" onclick="deleteSpese('${s.id}')">×</button></td>
   </tr>`;
 }
