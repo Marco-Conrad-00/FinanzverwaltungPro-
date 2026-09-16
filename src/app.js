@@ -222,6 +222,9 @@ function setAblaufVorlauf(v) {
 // Format je Eintrag: { v: 'Version', date: 'YYYY-MM-DD', changes: ['...','...'] }
 // Änderungen dürfen mit **Fett** Markierung versehen werden.
 const CHANGELOG = [
+  { v: '1.0.56', date: '2026-09-16', changes: [
+    '**Wechselkurs-Anzeige** – Im Depot wird bei Fremdwährungs-Positionen jetzt das Datum des zuletzt geholten Wechselkurses als Tooltip angezeigt. (Technisch löst dieses Update zugleich den Release-Build der Euro-Umrechnung aus 1.0.55 aus.)',
+  ]},
   { v: '1.0.55', date: '2026-09-16', changes: [
     '**Depotwerte in Euro (Währungsumrechnung)** – Kurse von US-Aktien (USD), australischen Werten (AUD) usw. werden jetzt automatisch in **Euro** umgerechnet. Bisher wurde z.B. der USD-Kurs direkt genommen, wodurch Positionen wie NVIDIA, Take-Two oder SpaceX zu hoch angezeigt wurden. Der Wechselkurs wird live geholt (EZB-Referenzkurs) mit Fallback auf einen hinterlegten Standardkurs. In der Depot-Karte steht bei Fremdwährungen ein kleines Kürzel (z.B. „USD") am Kurs. Euro-Positionen bleiben unverändert.',
   ]},
@@ -5289,7 +5292,7 @@ function buildEtfLiveSection() {
           '<div style="font-size:14px;font-weight:700">' + (p.units ? p.units.toFixed(4) : '–') + '</div></div>' +
         (hasLive ? (
           '<div><div style="font-size:10px;color:var(--muted);font-weight:700;text-transform:uppercase">Aktueller Kurs</div>' +
-            '<div style="font-size:14px;font-weight:700">' + fmtEur(kursInEur) + (fremdWaehrung ? ' <span style="font-size:10px;color:var(--muted)" title="Kurs in ' + fremdWaehrung + ': ' + k.kurs + '">(' + fremdWaehrung + ')</span>' : '') + (change !== null ? ' <span style="font-size:11px;color:' + (change >= 0 ? 'var(--green)' : 'var(--red)') + '">' + (change >= 0 ? '+' : '') + change.toFixed(2) + '%</span>' : '') + '</div></div>' +
+            '<div style="font-size:14px;font-weight:700">' + fmtEur(kursInEur) + (fremdWaehrung ? ' <span style="font-size:10px;color:var(--muted)" title="Kurs in ' + fremdWaehrung + ': ' + k.kurs + ' · 1 ' + fremdWaehrung + ' = ' + fxToEur(k.waehrung).toFixed(4) + ' €' + ((state.fxKurse && state.fxKurse._stand) ? ' (Stand ' + state.fxKurse._stand + ')' : '') + '">(' + fremdWaehrung + ')</span>' : '') + (change !== null ? ' <span style="font-size:11px;color:' + (change >= 0 ? 'var(--green)' : 'var(--red)') + '">' + (change >= 0 ? '+' : '') + change.toFixed(2) + '%</span>' : '') + '</div></div>' +
           '<div><div style="font-size:10px;color:var(--muted);font-weight:700;text-transform:uppercase">Wert</div>' +
             '<div style="font-size:14px;font-weight:700">' + fmtEur(aktuellerWert) + '</div></div>'
         ) : '') +
