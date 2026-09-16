@@ -554,18 +554,18 @@
       <h1 id="userName" onclick="editUserName()" title="Klicken zum Bearbeiten" style="cursor:pointer" >Nutzer</h1>
       <div class="version" id="appVersion">v1.01</div>
     </div>
-    <div class="sidebar-section">Übersicht</div>
+    <div class="sidebar-section" data-sec="uebersicht">Übersicht</div>
     <button class="nav-item active" onclick="navigate('dashboard')">📊 Dashboard</button>
     <button class="nav-item" onclick="navigate('einstellungen')">⚙️ Einstellungen</button>
     <button class="nav-item" onclick="navigate('jahresuebersicht')">📅 Jahresübersicht</button>
     <button class="nav-item" onclick="navigate('suche')">🔍 Suche</button>
-    <div class="sidebar-section">Monatsauswertung</div>
+    <div class="sidebar-section" data-sec="monat">Monatsauswertung</div>
     <button class="nav-item" onclick="navigate('buchungen')">📋 Buchungen</button>
     <button class="nav-item" onclick="navigate('einkaeufe')">🛒 Einkäufe</button>
     <button class="nav-item" onclick="navigate('ausgaben')">💸 Ausgaben</button>
     <button class="nav-item" onclick="navigate('einnahmen')">💰 Einnahmen</button>
     <button class="nav-item" onclick="navigate('spesen')">✈️ Spesen & Reisen</button>
-    <div class="sidebar-section">Planung</div>
+    <div class="sidebar-section" data-sec="planung">Planung</div>
     <button class="nav-item" onclick="navigate('fixkosten')">🔁 Fixkosten</button>
     <button class="nav-item" onclick="navigate('sparen')">🏦 Sparen & Depot</button>
     <button class="nav-item" onclick="navigate('umbuchungen')">🔄 Umbuchungen</button>
@@ -575,7 +575,7 @@
     <button class="nav-item" onclick="navigate('versicherungen')">🛡️ Versicherungen</button>
     <button class="nav-item" id="navAnalyse" onclick="navigate('analyse')" style="display:none">📊 Analyse</button>
     <button class="nav-item" id="navTabellen" onclick="navigate('tabellen')" style="display:none">📝 Eigene Tabellen</button>
-    <div class="sidebar-section">Verwaltung</div>
+    <div class="sidebar-section" data-sec="verwaltung">Verwaltung</div>
     <button class="nav-item" onclick="archiveYear()">📦 Jahr archivieren</button>
     <div class="sidebar-footer">
       <button class="quick-add-btn" onclick="openQuickAdd()">+ Neue Buchung</button>

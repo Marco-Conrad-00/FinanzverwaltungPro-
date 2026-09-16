@@ -255,6 +255,11 @@ async function checkGeldEingang() {
 // Format je Eintrag: { v: 'Version', date: 'YYYY-MM-DD', changes: ['...','...'] }
 // Änderungen dürfen mit **Fett** Markierung versehen werden.
 const CHANGELOG = [
+  { v: '1.0.59', date: '2026-09-16', changes: [
+    '**Spesen: „erhalten"-Schalter je Reise** – Wie beim Gehalt kannst du jetzt pro Reise festlegen, ob die Spesen schon ausgezahlt wurden. Erst wenn du auf „✓ erhalten" stellst, zählt der Spesen-Saldo zum ausgewählten Konto. Bis dahin steht die Reise auf „⏳ offen" und beeinflusst deinen Kontostand nicht (der Saldo wird ausgegraut). Standard: vergangene Monate gelten als erhalten, der laufende/kommende Monat erst nach deiner Bestätigung – so stimmen die Kontostände, obwohl die Spesen meist erst zum Monatsende kommen.',
+    '**Auslagen & Erstattungen jetzt voll abgebildet** – Verauslagtes Geld wirkt sich jetzt auf deinen Kontostand aus: Die Auslage mindert ab ihrem Datum das zugeordnete Konto, und sobald du sie auf „🟢 erstattet" stellst, kommt der Betrag am Erstattungsdatum wieder herein. So siehst du die Delle im Kontostand, bis dir das Geld zurückgezahlt wurde. Neu: pro Eintrag ein Konto wählbar (🏦-Knopf). Hinweis: Bereits erfasste offene Auslagen mindern damit rückwirkend den Kontostand – für schon längst erledigte Posten einfach auf „erstattet" mit Datum setzen.',
+    '**Reiter der Seitenleiste frei anordnen** – Unter Einstellungen → Darstellung → „Reiter-Reihenfolge" kannst du die Menüpunkte je Gruppe (Übersicht/Monatsauswertung/Planung/Verwaltung) mit ▲/▼ in deine Wunschreihenfolge bringen. Die Gruppen selbst bleiben fest. Mit „Auf Standard zurücksetzen" holst du die ursprüngliche Reihenfolge zurück.',
+  ]},
   { v: '1.0.58', date: '2026-09-16', changes: [
     '**„Geld ist eingegangen"-Meldung** – Wiederkehrende Einnahmen melden sich jetzt: Ab dem hinterlegten Stichtag zeigt die App beim Start eine Meldung „Geld ist eingegangen" mit Quelle und Betrag (einmal pro Monat je Einnahme, plus optional Windows-Benachrichtigung). So siehst du, wenn z.B. die monatlichen 5 € eingegangen sein sollten.',
     '**Versicherungen: Betrag immer mit 2 Nachkommastellen** – Das Betragsfeld zeigt jetzt auch eine abschließende Null (z.B. 79,90 statt 79,9).',
@@ -1674,6 +1679,26 @@ function incomeReceived(m, field) {
   if (flag === false) return false;
   return m < thisMonth();
 }
+// Ist die Auszahlung einer Reise (Spesen-Saldo) schon eingegangen? Steuert –
+// analog zu incomeReceived –, ob der Spesen-Saldo zum Kontostand/Cashflow zählt.
+// Explizites Flag s.erhalten gewinnt; ohne Flag gilt: vergangene Monate =
+// erhalten, laufender/künftiger Monat = erst nach Bestätigung (Schalter in der
+// Spesen-Zeile). Reisen kommen meist erst zum Monatsende zur Auszahlung.
+function speseReceived(s) {
+  if (!s) return false;
+  if (s.erhalten === true) return true;
+  if (s.erhalten === false) return false;
+  return (s.month || '') < thisMonth();
+}
+function toggleSpeseReceived(id) {
+  if (!requireUnlocked()) return;
+  const s = findSpese(id);
+  if (!s) return;
+  s.erhalten = !speseReceived(s);
+  saveData();
+  if (typeof updateBadges === 'function') updateBadges();
+  renderPage();
+}
 function kontoNetBis(kontoId, month) {
   const ausg = (state.ausgaben||[]).filter(a => (a.kontoId||defaultKontoId()) === kontoId && !a._korrektur && (!month || a.month <= month))
     .reduce((s,a) => s + (+a.amount||0), 0);
@@ -1761,9 +1786,26 @@ function kontoNetBis(kontoId, month) {
       if ((e.kontoId||def) === kontoId) sonst -= (+e.amount||0);
     });
     // Spesen-Saldo (Spesen − Ausgaben) auf zugeordnetes Konto (Default für Altbestand).
+    // Zählt erst, wenn die Reise als „erhalten" markiert ist (speseReceived).
     (state.spesen||[]).forEach(t => {
       if (t.month !== m) return;
+      if (!speseReceived(t)) return;
       if ((t.kontoId||def) === kontoId) sonst += (+(t.allowance||0) - +(t.ausgaben||0));
+    });
+    // Auslagen & Erstattungen (voll abgebildet): Die Auslage mindert das Konto ab
+    // ihrem Datum; bei Status „erstattet" kommt der Betrag ab dem Erstattungs-
+    // datum wieder herein (Durchlaufposten mit Timing). Tagesgenau im laufenden Monat.
+    (state.erstattungen||[]).forEach(e => {
+      if ((e.kontoId||def) !== kontoId) return;
+      const amt = +e.amount||0;
+      const outM = (e.date||'').slice(0,7);
+      const outDay = +((e.date||'').slice(8,10)) || 1;
+      if (outM === m && faelligkeitstagErreicht(outDay, m, grenze)) sonst -= amt;
+      if (e.status === 'erstattet' && e.erstattetAm) {
+        const inM = e.erstattetAm.slice(0,7);
+        const inDay = +(e.erstattetAm.slice(8,10)) || 1;
+        if (inM === m && faelligkeitstagErreicht(inDay, m, grenze)) sonst += amt;
+      }
     });
   });
   return einn + regel + sparTransfer + umb + sonst - ausg - wpKauf;
@@ -1958,10 +2000,19 @@ function monthFinancials(month, includeVormonat = true) {
   const ausgTotal = state.ausgaben.filter(a => a.month === month && !a._korrektur && istCashflowBuchung(a)).reduce((s, a) => s + a.amount, 0);
 
   const spesen = state.spesen.filter(s => s.month === month);
-  const spesenSaldo = spesen.reduce((s, t) => s + (+(t.allowance||0) - +(t.ausgaben||0)), 0);
+  // Nur „erhaltene" Reisen zählen zum Cashflow/Kontostand (analog Gehalt).
+  const spesenSaldo = spesen.reduce((s, t) => s + (speseReceived(t) ? (+(t.allowance||0) - +(t.ausgaben||0)) : 0), 0);
+  // Auslagen & Erstattungen (voll abgebildet): Auslage raus im Monat des Datums,
+  // Erstattung rein im Monat des Erstattungsdatums.
+  let erstattungSaldo = 0;
+  (state.erstattungen||[]).forEach(e => {
+    const amt = +e.amount||0;
+    if ((e.date||'').slice(0,7) === month) erstattungSaldo -= amt;
+    if (e.status === 'erstattet' && (e.erstattetAm||'').slice(0,7) === month) erstattungSaldo += amt;
+  });
 
   const totalExpenses = fixTotal + einkTotal + ausgTotal;
-  const cashflow = totalIncome + spesenSaldo - totalExpenses;
+  const cashflow = totalIncome + spesenSaldo + erstattungSaldo - totalExpenses;
 
   // Kumulativer Saldo: Startgeld + alle Vormonate + aktueller Cashflow
   const vormonatSaldo = includeVormonat ? getVormonatSaldo(month) : 0;
@@ -2023,11 +2074,130 @@ function kontoCashflowMonat(kontoId, month) {
     .filter(e => (e.kontoId||def) === kontoId && e.month === month)
     .reduce((s,e) => s + (+e.amount||0), 0);
   const spesen = (state.spesen||[])
-    .filter(t => (t.kontoId||def) === kontoId && t.month === month)
+    .filter(t => (t.kontoId||def) === kontoId && t.month === month && speseReceived(t))
     .reduce((s,t) => s + (+(t.allowance||0) - +(t.ausgaben||0)), 0);
-  cf += -eink + spesen;
+  // Auslagen & Erstattungen dieses Kontos (voll abgebildet).
+  let erst = 0;
+  (state.erstattungen||[]).forEach(e => {
+    if ((e.kontoId||def) !== kontoId) return;
+    const amt = +e.amount||0;
+    if ((e.date||'').slice(0,7) === month) erst -= amt;
+    if (e.status === 'erstattet' && (e.erstattetAm||'').slice(0,7) === month) erst += amt;
+  });
+  cf += -eink + spesen + erst;
 
   return Math.round(cf * 100) / 100;
+}
+
+// ── SEITENLEISTE: REIHENFOLGE DER REITER ────────────────────────────────────
+// Die Reiter lassen sich in den Einstellungen (Darstellung) je Gruppe per
+// Hoch/Runter-Pfeilen anordnen. Gespeichert wird die Reihenfolge in
+// state.settings.navOrder[<gruppe>] als Liste der Reiter-Schlüssel.
+const NAV_DEF = [
+  { sec: 'uebersicht', label: 'Übersicht', items: [
+    ['dashboard','📊 Dashboard'], ['einstellungen','⚙️ Einstellungen'],
+    ['jahresuebersicht','📅 Jahresübersicht'], ['suche','🔍 Suche'] ] },
+  { sec: 'monat', label: 'Monatsauswertung', items: [
+    ['buchungen','📋 Buchungen'], ['einkaeufe','🛒 Einkäufe'], ['ausgaben','💸 Ausgaben'],
+    ['einnahmen','💰 Einnahmen'], ['spesen','✈️ Spesen & Reisen'] ] },
+  { sec: 'planung', label: 'Planung', items: [
+    ['fixkosten','🔁 Fixkosten'], ['sparen','🏦 Sparen & Depot'], ['umbuchungen','🔄 Umbuchungen'],
+    ['zaehler','⚡ Zählerstände'], ['pv','☀️ PV-Anlage'], ['finanzprodukte','📋 Finanzprodukte'],
+    ['versicherungen','🛡️ Versicherungen'], ['analyse','📊 Analyse'], ['tabellen','📝 Eigene Tabellen'] ] },
+  { sec: 'verwaltung', label: 'Verwaltung', items: [
+    ['archiveYear','📦 Jahr archivieren'] ] },
+];
+// Schlüssel eines Nav-Buttons aus seinem onclick ableiten.
+function navKey(elm) {
+  const oc = (elm && elm.getAttribute && elm.getAttribute('onclick')) || '';
+  const m = oc.match(/navigate\('([^']+)'\)/);
+  if (m) return m[1];
+  if (/archiveYear/.test(oc)) return 'archiveYear';
+  return oc;
+}
+// Effektive Reihenfolge einer Gruppe: gespeicherte Reihenfolge (nur bekannte
+// Schlüssel) + alle übrigen Standard-Reiter hinten angehängt.
+function effectiveNavOrder(sec) {
+  const def = NAV_DEF.find(s => s.sec === sec);
+  if (!def) return [];
+  const known = def.items.map(i => i[0]);
+  let saved = (state.settings && state.settings.navOrder && state.settings.navOrder[sec]) || [];
+  if (!Array.isArray(saved)) saved = [];
+  const order = saved.filter(k => known.includes(k));
+  known.forEach(k => { if (!order.includes(k)) order.push(k); });
+  return order;
+}
+// Reihenfolge im DOM anwenden (je Gruppe, Gruppen-Überschriften bleiben).
+function applyNavOrder() {
+  const aside = document.querySelector('.sidebar');
+  if (!aside) return;
+  const kids = Array.from(aside.children);
+  const sections = [];
+  kids.forEach(elm => {
+    if (elm.classList && elm.classList.contains('sidebar-section')) {
+      sections.push({ header: elm, items: [] });
+    } else if (elm.classList && elm.classList.contains('nav-item') && sections.length) {
+      sections[sections.length - 1].items.push(elm);
+    }
+  });
+  sections.forEach(sec => {
+    const secKey = sec.header.dataset ? sec.header.dataset.sec : '';
+    if (!secKey) return;
+    const order = effectiveNavOrder(secKey);
+    if (!order.length) return;
+    const byKey = {};
+    sec.items.forEach(it => { byKey[navKey(it)] = it; });
+    let anchor = sec.header;
+    const placed = new Set();
+    order.forEach(k => { const it = byKey[k]; if (it) { anchor.after(it); anchor = it; placed.add(k); } });
+    sec.items.forEach(it => { const k = navKey(it); if (!placed.has(k)) { anchor.after(it); anchor = it; } });
+  });
+}
+function moveNavItem(sec, key, dir) {
+  const order = effectiveNavOrder(sec);
+  const idx = order.indexOf(key);
+  if (idx < 0) return;
+  const ni = idx + (dir < 0 ? -1 : 1);
+  if (ni < 0 || ni >= order.length) return;
+  const tmp = order[idx]; order[idx] = order[ni]; order[ni] = tmp;
+  state.settings = state.settings || {};
+  state.settings.navOrder = state.settings.navOrder || {};
+  state.settings.navOrder[sec] = order;
+  saveData();
+  applyNavOrder();
+  renderPage();
+}
+function resetNavOrder() {
+  if (state.settings && state.settings.navOrder) { delete state.settings.navOrder; saveData(); }
+  // Standard-Reihenfolge wieder herstellen: Seite neu laden ist am robustesten,
+  // aber wir ordnen direkt neu an (Standard = NAV_DEF-Reihenfolge).
+  applyNavOrder();
+  renderPage();
+  showToast('Reihenfolge zurückgesetzt', 'info');
+}
+// Karte für die Einstellungen (Darstellung).
+function navOrderCard() {
+  const groups = NAV_DEF.map(def => {
+    const order = effectiveNavOrder(def.sec);
+    const labelByKey = {}; def.items.forEach(i => { labelByKey[i[0]] = i[1]; });
+    const rows = order.map((k, i) => {
+      const isFirst = i === 0, isLast = i === order.length - 1;
+      return '<div style="display:flex;align-items:center;gap:8px;padding:6px 10px;border:1px solid var(--border);border-radius:8px;background:var(--input-bg);margin-bottom:6px">' +
+        '<span style="flex:1;font-size:13px">' + (labelByKey[k] || k) + '</span>' +
+        '<button class="btn-icon" title="Nach oben" onclick="moveNavItem(\'' + def.sec + '\',\'' + k + '\',-1)"' + (isFirst?' disabled style="opacity:.3"':'') + '>▲</button>' +
+        '<button class="btn-icon" title="Nach unten" onclick="moveNavItem(\'' + def.sec + '\',\'' + k + '\',1)"' + (isLast?' disabled style="opacity:.3"':'') + '>▼</button>' +
+        '</div>';
+    }).join('');
+    return '<div style="margin-bottom:16px">' +
+      '<div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px">' + def.label + '</div>' +
+      rows + '</div>';
+  }).join('');
+  return '<div class="card mb-2">' +
+    '<div class="card-header"><h3>🧭 Reiter-Reihenfolge</h3></div>' +
+    '<div style="font-size:11px;color:var(--muted);margin:-4px 0 14px">Ordne die Reiter in der Seitenleiste je Gruppe mit ▲/▼ an. Die Gruppen selbst bleiben in fester Reihenfolge. Ausgeblendete Reiter (z.B. PV-Anlage) erscheinen erst, wenn du sie unter „Funktionen" aktivierst.</div>' +
+    groups +
+    '<button class="btn btn-ghost btn-sm" onclick="resetNavOrder()">Auf Standard zurücksetzen</button>' +
+    '</div>';
 }
 
 // ── NAVIGATION ────────────────────────────────────────────────────────────
@@ -4381,6 +4551,7 @@ function erstattungenCard() {
       '</select></td>' +
       '<td><input type="date" value="' + (e.erstattetAm||'') + '" onchange="updateErstattung(\'' + e.id + '\',\'erstattetAm\',this.value)" style="width:135px"' + (isErstattet?'':' disabled') + '/></td>' +
       '<td><input type="text" value="' + (e.note||'').replace(/"/g,'&quot;') + '" onchange="updateErstattung(\'' + e.id + '\',\'note\',this.value)" placeholder="Notiz…"/></td>' +
+      '<td style="white-space:nowrap">' + (() => { const _k=kontoById(e.kontoId||defaultKontoId()); const _kn=_k?_k.name:'Konto'; const _cf=_k?_k.cashflow:true; return '<button class="btn-icon" title="Konto: ' + _kn + ' – klicken zum Ändern" onclick="pickErstattungKonto(\'' + e.id + '\')" style="width:auto;min-width:0;padding:0 8px;font-size:12px;white-space:nowrap;gap:4px">' + (_cf?'🏦':'📈') + ' ' + _kn + '</button>'; })() + '</td>' +
       '<td><button class="btn-icon danger" onclick="deleteErstattung(\'' + e.id + '\')" ' + lockAttr() + '>×</button></td>' +
       '</tr>';
   }).join('');
@@ -4397,6 +4568,7 @@ function erstattungenCard() {
     '<td></td>' +
     '<td><input type="text" id="erad_note" placeholder="Notiz…" ' +
       'onkeydown="if(event.key===\'Enter\'){document.getElementById(\'eraddbtn\').click();}"/></td>' +
+    '<td style="color:var(--muted);font-size:11px">Standard-Konto</td>' +
     '<td><button id="eraddbtn" class="btn-icon" style="color:#0f766e;font-weight:800;font-size:18px" onclick="quickAddErstattung()" ' + lockAttr() + ' title="Auslage hinzufügen">+</button></td>' +
     '</tr>';
 
@@ -4404,14 +4576,14 @@ function erstattungenCard() {
     '<div class="card-header"><h3>💶 Auslagen & Erstattungen</h3>' +
       '<span class="badge badge-muted">' + list.length + ' Einträge</span></div>' +
     '<div style="font-size:11px;color:var(--muted);margin:-6px 0 12px">' +
-      'Verauslagtes Geld, das dir erstattet wird (z.B. Öl/Tanken Firmenwagen). Reine Durchlaufposten – zählen nicht als Einnahme/Ausgabe.' +
+      'Verauslagtes Geld, das dir erstattet wird (z.B. Öl/Tanken Firmenwagen). Voll abgebildet: Die Auslage mindert ab ihrem Datum das gewählte Konto; sobald „erstattet", kommt der Betrag am Erstattungsdatum wieder herein. So siehst du die Delle im Kontostand bis zur Erstattung.' +
     '</div>' +
     '<div class="kpi-grid kpi-grid-3" style="margin-bottom:14px">' +
       '<div class="kpi"><div class="kpi-label">Offene Erstattungen</div><div class="kpi-value ' + (offen>0?'negative':'') + '">' + fmtEur(offen) + '</div><div class="kpi-sub">' + offenCount + ' offen</div></div>' +
       '<div class="kpi"><div class="kpi-label">Bereits erstattet</div><div class="kpi-value positive">' + fmtEur(erstattet) + '</div></div>' +
     '</div>' +
     '<div class="table-wrap"><table>' +
-    '<thead><tr><th>Datum</th><th>Beschreibung</th><th>Kategorie</th><th style="text-align:right">Betrag</th><th>Status</th><th>Erstattet am</th><th>Notiz</th><th></th></tr></thead>' +
+    '<thead><tr><th>Datum</th><th>Beschreibung</th><th>Kategorie</th><th style="text-align:right">Betrag</th><th>Status</th><th>Erstattet am</th><th>Notiz</th><th>Konto</th><th></th></tr></thead>' +
     '<tbody>' + rowsHtml + addRow + '</tbody></table></div>' +
     '</div>';
 }
@@ -4425,7 +4597,7 @@ function quickAddErstattung() {
   const note   = (document.getElementById('erad_note') && document.getElementById('erad_note').value) || '';
   if (!amount) { showToast('Bitte Betrag eingeben','error'); const a=document.getElementById('erad_amount'); if(a)a.focus(); return; }
   state.erstattungen = state.erstattungen || [];
-  state.erstattungen.push({ id: uid(), date: dateV, desc, category: cat, amount, status: 'offen', erstattetAm: '', note });
+  state.erstattungen.push({ id: uid(), date: dateV, desc, category: cat, amount, status: 'offen', erstattetAm: '', note, kontoId: defaultKontoId() });
   saveData(); renderPage(); showToast('Auslage hinzugefügt');
 }
 function updateErstattung(id, f, v) {
@@ -4445,6 +4617,17 @@ function setErstattungStatus(id, status) {
 function deleteErstattung(id) {
   if (!requireUnlocked()) return;
   if (moveToTrash('erstattungen', id, 'Auslage/Erstattung')) { renderPage(); showToast('In Papierkorb verschoben','info'); }
+}
+async function pickErstattungKonto(id) {
+  if (!requireUnlocked()) return;
+  const e = (state.erstattungen||[]).find(x => String(x.id) === String(id)); if (!e) return;
+  const kid = await askKontoWahl({
+    title: 'Auslage – welches Konto?', icon: '💶',
+    message: 'Auslage/Erstattung' + (e.desc?(' ('+e.desc+')'):'') + ' diesem Konto zuordnen (Abzug bei Auslage, Gutschrift bei Erstattung):',
+    kontoId: e.kontoId || defaultKontoId(),
+  });
+  if (kid) { e.kontoId = kid; saveData(); if (typeof updateBadges==='function') updateBadges(); renderPage();
+    const k = kontoById(kid); if (k) showToast('Konto: ' + k.name, 'info'); }
 }
 
 // Ermittelt die gültigen Sätze für eine Reise. Maßgeblich sind Land und
@@ -4534,6 +4717,7 @@ function speseRow(s) {
   const vorOrtTage = Math.max(0, totalDays - 2);
   const saldo    = (s.allowance||0) - (+s.ausgaben||0);
   const zuUeberweisen = (s.allowance||0) + (s.auslagen||0);
+  const rec = speseReceived(s);
   const countryOpts = aktiveSpesenSaetze().filter(l => l.land !== 'Deutschland')
     .map(l => `<option value="${l.land}" ${l.land===s.country?'selected':''}>${l.land} (${l.halb}€/${l.ganz}€)</option>`).join('');
   const deutschlandOpt = `<option value="Deutschland" ${'Deutschland'===s.country?'selected':''}>Deutschland (14€/28€)</option>`;
@@ -4554,10 +4738,12 @@ function speseRow(s) {
     <td style="text-align:center"><input type="number" value="${s.abendessen||0}" min="0" onchange="updateSpese('${s.id}','abendessen',+this.value);recalcSpeseRow('${s.id}')" style="width:45px;text-align:center"/></td>
     ${speseAmountCell(s,'ausgaben','sp_ausg_'+s.id)}
     <td class="amount positive">${fmtEur(s.allowance||0)}</td>
-    <td class="amount ${saldo>=0?'positive':'negative'}">${saldo>=0?'+':''}${fmtEur(saldo)}</td>
+    <td class="amount ${rec?(saldo>=0?'positive':'negative'):''}"${rec?'':' style="opacity:.5" title="Noch nicht erhalten – zählt noch nicht zum Konto"'}>${saldo>=0?'+':''}${fmtEur(saldo)}</td>
     ${speseAmountCell(s,'auslagen','sp_ausl_'+s.id)}
     <td class="amount ${zuUeberweisen>=0?'positive':'negative'}" style="font-weight:700">${fmtEur(zuUeberweisen)}</td>
-    <td style="white-space:nowrap">${(() => { const _k=kontoById(s.kontoId||defaultKontoId()); const _kn=_k?_k.name:'Konto'; const _cf=_k?_k.cashflow:true; return `<button class="btn-icon" title="Konto (Spesen-Saldo): ${_kn} – klicken zum Ändern" onclick="pickSpeseKonto('${s.id}')" style="width:auto;min-width:0;padding:0 8px;font-size:12px;white-space:nowrap;gap:4px">${_cf?'🏦':'📈'} ${_kn}</button>`; })()}<button class="btn-icon danger" onclick="deleteSpese('${s.id}')">×</button></td>
+    <td style="white-space:nowrap">
+      <button class="btn-icon" onclick="toggleSpeseReceived('${s.id}')" title="${rec?'Reise ist ausgezahlt – Saldo zählt zum Konto. Klicken = auf „offen" setzen.':'Reise noch nicht ausgezahlt – Saldo zählt noch nicht. Klicken = als „erhalten" markieren.'}" style="width:auto;min-width:0;padding:0 8px;font-size:12px;white-space:nowrap;gap:4px;color:${rec?'var(--green)':'#d97706'}">${rec?'✓ erhalten':'⏳ offen'}</button>
+      ${(() => { const _k=kontoById(s.kontoId||defaultKontoId()); const _kn=_k?_k.name:'Konto'; const _cf=_k?_k.cashflow:true; return `<button class="btn-icon" title="Konto (Spesen-Saldo): ${_kn} – klicken zum Ändern" onclick="pickSpeseKonto('${s.id}')" style="width:auto;min-width:0;padding:0 8px;font-size:12px;white-space:nowrap;gap:4px">${_cf?'🏦':'📈'} ${_kn}</button>`; })()}<button class="btn-icon danger" onclick="deleteSpese('${s.id}')">×</button></td>
   </tr>`;
 }
 
@@ -4599,7 +4785,7 @@ function recalcSpeseRow(id) {
   const zuUeberweisen = (s.allowance||0) + (s.auslagen||0);
   // col 9 = Spesenbetrag (allowance), col 10 = saldo, col 12 = zuUeberweisen
   if (cells[9])  { cells[9].textContent = fmtEur(s.allowance||0); }
-  if (cells[10]) { cells[10].className='amount '+(saldo>=0?'positive':'negative'); cells[10].textContent=(saldo>=0?'+':'')+fmtEur(saldo); }
+  if (cells[10]) { const _rec=speseReceived(s); cells[10].className='amount '+(_rec?(saldo>=0?'positive':'negative'):''); cells[10].style.opacity=_rec?'':'0.5'; cells[10].textContent=(saldo>=0?'+':'')+fmtEur(saldo); }
   if (cells[12]) { cells[12].className='amount '+(zuUeberweisen>=0?'positive':'negative'); cells[12].style.fontWeight='700'; cells[12].textContent=fmtEur(zuUeberweisen); }
 }
 
@@ -6770,6 +6956,7 @@ function einstellungen() {
             '</div>';
         })()}
       </div>
+      ${navOrderCard()}
       </div>
       <div class="settings-section" style="display:${_setTab==='funktionen'?'block':'none'}">
       <div class="settings-section-header">🎯 Sparziel</div>
@@ -11454,11 +11641,15 @@ window.updateSpeseDate   = updateSpeseDate;
 window.updateSpeseCountry= updateSpeseCountry;
 window.deleteSpese       = deleteSpese;
 window.pickSpeseKonto    = pickSpeseKonto;
+window.toggleSpeseReceived = toggleSpeseReceived;
 window.quickAddErstattung = quickAddErstattung;
 window.updateErstattung   = updateErstattung;
 window.setErstattungStatus = setErstattungStatus;
 window.deleteErstattung   = deleteErstattung;
+window.pickErstattungKonto = pickErstattungKonto;
 window.recalcSpeseRow    = recalcSpeseRow;
+window.moveNavItem       = moveNavItem;
+window.resetNavOrder     = resetNavOrder;
 
 // Fixkosten
 window.addFixkosten         = addFixkosten;
@@ -11568,6 +11759,7 @@ window.deleteRegelEinnahme   = deleteRegelEinnahme;
 
   applySettings();
   pvNavSichtbarkeit();
+  try { applyNavOrder(); } catch (e) { console.error('applyNavOrder:', e); }
   cleanOldTrash();
   checkAutoBackup();
   // Auto-create sparen entries from linked fixkosten (silent)
