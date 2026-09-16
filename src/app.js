@@ -216,12 +216,52 @@ function setAblaufVorlauf(v) {
   try { checkAblaufReminders(); } catch (e) { console.error('checkAblaufReminders:', e); }
   renderPage();
 }
+// Wiederkehrende Einnahmen: am hinterlegten Stichtag eine Meldung „Geld ist
+// eingegangen" zeigen – einmal pro Monat je Einnahme (Dedupe via _eingangNotified).
+async function checkGeldEingang() {
+  const now = new Date();
+  const nowYm = now.toISOString().slice(0, 7);
+  const tag = now.getDate();
+  const due = (state.regelEinnahmen || []).filter(r => {
+    if (r.startMonth && r.startMonth > nowYm) return false;   // noch nicht aktiv
+    if (r.endMonth && r.endMonth < nowYm) return false;       // schon ausgelaufen
+    const st = Math.max(1, +r.startTag || 1);
+    if (tag < st) return false;                               // Stichtag noch nicht erreicht
+    if (r._eingangNotified === nowYm) return false;           // diesen Monat schon gemeldet
+    return true;
+  });
+  if (!due.length) return;
+  due.forEach(r => { r._eingangNotified = nowYm; });
+  saveData();
+  // Windows-Benachrichtigung (nur bei laufender App)
+  try {
+    if (window.EA && window.EA.notify) window.EA.notify({
+      title: '💶 Geld ist eingegangen',
+      body: due.map(r => (r.source || 'Einnahme') + ': ' + fmtEur(+r.amount || 0)).join('\n'),
+    });
+  } catch (e) { /* ignore */ }
+  const lines = due.map(r => '• <strong>' + String(r.source || 'Einnahme').replace(/</g, '&lt;') + '</strong>: ' + fmtEur(+r.amount || 0) + (r.startTag ? ' <span style="color:var(--muted)">(Stichtag ' + (+r.startTag) + '.)</span>' : ''));
+  try {
+    await uiAlert({
+      title: 'Geld ist eingegangen', icon: '💶',
+      message: (due.length > 1 ? 'Diese wiederkehrenden Einnahmen sind' : 'Diese wiederkehrende Einnahme ist') +
+        ' laut Stichtag eingegangen:<br><br>' + lines.join('<br>'),
+    });
+  } catch (e) { /* ignore */ }
+}
 
 // ── "WAS IST NEU" / CHANGELOG ───────────────────────────────────────────────
 // ▼▼▼ CHANGELOG – wird bei jedem Update gepflegt. Neueste Version ZUERST. ▼▼▼
 // Format je Eintrag: { v: 'Version', date: 'YYYY-MM-DD', changes: ['...','...'] }
 // Änderungen dürfen mit **Fett** Markierung versehen werden.
 const CHANGELOG = [
+  { v: '1.0.58', date: '2026-09-16', changes: [
+    '**„Geld ist eingegangen"-Meldung** – Wiederkehrende Einnahmen melden sich jetzt: Ab dem hinterlegten Stichtag zeigt die App beim Start eine Meldung „Geld ist eingegangen" mit Quelle und Betrag (einmal pro Monat je Einnahme, plus optional Windows-Benachrichtigung). So siehst du, wenn z.B. die monatlichen 5 € eingegangen sein sollten.',
+    '**Versicherungen: Betrag immer mit 2 Nachkommastellen** – Das Betragsfeld zeigt jetzt auch eine abschließende Null (z.B. 79,90 statt 79,9).',
+  ]},
+  { v: '1.0.57', date: '2026-09-16', changes: [
+    '**Behoben: manuelle Verknüpfung Versicherung ↔ Fixkost hielt nicht.** Beim manuellen Auswählen einer Fixkost aus der Liste erschien zwar „verknüpft", die grüne Verknüpfung blieb aber nicht bestehen. Ursache war ein Typ-Vergleich der Fixkosten-ID (Text vs. Zahl). Jetzt bleibt die Verknüpfung dauerhaft bestehen und wird grün angezeigt – wie bei automatischen Namens-Treffern. (Erinnerung: Deine Absenderadresse fürs Kündigungsschreiben pflegst du unter Einstellungen → Profil.)',
+  ]},
   { v: '1.0.56', date: '2026-09-16', changes: [
     '**Wechselkurs-Anzeige** – Im Depot wird bei Fremdwährungs-Positionen jetzt das Datum des zuletzt geholten Wechselkurses als Tooltip angezeigt. (Technisch löst dieses Update zugleich den Release-Build der Euro-Umrechnung aus 1.0.55 aus.)',
   ]},
@@ -2394,7 +2434,7 @@ function versMonthly(v) {
   return v.zahlweise === 'monatlich' ? a : v.zahlweise === 'vierteljährlich' ? a/3
        : v.zahlweise === 'halbjährlich' ? a/6 : v.zahlweise === 'jährlich' ? a/12 : a;
 }
-function versFixLinked(v) { return v.fixId ? ((getYearData().fixkosten||[]).find(f => f.id === v.fixId) || null) : null; }
+function versFixLinked(v) { return v.fixId ? ((getYearData().fixkosten||[]).find(f => String(f.id) === String(v.fixId)) || null) : null; }
 
 function versicherungen() {
   const list = getVersicherungen();
@@ -2439,7 +2479,7 @@ function versicherungen() {
           F('Typ (z.B. Zusatzversicherung)','typ','text',sel.typ) +
           F('Anbieter','anbieter','text',sel.anbieter) +
           F('Policennummer','police','text',sel.police) +
-          F('Betrag (' + currencySymbol() + ')','amount','number',(+sel.amount||0)) +
+          '<label class="field">Betrag (' + currencySymbol() + ')<input type="number" step="0.01" value="' + (+sel.amount||0).toFixed(2) + '" onchange="updateVers(\'' + sel.id + '\',\'amount\',+this.value)"/></label>' +
           '<label class="field">Zahlweise<select onchange="updateVers(\'' + sel.id + '\',\'zahlweise\',this.value)">' + zwOpts + '</select></label>' +
           '<label class="field">Beginn<input type="month" value="' + (sel.start||'') + '" onchange="updateVers(\'' + sel.id + '\',\'start\',this.value)"/></label>' +
           '<label class="field">Ende (leer = unbefristet)<input type="month" value="' + (sel.end||'') + '" onchange="updateVers(\'' + sel.id + '\',\'end\',this.value)"/></label>' +
@@ -2547,8 +2587,10 @@ async function versLinkFixkost(id) {
   });
   if (!wahl) return;
   if (wahl !== '__new__') {
-    o.fixId = wahl; saveData(); renderPage();
-    const f = (getYearData().fixkosten||[]).find(x => x.id === wahl);
+    // wahl kommt als String aus dem Dialog – echte Fixkost-ID (kann Zahl sein) übernehmen
+    const f = (getYearData().fixkosten||[]).find(x => String(x.id) === String(wahl));
+    o.fixId = f ? f.id : wahl;
+    saveData(); renderPage();
     showToast('Verknüpft mit „' + (f ? (f.name||'Fixkost') : 'Fixkost') + '"', 'info');
     return;
   }
@@ -11536,6 +11578,8 @@ window.deleteRegelEinnahme   = deleteRegelEinnahme;
   setTimeout(() => initReminders(), 1500);
   // ── "Was ist neu" nach einem Update anzeigen ────────────────────────────
   setTimeout(() => checkWhatsNew(), 2000);
+  // ── Wiederkehrende Einnahmen: „Geld ist eingegangen" am Stichtag ────────
+  setTimeout(() => { checkGeldEingang().catch(e => console.error('checkGeldEingang:', e)); }, 2600);
   // ── Robustheit: Backup-Ordner an Hauptprozess melden (für Backup beim Beenden)
   if (window.EA && window.EA.setBackupDir && state.config && state.config.backupPath) {
     try { window.EA.setBackupDir(state.config.backupPath); } catch {}
