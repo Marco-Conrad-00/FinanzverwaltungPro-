@@ -255,6 +255,10 @@ async function checkGeldEingang() {
 // Format je Eintrag: { v: 'Version', date: 'YYYY-MM-DD', changes: ['...','...'] }
 // Änderungen dürfen mit **Fett** Markierung versehen werden.
 const CHANGELOG = [
+  { v: '1.0.61', date: '2026-10-11', changes: [
+    '**Dynamik: automatische Erhöhung für Fixkosten & Sparpläne.** Jede Fixkost/jeder Sparplan hat jetzt einen ⚡-Knopf: Lege fest, dass sich der Betrag ab einem Stichtag automatisch erhöht – wahlweise um einen **festen Betrag (€)** oder um **Prozent (%)**, einmalig oder wiederkehrend (z.B. jährlich). Beispiel Renten-Sparplan: +27,35 € ab dem nächsten Stichtag. Die Erhöhung wirkt überall automatisch: Abbuchung/Kontostand, automatischer Sparplan-Kauf und alle Summen. Der im Eingabefeld gepflegte Wert bleibt der **Grundbetrag**; der aktuell gültige Betrag wird mit ⚡ daneben angezeigt.',
+    '**Aussetzen – ganz oder einzeln.** Im Dynamik-Dialog kannst du die Dynamik komplett pausieren (Schalter „aktiv") oder **einzelne Termine abhaken** (z.B. wenn du eine jährliche Erhöhung einmal nicht mitmachen willst, wie bei den Versicherungs-Dynamiken). Eine Vorschau zeigt je Termin den dann gültigen Betrag; Prozent-Erhöhungen wirken zusammengesetzt. Beim Jahreswechsel wird die Dynamik mit übernommen.',
+  ]},
   { v: '1.0.60', date: '2026-09-16', changes: [
     '**Spesen-Schalter präzisiert: Ausgaben zählen sofort, nur die Pauschale wartet auf „erhalten".** Deine (privaten) Ausgaben auf einer Reise mindern jetzt sofort dein Konto – unabhängig vom Schalter. Erst die Spesen-**Pauschale** (z.B. 47 €) kommt hinzu, sobald du die Reise auf „✓ erhalten" stellst. Beispiel: Kontostand 1.427,58 €, Ausgaben 1,83 € → sofort 1.425,75 €; nach Erhalt der Pauschale (47 €) → 1.472,75 €.',
   ]},
@@ -1451,6 +1455,41 @@ function fixkostenAktivImMonat(f, month) {
   return (monthDiff(start, month) % iv) === 0;
 }
 
+// ── DYNAMIK (automatische Beitrags-/Sparraten-Erhöhung) ─────────────────────
+// Optional je Fixkost/Sparplan: f.dynamik = { aktiv, typ:'prozent'|'betrag',
+// wert, abMonat:'YYYY-MM', intervallMonate (0/leer = einmalig, sonst z.B. 12),
+// endMonat (optional), uebersprungen:[ 'YYYY-MM', … ] }. f.amount bleibt der
+// GRUNDBETRAG; fixkostBetrag(f,m) liefert den im Monat m tatsächlich gültigen
+// Betrag (Prozent-Dynamik wirkt zusammengesetzt). Einzelne Termine lassen sich
+// „aussetzen" (uebersprungen), die ganze Dynamik über aktiv=false.
+function dynamikTermine(f, bisM) {
+  const d = f && f.dynamik; const out = [];
+  if (!d || !d.abMonat || !bisM) return out;
+  const iv = +d.intervallMonate || 0;
+  let s = d.abMonat, guard = 0;
+  while (s <= bisM && guard++ < 1200) {
+    if (!d.endMonat || s <= d.endMonat) out.push(s);
+    if (iv <= 0) break;            // einmalige Dynamik: nur abMonat
+    s = monthShift(s, iv);
+  }
+  return out;
+}
+function fixkostBetrag(f, m) {
+  let amt = +f.amount || 0;
+  const d = f && f.dynamik;
+  if (d && d.aktiv && d.abMonat && (+d.wert || 0) !== 0 && m && m >= d.abMonat) {
+    const skip = d.uebersprungen || [];
+    dynamikTermine(f, m).forEach(s => {
+      if (skip.includes(s)) return;
+      if (d.typ === 'prozent') amt = Math.round(amt * (1 + (+d.wert || 0) / 100) * 100) / 100;
+      else amt = Math.round((amt + (+d.wert || 0)) * 100) / 100;
+    });
+  }
+  return Math.round(amt * 100) / 100;
+}
+function fixkostBetragAktuell(f) { return fixkostBetrag(f, thisMonth()); }
+function hatAktiveDynamik(f) { return !!(f && f.dynamik && f.dynamik.aktiv && f.dynamik.abMonat && (+f.dynamik.wert || 0) !== 0); }
+
 // ── TAGESGENAUE SALDO-REGEL (FÄLLIGKEITSTAG) ────────────────────────────────
 // Eine Position (Fixkost oder wiederkehrende Einnahme) mit Tag > 1 zählt in
 // JEDEM Monat erst ab diesem Fälligkeitstag in den Saldo:
@@ -1478,7 +1517,7 @@ function fixkostenForMonth(month) {
   return state.fixkosten.filter(f => fixkostenAktivImMonat(f, month));
 }
 function fixkostenTotal(month) {
-  return fixkostenForMonth(month).reduce((s, f) => s + f.amount, 0);
+  return fixkostenForMonth(month).reduce((s, f) => s + fixkostBetrag(f, month), 0);
 }
 
 // ── FINANCIALS FOR MONTH ──────────────────────────────────────────────────
@@ -1732,7 +1771,7 @@ function kontoNetBis(kontoId, month) {
     const start = f.start || (yr + '-01');
     const end = f.end || grenze;
     const bisM = (end < grenze) ? end : grenze;
-    if (bisM >= start) monthsBetween(start, bisM).forEach((m) => { if (fixkostenAktivImMonat(f, m) && faelligkeitstagErreicht(f.day, m, grenze)) sparTransfer += (+f.amount||0); });
+    if (bisM >= start) monthsBetween(start, bisM).forEach((m) => { if (fixkostenAktivImMonat(f, m) && faelligkeitstagErreicht(f.day, m, grenze)) sparTransfer += fixkostBetrag(f, m); });
   });
   // Wertpapierkäufe mindern das Verrechnungskonto.
   // Ohne das erschiene dasselbe Geld doppelt: einmal als Kontoguthaben und
@@ -1781,7 +1820,7 @@ function kontoNetBis(kontoId, month) {
     // Tagesgenau: zählt im laufenden Monat erst ab dem Fälligkeitstag (f.day).
     (state.fixkosten||[]).forEach(f => {
       if ((f.kontoId||def) !== kontoId) return;
-      if (fixkostenAktivImMonat(f, m) && faelligkeitstagErreicht(f.day, m, grenze)) sonst -= (+f.amount||0);
+      if (fixkostenAktivImMonat(f, m) && faelligkeitstagErreicht(f.day, m, grenze)) sonst -= fixkostBetrag(f, m);
     });
     // Einkäufe mindern ihr zugeordnetes Konto (Default für Altbestand).
     (state.einkaeufe||[]).forEach(e => {
@@ -2054,11 +2093,11 @@ function kontoCashflowMonat(kontoId, month) {
     .filter(f => f.sparenLink && !f.sparenLink.extern && f.sparenLink.zielkonto === kontoId
       && (!f.sparenLink.sparTyp || f.sparenLink.sparTyp === 'bargeld')
       && fixkostenAktivImMonat(f, month))
-    .reduce((s,f) => s + (+f.amount||0), 0);
+    .reduce((s,f) => s + fixkostBetrag(f, month), 0);
   // Fixkosten dieses Kontos (Quelle = kontoId, Default für Altbestand)
   const fixK = (state.fixkosten||[])
     .filter(f => (f.kontoId||def) === kontoId && fixkostenAktivImMonat(f, month))
-    .reduce((s,f) => s + (+f.amount||0), 0);
+    .reduce((s,f) => s + fixkostBetrag(f, month), 0);
   // Umbuchungen: Abgang bei vonKonto, Zugang bei nachKonto
   const umbAus = (state.umbuchungen||[])
     .filter(u => u.vonKonto === kontoId && (u.month || (u.date||'').slice(0,7)) === month)
@@ -2378,7 +2417,9 @@ async function confirmNewYear() {
         .map(f => {
           // Endet der Vertrag IM neuen Jahr, gilt er nur bis dahin; sonst ganzjährig aktiv.
           const perYearEnd = (f.laufzeitEnde && f.laufzeitEnde <= ny + '-12') ? f.laufzeitEnde : (ny + '-12');
-          return { ...f, id: uid(), start: ny + '-01', end: perYearEnd };
+          const copy = { ...f, id: uid(), start: ny + '-01', end: perYearEnd };
+          if (f.dynamik) copy.dynamik = { ...f.dynamik, uebersprungen: [ ...(f.dynamik.uebersprungen || []) ] };
+          return copy;
         });
     }
     if (takeRegel) {
@@ -2912,7 +2953,7 @@ function sparenMonat(month) {
     const kat = f.category || f.cat;
     if (kat !== 'Sparen') return;
     if (f.sparenLink && f.sparenLink.extern) return;  // extern verlässt das System
-    if (fixkostenAktivImMonat(f, month)) summe += (+f.amount||0);
+    if (fixkostenAktivImMonat(f, month)) summe += fixkostBetrag(f, month);
   });
   return Math.round(summe * 100) / 100;
 }
@@ -2923,14 +2964,15 @@ function dashboard() {
   const prev = monthFinancials(prevMonth);
   const trendIcon = (curr, prev) => curr > prev ? '<span class="kpi-trend up">↑ mehr</span>' : curr < prev ? '<span class="kpi-trend down">↓ weniger</span>' : '';
 
-  const fixItems = fixkostenForMonth(currentMonth).sort((a,b) => b.amount - a.amount);
-  const totalFix = fixItems.reduce((s,f) => s + f.amount, 0) || 1;
+  const fixItems = fixkostenForMonth(currentMonth).sort((a,b) => fixkostBetrag(b, currentMonth) - fixkostBetrag(a, currentMonth));
+  const totalFix = fixItems.reduce((s,f) => s + fixkostBetrag(f, currentMonth), 0) || 1;
   const timelineHtml = fixItems.map(f => {
-    const pct = (f.amount / totalFix) * 100;
+    const _fb = fixkostBetrag(f, currentMonth);
+    const pct = (_fb / totalFix) * 100;
     return `<div class="timeline-item">
       <span class="timeline-day" style="width:130px;text-align:left;font-size:11px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${f.name||''}">${f.name||'–'}</span>
       <div class="timeline-bar"><i style="width:${pct}%"></i></div>
-      <span style="white-space:nowrap;font-size:11px">${fmtEur(f.amount)} <span style="color:var(--muted)">· ${pct.toFixed(1)}%</span></span>
+      <span style="white-space:nowrap;font-size:11px">${fmtEur(_fb)} <span style="color:var(--muted)">· ${pct.toFixed(1)}%</span></span>
     </div>`;
   }).join('');
 
@@ -3396,7 +3438,7 @@ function jahresMonatswerte(jahr, art) {
     let fix = 0;
     (yd.fixkosten||[]).forEach(f => {
       const von = f.start || (jahr + '-01'), bis = f.end || (jahr + '-12');
-      if (m >= von && m <= bis) fix += (+f.amount||0);
+      if (m >= von && m <= bis) fix += fixkostBetrag(f, m);
     });
     let aus = fix;
     (yd.ausgaben||[]).forEach(x => { if (x.month === m && !x._korrektur) aus += (+x.amount||0); });
@@ -4863,11 +4905,11 @@ function setFixkostenFilter(cat) {
 
 function fixkosten() {
   const items = fixkostenForMonth(currentMonth);
-  const total = items.reduce((s,f) => s+f.amount, 0);
+  const total = items.reduce((s,f) => s+fixkostBetrag(f, currentMonth), 0);
   const byCat = {};
   items.forEach(f => {
     const cat = f.category || f.cat || 'Sonstiges';
-    byCat[cat] = (byCat[cat]||0) + f.amount;
+    byCat[cat] = (byCat[cat]||0) + fixkostBetrag(f, currentMonth);
   });
   const catEntries = Object.entries(byCat).sort((a,b) => b[1]-a[1]);
 
@@ -4930,8 +4972,8 @@ function fixkosten() {
               <td><input type="month" value="${f.end}" onchange="updateFixk('${f.id}','end',this.value)" style="width:145px"/></td>
               <td><input type="month" value="${f.laufzeitEnde||''}" onchange="updateFixk('${f.id}','laufzeitEnde',this.value)" style="width:145px" title="Echtes Vertragsende – wird beim Jahreswechsel übernommen; leer = unbefristet"/></td>
               <td><input type="number" value="${f.day||1}" onchange="updateFixk('${f.id}','day',+this.value)" style="width:60px;text-align:center" min="1" max="31"/></td>
-              <td><input type="number" value="${(+f.amount||0).toFixed(2)}" onchange="updateFixk('${f.id}','amount',+this.value)" step="0.01" style="width:90px;text-align:right"/> ${currencySymbol()}</td>
-              <td style="white-space:nowrap">${_vonBtn}${_zielBtn}${_depotBtn}<button class="btn-icon danger" onclick="deleteFixk('${f.id}')">×</button></td>
+              <td style="white-space:nowrap"><input type="number" value="${(+f.amount||0).toFixed(2)}" onchange="updateFixk('${f.id}','amount',+this.value)" step="0.01" style="width:90px;text-align:right" title="Grundbetrag${hatAktiveDynamik(f)?' (ohne Dynamik)':''}"/> ${currencySymbol()}${(() => { if (!hatAktiveDynamik(f)) return ''; const eff = fixkostBetrag(f, currentMonth); const d = f.dynamik; const istZukunft = d.abMonat > currentMonth; const lbl = istZukunft ? ('ab ' + monthLabel(d.abMonat)) : 'akt.'; const wlbl = d.typ==='prozent' ? ('+'+fmt(+d.wert||0)+' %') : ('+'+fmtEur(+d.wert||0)); return `<div style="font-size:10px;color:var(--accent);white-space:nowrap;margin-top:2px" title="Dynamik ${wlbl}${d.intervallMonate>0?(' alle '+d.intervallMonate+' Monate'):' einmalig'} ab ${monthLabel(d.abMonat)}">⚡ ${fmtEur(eff)} ${lbl}</div>`; })()}</td>
+              <td style="white-space:nowrap"><button class="btn-icon" title="Dynamik (automatische Erhöhung) einrichten/bearbeiten" onclick="openDynamikModal('${f.id}')" style="width:auto;min-width:0;padding:0 8px;font-size:12px;${hatAktiveDynamik(f)?'color:var(--accent)':''}">⚡</button>${_vonBtn}${_zielBtn}${_depotBtn}<button class="btn-icon danger" onclick="deleteFixk('${f.id}')">×</button></td>
             </tr>`;
           }).join('')}
         </tbody>
@@ -4986,6 +5028,91 @@ async function linkSparplanDepot(id) {
   renderPage();
   showToast('Sparplan → Depot „' + depot + '"' + (moved ? (' · ' + moved + ' Einträge umgehängt') : ''), 'info');
 }
+
+// ── Dynamik-Editor (automatische Erhöhung je Fixkost/Sparplan) ──────────────
+function openDynamikModal(id) {
+  if (!requireUnlocked()) return;
+  const f = (state.fixkosten||[]).find(x => String(x.id) === String(id));
+  if (!f) return;
+  const base = +f.amount || 0;
+  const d = Object.assign({ aktiv:true, typ:'prozent', wert:0, abMonat:'', intervallMonate:12, endMonat:'', uebersprungen:[] }, f.dynamik || {});
+  if (!d.abMonat) d.abMonat = monthShift(thisMonth(), 1);
+  if (!Array.isArray(d.uebersprungen)) d.uebersprungen = [];
+
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:99999;display:flex;align-items:center;justify-content:center;padding:20px;backdrop-filter:blur(4px)';
+  document.body.appendChild(overlay);
+
+  const effAt = (m) => fixkostBetrag({ amount: base, dynamik: d }, m);
+  const termine = () => dynamikTermine({ dynamik: d }, monthShift(d.abMonat, ((+d.intervallMonate||0) > 0 ? (+d.intervallMonate) * 11 : 0)));
+
+  function render() {
+    const terms = termine();
+    const rowsT = terms.length ? terms.map(s => {
+      const skip = d.uebersprungen.includes(s);
+      return '<label style="display:flex;align-items:center;gap:8px;padding:5px 8px;border:1px solid var(--border);border-radius:7px;margin:4px 0;font-size:13px;' + (skip?'opacity:.55':'') + '">'
+        + '<input type="checkbox" data-skip="' + s + '" ' + (skip?'':'checked') + '/> '
+        + '<span style="width:84px">' + monthLabel(s) + '</span>'
+        + '<span style="color:var(--muted)">→ ' + fmtEur(effAt(s)) + '</span>'
+        + (skip?'<span style="color:#d97706;margin-left:auto;font-size:11px">ausgesetzt</span>':'')
+        + '</label>';
+    }).join('') : '<p style="color:var(--muted);font-size:12px;margin:6px 0">Kein Termin – bitte Startmonat/Intervall prüfen.</p>';
+    overlay.innerHTML = '<div style="background:var(--surface);color:var(--text);border:1px solid var(--border);border-radius:12px;max-width:520px;width:100%;box-shadow:0 20px 60px rgba(0,0,0,.5);max-height:88vh;display:flex;flex-direction:column">'
+      + '<div style="padding:16px 20px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px"><div style="font-size:24px">⚡</div><div><h3 style="margin:0;font-size:16px">Dynamik – ' + escapeHtml(f.name||'Fixkost') + '</h3><div style="font-size:12px;color:var(--muted)">Grundbetrag ' + fmtEur(base) + '</div></div></div>'
+      + '<div style="padding:16px 20px;overflow:auto">'
+        + '<label style="display:flex;align-items:center;gap:10px;margin-bottom:14px;font-size:14px"><div class="div-switch ' + (d.aktiv?'div-switch-on':'') + '" data-act="toggle" style="cursor:pointer"><div class="div-switch-thumb"></div></div> Dynamik aktiv ' + (d.aktiv?'':'<span style="color:#d97706">(komplett ausgesetzt)</span>') + '</label>'
+        + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">'
+          + '<label class="field">Art<select data-f="typ"><option value="prozent" ' + (d.typ==='prozent'?'selected':'') + '>Prozent (%)</option><option value="betrag" ' + (d.typ==='betrag'?'selected':'') + '>Betrag (€)</option></select></label>'
+          + '<label class="field">Wert ' + (d.typ==='prozent'?'(%)':'(€)') + '<input type="number" step="0.01" data-f="wert" value="' + (+d.wert||0) + '"/></label>'
+          + '<label class="field">Ab Monat<input type="month" data-f="abMonat" value="' + d.abMonat + '"/></label>'
+          + '<label class="field">Intervall<select data-f="intervallMonate"><option value="0" ' + (+d.intervallMonate===0?'selected':'') + '>einmalig</option><option value="12" ' + (+d.intervallMonate===12?'selected':'') + '>jährlich</option><option value="6" ' + (+d.intervallMonate===6?'selected':'') + '>alle 6 Monate</option><option value="3" ' + (+d.intervallMonate===3?'selected':'') + '>alle 3 Monate</option><option value="1" ' + (+d.intervallMonate===1?'selected':'') + '>monatlich</option></select></label>'
+          + '<label class="field">Ende (optional)<input type="month" data-f="endMonat" value="' + (d.endMonat||'') + '"/></label>'
+        + '</div>'
+        + '<div style="margin-top:12px;padding:10px 12px;background:var(--surface-2);border-radius:8px;font-size:13px">Aktueller Monat (' + monthLabel(thisMonth()) + '): <strong>' + fmtEur(effAt(thisMonth())) + '</strong>' + (d.typ==='prozent'?' · Prozent-Dynamik wirkt zusammengesetzt':'') + '</div>'
+        + '<div style="margin-top:14px;font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.05em">Termine &amp; Beträge <span style="font-weight:400;text-transform:none">(Haken entfernen = diesen Termin aussetzen)</span></div>'
+        + rowsT
+      + '</div>'
+      + '<div style="padding:12px 20px;border-top:1px solid var(--border);display:flex;justify-content:space-between;gap:8px;background:var(--surface-2);border-radius:0 0 12px 12px">'
+        + '<button class="btn btn-ghost" data-act="remove" style="color:var(--red)">Entfernen</button>'
+        + '<div style="display:flex;gap:8px"><button class="btn btn-ghost" data-act="cancel">Abbrechen</button><button class="btn btn-primary" data-act="save">Speichern</button></div>'
+      + '</div></div>';
+    bind();
+  }
+  function bind() {
+    overlay.querySelectorAll('[data-f]').forEach(el => el.addEventListener('change', () => {
+      const k = el.getAttribute('data-f');
+      let v = el.value;
+      if (k === 'wert' || k === 'intervallMonate') v = +v || 0;
+      d[k] = v;
+      render();
+    }));
+    const tg = overlay.querySelector('[data-act="toggle"]'); if (tg) tg.addEventListener('click', () => { d.aktiv = !d.aktiv; render(); });
+    overlay.querySelectorAll('[data-skip]').forEach(cb => cb.addEventListener('change', () => {
+      const s = cb.getAttribute('data-skip');
+      if (cb.checked) d.uebersprungen = d.uebersprungen.filter(x => x !== s);
+      else if (!d.uebersprungen.includes(s)) d.uebersprungen.push(s);
+      render();
+    }));
+    overlay.querySelector('[data-act="cancel"]').addEventListener('click', () => overlay.remove());
+    overlay.querySelector('[data-act="remove"]').addEventListener('click', async () => {
+      delete f.dynamik; saveData(); overlay.remove();
+      if (typeof runSparenAutoEintragung === 'function') { try { await runSparenAutoEintragung(); } catch(e) {} }
+      renderPage(); showToast('Dynamik entfernt', 'info');
+    });
+    overlay.querySelector('[data-act="save"]').addEventListener('click', async () => {
+      d.wert = +d.wert || 0; d.intervallMonate = +d.intervallMonate || 0;
+      d.uebersprungen = (d.uebersprungen || []).filter(Boolean);
+      if (!d.abMonat || d.wert === 0) delete f.dynamik; else f.dynamik = d;
+      saveData(); overlay.remove();
+      if (typeof runSparenAutoEintragung === 'function') { try { await runSparenAutoEintragung(); } catch(e) {} }
+      renderPage(); showToast('Dynamik gespeichert', 'info');
+    });
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
+  }
+  render();
+}
+window.openDynamikModal = openDynamikModal;
 
 function addFixkosten(){
   if (!requireUnlocked()) return; openFixkostenModal(); }
@@ -5112,11 +5239,12 @@ async function runSparenAutoEintragung() {
       // Erstelle Eintrag - Datum = Monatsanfang
       const date = m + '-01';
       const sparTyp = f.sparenLink?.sparTyp || 'bargeld';
+      const mBetrag = fixkostBetrag(f, m);   // Dynamik berücksichtigen
       const entry = {
         id: uid(),
         date,
         month: m,
-        amount: +f.amount,
+        amount: mBetrag,
         kategorie: sparTyp === 'bargeld' ? 'Sparen' :
                    sparTyp === 'etf' ? 'ETF' :
                    sparTyp === 'fonds' ? 'Fonds' :
@@ -5136,7 +5264,7 @@ async function runSparenAutoEintragung() {
         const price = await fetchWertpapierKursAtDate(f.sparenLink.symbol, date);
         if (price) {
           entry.price = price;
-          entry.units = +((Math.max(0, f.amount) / price).toFixed(6));
+          entry.units = +((Math.max(0, mBetrag) / price).toFixed(6));
         }
         // Legacy etf field
         entry.etf = { name: f.sparenLink.name, ticker: f.sparenLink.symbol, isin: f.sparenLink.isin || '' };
@@ -6184,7 +6312,7 @@ function saldoBreakdown(kontoId) {
   (state.fixkosten||[]).forEach(f => {
     if (!f.sparenLink || f.sparenLink.extern || f.sparenLink.zielkonto!==kontoId) return;
     if (f.sparenLink.sparTyp && f.sparenLink.sparTyp!=='bargeld') return;
-    months.forEach(m => { if (m<=grenze && fixkostenAktivImMonat(f, m) && faelligkeitstagErreicht(f.day, m, grenze)) b.sparTransfer += (+f.amount||0); });
+    months.forEach(m => { if (m<=grenze && fixkostenAktivImMonat(f, m) && faelligkeitstagErreicht(f.day, m, grenze)) b.sparTransfer += fixkostBetrag(f, m); });
   });
   // Umbuchungen
   (state.umbuchungen||[]).forEach(u => {
@@ -6200,7 +6328,7 @@ function saldoBreakdown(kontoId) {
     if (getNebenjobKonto(yr)===kontoId && incomeReceived(m,'nebenjob')) b.nebenjob += (+inc.nebenjob||0);
     (state.fixkosten||[]).forEach(f => {
       if ((f.kontoId||def)!==kontoId) return;
-      if (fixkostenAktivImMonat(f, m) && faelligkeitstagErreicht(f.day, m, grenze)) b.fixkosten -= (+f.amount||0);
+      if (fixkostenAktivImMonat(f, m) && faelligkeitstagErreicht(f.day, m, grenze)) b.fixkosten -= fixkostBetrag(f, m);
     });
     (state.einkaeufe||[]).forEach(e => { if (e.month===m && (e.kontoId||def)===kontoId) b.einkaeufe -= (+e.amount||0); });
     (state.spesen||[]).forEach(t => { if (t.month===m && (t.kontoId||def)===kontoId) b.spesen += (+(t.allowance||0) - +(t.ausgaben||0)); });
@@ -7939,7 +8067,7 @@ function fpBeitraegeSeitStichtag(fp) {
   // Stand vor der Augustzahlung – der Beitrag dieses Monats fehlt also noch.
   monthsBetween(von, bis).forEach(m => {
     if (!fixkostenAktivImMonat(fk, m)) return;
-    summe += (+fk.amount || 0); monate++;
+    summe += fixkostBetrag(fk, m); monate++;
   });
   return { summe: Math.round(summe * 100) / 100, monate };
 }
