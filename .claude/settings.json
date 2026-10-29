@@ -1,0 +1,24 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git status:*)",
+      "Bash(git diff:*)",
+      "Bash(git log:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git pull:*)",
+      "Bash(git fetch:*)",
+      "Bash(git push origin main)",
+      "Bash(node:*)",
+      "Bash(npm install)",
+      "Bash(npm start)",
+      "Bash(bash scripts/release.sh:*)"
+    ],
+    "deny": [
+      "Read(**/gh_token.txt)",
+      "Read(**/data.json)",
+      "Bash(git push --force:*)",
+      "Bash(git push -f:*)"
+    ]
+  }
+}

@@ -17,3 +17,10 @@ Thumbs.db
 .vscode/
 .idea/
 *.swp
+
+# Secrets & Datenkopien (Repo ist öffentlich!)
+gh_token.txt
+*.env
+data-*.json
+data_alt.json
+*.json.prev
