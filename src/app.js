@@ -255,6 +255,9 @@ async function checkGeldEingang() {
 // Format je Eintrag: { v: 'Version', date: 'YYYY-MM-DD', changes: ['...','...'] }
 // Änderungen dürfen mit **Fett** Markierung versehen werden.
 const CHANGELOG = [
+  { v: '1.0.63', date: '2026-11-07', changes: [
+    '**Arbeitszeit: Lohn nach Abrechnungszeitraum.** Der Nebenjob-Lohn eines Monats umfasst jetzt die Stunden vom **20. des Vormonats bis zum 19.** – z.B. Lohn November = 20.10.–19.11. Die Kachel „Lohn" auf der Arbeitszeit-Seite zeigt Zeitraum, Stunden und Betrag; in der Tabelle markiert eine Trennlinie, ab wann die Tage zum Lohn des Folgemonats zählen. Die DATEV-Listen bleiben wie bisher je Kalendermonat.',
+  ]},
   { v: '1.0.62', date: '2026-11-07', changes: [
     '**Neu: Arbeitszeit für den Nebenjob (⏱️).** Unter Einstellungen → „Arbeitszeit (Nebenjob)" aktivierbar – wie die PV-Anlage erscheint der Reiter erst danach. Du trägst je Arbeitstag Datum, Von, Bis und optional Kürzel/Notiz ein. Die **Nebenjob-Einnahme** des Monats ergibt sich automatisch aus **Stunden × Stundenlohn** (netto, Minijob) und wächst mit jedem Tag; der Schalter „Nebenjob erhalten?" bleibt wie gewohnt. Der Stundenlohn hat eine Historie mit „gültig ab".',
     '**6-Stunden-Regel automatisch.** Pro Tag werden höchstens 6 h dokumentiert – der Rest wandert auf den Vortag: auf einen freien Vortag mit Ende 20:00, sonst an dessen Zeiten angehängt (nie nach 20:00). Beispiel: Samstag 08:40–17:40 → Samstag 08:40–14:40 + Freitag 17:00–20:00 „Mehrstunden von Samstag". Wird der Vortag dadurch länger als 6 h, markiert die App die Zeile ⚠.',
@@ -4132,7 +4135,7 @@ function einnahmen() {
         ${azAktiv() && inc.nebenjobAusAz
           ? `<label class="field">Nebenjob ${monthLabel(currentMonth)}
                <input type="number" value="${(+inc.nebenjob||0).toFixed(2)}" readonly title="Wird aus der Arbeitszeit berechnet" /> ${currencySymbol()}
-               <span style="font-size:11px;color:var(--muted)">⏱️ aus der Arbeitszeit (${azDauerText(azMonatsSumme(currentMonth).minuten)}) · <a href="#" onclick="navigate('arbeitszeit');return false">öffnen</a></span>
+               <span style="font-size:11px;color:var(--muted)">⏱️ aus der Arbeitszeit (${azDauerText(azLohnSumme(currentMonth).minuten)}, ${azLohnZeitraum(currentMonth).von.slice(5).split('-').reverse().join('.')}.–${azLohnZeitraum(currentMonth).bis.slice(5).split('-').reverse().join('.')}.) ·<a href="#" onclick="navigate('arbeitszeit');return false">öffnen</a></span>
              </label>`
           : `<label class="field">Nebenjob ${monthLabel(currentMonth)}
                <input type="number" value="${(+inc.nebenjob||0).toFixed(2)}" step="0.01"
@@ -11923,8 +11926,9 @@ window.deleteRegelEinnahme   = deleteRegelEinnahme;
 // Abrechnungsregel: pro Tag max. 6 h dokumentieren. Der Überhang wandert auf den
 // Vortag – auf einen leeren Vortag mit Ende 20:00, sonst an dessen eigene Zeiten
 // angehängt (nie nach 20:00). Einnahme = dokumentierte Stunden × Stundenlohn
-// (netto, Minijob) und ersetzt je Monat incomeByMonth[m].nebenjob (Flag
-// nebenjobAusAz), sobald Einträge da sind. Das „erhalten"-Gate bleibt unverändert.
+// (netto, Minijob) je LOHNZEITRAUM (20. Vormonat bis 19., siehe azLohnMonat) und
+// ersetzt incomeByMonth[m].nebenjob (Flag nebenjobAusAz), sobald Einträge da
+// sind. Die DATEV-Listen bleiben je Kalendermonat. „erhalten"-Gate unverändert.
 // Excel: die DATEV-Vorlage wählt der Nutzer selbst (enthält Name/Firma, gehört
 // nicht ins öffentliche Repo); gefüllt wird sie in main.js (arbeitszeit-xlsx.js).
 const AZ_MAX_MIN = 360;
@@ -12041,17 +12045,35 @@ function azLohnSatz(datum) {
 function azMonatsZeilen(ym, zeilen) {
   return (zeilen || azDokuZeilen(azListe())).filter(z => z.datum.slice(0, 7) === ym);
 }
-function azMonatsSumme(ym, zeilen) {
+function azSumme(zeilen) {
   let minuten = 0, betrag = 0;
-  azMonatsZeilen(ym, zeilen).forEach(z => { minuten += z.minuten; betrag += z.minuten / 60 * azLohnSatz(z.datum); });
+  zeilen.forEach(z => { minuten += z.minuten; betrag += z.minuten / 60 * azLohnSatz(z.datum); });
   return { minuten, betrag: Math.round(betrag * 100) / 100 };
 }
-// Monatssumme → incomeByMonth[m].nebenjob aller (nicht archivierten) Jahre.
-// Monate ohne Arbeitszeit-Einträge behalten ihren manuell erfassten Wert.
+// Kalendermonat (DATEV-Liste, Mail)
+function azMonatsSumme(ym, zeilen) { return azSumme(azMonatsZeilen(ym, zeilen)); }
+// Lohnzeitraum: der Lohn eines Monats deckt den 20. des Vormonats bis zum 19.
+// (z.B. November = 20.10.–19.11.). azLohnMonat liefert den Monat, in dem ein
+// Arbeitstag bezahlt wird.
+const AZ_LOHN_STICHTAG = 20;
+function azLohnMonat(datum) {
+  const ym = datum.slice(0, 7);
+  if (+datum.slice(8) < AZ_LOHN_STICHTAG) return ym;
+  const [y, m] = ym.split('-').map(Number);
+  return m === 12 ? (y + 1) + '-01' : y + '-' + String(m + 1).padStart(2, '0');
+}
+function azLohnZeitraum(ym) {
+  return { von: azVormonat(ym) + '-' + AZ_LOHN_STICHTAG, bis: ym + '-' + String(AZ_LOHN_STICHTAG - 1).padStart(2, '0') };
+}
+function azLohnSumme(ym, zeilen) {
+  return azSumme((zeilen || azDokuZeilen(azListe())).filter(z => azLohnMonat(z.datum) === ym));
+}
+// Lohnsumme → incomeByMonth[m].nebenjob aller (nicht archivierten) Jahre.
+// Monate ohne Arbeitszeit im Lohnzeitraum behalten ihren manuell erfassten Wert.
 function azSyncEinnahmen() {
   if (!azAktiv() || !state.years) return false;
   const zeilen = azDokuZeilen(azListe());
-  const monate = new Set(zeilen.filter(z => z.minuten > 0).map(z => z.datum.slice(0, 7)));
+  const monate = new Set(zeilen.filter(z => z.minuten > 0).map(z => azLohnMonat(z.datum)));
   let geaendert = false;
   Object.keys(state.years).forEach(y => {
     const yd = state.years[y];
@@ -12060,7 +12082,7 @@ function azSyncEinnahmen() {
       const inc = yd.incomeByMonth[m];
       if (!inc) return;
       if (monate.has(m)) {
-        const b = azMonatsSumme(m, zeilen).betrag;
+        const b = azLohnSumme(m, zeilen).betrag;
         if (inc.nebenjob !== b || !inc.nebenjobAusAz) { inc.nebenjob = b; inc.nebenjobAusAz = true; geaendert = true; }
       } else if (inc.nebenjobAusAz) {
         inc.nebenjob = 0; delete inc.nebenjobAusAz; geaendert = true;
@@ -12430,10 +12452,11 @@ function arbeitszeit() {
   const alle = azDokuZeilen(azListe());
   const zeilen = azMonatsZeilen(ym, alle);
   const sum = azMonatsSumme(ym, alle);
+  const lohn = azLohnSumme(ym, alle);
+  const lz = azLohnZeitraum(ym);
   const echtMin = azListe().filter(e => (e.datum || '').slice(0, 7) === ym).reduce((s, e) => s + azDauer(e), 0);
   const satzAktuell = azLohnSatz(ym === heute.slice(0, 7) ? heute : ym + '-31');
   const edit = _azEditId ? azListe().find(e => String(e.id) === String(_azEditId)) : null;
-  const inc = state.incomeByMonth[ym] || {};
   const erhalten = incomeReceived(ym, 'nebenjob');
   const fehlt = [];
   if (!c.loehne.length) fehlt.push('Stundenlohn');
@@ -12463,14 +12486,21 @@ function arbeitszeit() {
       '<div style="font-size:11px;color:var(--muted);margin-top:8px">Trag die echten Zeiten ein. Über 6 h pro Tag verschiebt die App den Rest automatisch auf den Vortag (Ende 20:00), so wie es die Abrechnung verlangt.</div>' +
     '</div>';
 
+  let trenner = false;
   const rowsHtml = zeilen.map(z => {
+    let vorspann = '';
+    if (!trenner && azLohnMonat(z.datum) !== ym) {
+      trenner = true;
+      vorspann = '<tr><td colspan="7" style="font-size:11px;color:var(--muted);border-top:2px dashed var(--border);padding-top:6px">' +
+        'ab ' + AZ_LOHN_STICHTAG + '. → zählt zum Lohn ' + azMonatName(azLohnMonat(z.datum)) + '</td></tr>';
+    }
     const e = z.eintragId != null ? azListe().find(x => String(x.id) === String(z.eintragId)) : null;
     const wt = AZ_WOCHENTAGE[azWochentag(z.datum)].slice(0, 2);
     const betrag = z.minuten / 60 * azLohnSatz(z.datum);
     const hinweise = [];
     if (z.verschobenRaus) hinweise.push('→ ' + azDauerText(z.verschobenRaus) + ' auf Vortag');
     if (z.verschobenRein) hinweise.push('← ' + azDauerText(z.verschobenRein) + ' vom Folgetag');
-    return '<tr' + (z.warnung ? ' style="background:rgba(234,179,8,.12)" title="' + escapeHtml(z.warnung) + '"' : '') + '>' +
+    return vorspann + '<tr' + (z.warnung ? ' style="background:rgba(234,179,8,.12)" title="' + escapeHtml(z.warnung) + '"' : '') + '>' +
       '<td style="white-space:nowrap">' + wt + ', ' + datumDe(z.datum).slice(0, 6) + (z.warnung ? ' ⚠' : '') + '</td>' +
       '<td style="white-space:nowrap">' + (e && e.von ? escapeHtml(e.von) + '–' + escapeHtml(e.bis) + ' <span style="color:var(--muted)">(' + azDauerText(z.echt) + ')</span>' : '<span style="color:var(--muted)">–</span>') + '</td>' +
       '<td style="white-space:nowrap">' + (z.beginn != null ? azZeit(z.beginn) + '–' + azZeit(z.ende) + ' <span style="color:var(--muted)">(' + azDauerText(z.minuten) + ')</span>' : '–') +
@@ -12487,7 +12517,7 @@ function arbeitszeit() {
   const tabelleHtml = zeilen.length
     ? '<div class="table-wrap"><table><thead><tr><th>Tag</th><th>Erfasst</th><th>Für DATEV dokumentiert</th><th>*</th><th>Bemerkung</th><th style="text-align:right">Betrag</th><th></th></tr></thead><tbody>' +
         rowsHtml + '</tbody><tfoot><tr>' +
-        '<td><strong>Summe</strong></td><td><strong>' + azDauerText(echtMin) + '</strong></td><td><strong>' + azDauerText(sum.minuten) + '</strong></td><td></td><td></td>' +
+        '<td><strong>Summe Monat</strong></td><td><strong>' + azDauerText(echtMin) + '</strong></td><td><strong>' + azDauerText(sum.minuten) + '</strong></td><td></td><td></td>' +
         '<td class="amount"><strong>' + fmtEur(sum.betrag) + '</strong></td><td></td></tr></tfoot></table></div>'
     : '<div class="empty-state" style="padding:20px"><div class="empty-icon">⏱️</div><p>Für ' + azMonatName(ym) + ' sind noch keine Arbeitstage erfasst.</p></div>';
 
@@ -12553,9 +12583,9 @@ function arbeitszeit() {
       <div class="kpi"><div class="kpi-label">💶 Stundenlohn</div>
         <div class="kpi-value">${fmtEur(satzAktuell)}</div>
         <div class="kpi-sub">netto (Minijob)</div></div>
-      <div class="kpi"><div class="kpi-label">💰 Einnahme</div>
-        <div class="kpi-value positive">${fmtEur(sum.betrag)}</div>
-        <div class="kpi-sub">${inc.nebenjobAusAz ? 'als Nebenjob-Einnahme übernommen' : 'noch keine Einträge'}</div></div>
+      <div class="kpi"><div class="kpi-label">💰 Lohn ${monthLabel(ym)}</div>
+        <div class="kpi-value positive">${fmtEur(lohn.betrag)}</div>
+        <div class="kpi-sub">${datumDe(lz.von).slice(0, 6)}–${datumDe(lz.bis).slice(0, 6)} · ${azDauerText(lohn.minuten)}</div></div>
       <div class="kpi"><div class="kpi-label">Auszahlung</div>
         <div class="kpi-value" style="font-size:18px">${erhalten ? '<span style="color:var(--green)">✓ erhalten</span>' : '<span style="color:#d97706">⏳ offen</span>'}</div>
         <div class="kpi-sub"><a href="#" onclick="toggleIncomeReceived('${ym}','nebenjob');return false">umschalten</a></div></div>
