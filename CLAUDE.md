@@ -102,6 +102,12 @@ ersetzen, wenn die App komplett beendet ist (inkl. System-Tray).
   (`laufzeitEnde`, Dynamik deep-copy).
 - **Ablauf-Erinnerungen**: `checkAblaufReminders()` beim Start (Fixkosten +
   Versicherungen, Vorlauf `state.config.ablaufVorlauf`).
+- **Arbeitszeit Nebenjob** (v1.0.62, `state.arbeitszeit` + `arbeitszeitConfig`,
+  außerhalb `YEAR_FIELDS`): `azDokuZeilen` setzt die 6-h-Regel um (Überhang auf
+  Vortag, Ende max. 20:00); `azSyncEinnahmen` schreibt die Monatssumme nach
+  `incomeByMonth[m].nebenjob` (Flag `nebenjobAusAz`, läuft in `renderPage`).
+  Excel füllt `src/arbeitszeit-xlsx.js` im Main-Process aus der vom Nutzer
+  gewählten DATEV-Vorlage (Vorlage enthält Name → nie ins Repo).
 - **Auto-Einträge** tragen Flags (`autoWork`, `autoAblauf`, `autoFromFixkostenId`)
   zur Nachvollziehbarkeit.
 
@@ -160,9 +166,8 @@ Skript nutzt `gh_token.txt` (Repo-Root, Elternordner oder
   Variante A = ~20 klassische Script-Dateien nach Domäne, gemeinsamer globaler
   Scope, Laden in Reihenfolge über `index.html`, `check.js` auf Multi-File
   erweitern; schrittweise über 6–8 Releases.
-- **Arbeitszeit-Einnahmen automatisch** (fester Plan + Stundensatz + Auszahltag,
-  Einträge mit `autoWork: true`, Config nach `pvConfig`-Muster) – Rückfragen an
-  Marco offen.
+- Arbeitszeit (v1.0.62): Electron-Smoke-Test von Vorlage/Ordner-Auswahl,
+  Excel-Export, Mail-Entwurf und Stichtag-Automatik ausstehend.
 - Mehr Standard-Kategorien / „+ Neue Kategorie" direkt im Modal (optional).
 - Sparplan über Trade-Verrechnungskonto tagesgenau (optional).
 - Bilder (jpg/png) als Versicherungs-Dokumente – bräuchte `main.js`-Änderung.

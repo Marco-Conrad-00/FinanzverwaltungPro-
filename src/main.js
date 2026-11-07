@@ -649,13 +649,38 @@ ipcMain.handle('open-data-folder', () => {
   shell.openPath(dp);
 });
 
-ipcMain.handle('select-folder', async () => {
+ipcMain.handle('select-folder', async (_e, title) => {
   const result = await dialog.showOpenDialog(win, {
     properties: ['openDirectory', 'createDirectory'],
-    title: 'Backup-Ordner auswählen',
+    title: title || 'Backup-Ordner auswählen',
   });
   if (result.canceled || !result.filePaths.length) return null;
   return { path: result.filePaths[0] };
+});
+
+// Einzelne Datei auswählen (z.B. DATEV-Vorlage). opts: { title, filters }
+ipcMain.handle('select-file', async (_e, opts) => {
+  const o = opts || {};
+  const result = await dialog.showOpenDialog(win, {
+    title: o.title || 'Datei auswählen',
+    filters: (o.filters && o.filters.length) ? o.filters : [{ name: 'Alle Dateien', extensions: ['*'] }],
+    properties: ['openFile'],
+  });
+  if (result.canceled || !result.filePaths.length) return null;
+  return { path: result.filePaths[0] };
+});
+
+// Arbeitszeit: DATEV-Vorlage je Monat füllen und in den Zielordner schreiben.
+// payload: { vorlage, ordner, monate: [{ jahr, monat, zeilen }] }
+ipcMain.handle('arbeitszeit-export', async (_e, payload) => {
+  try {
+    const dateien = await require('./arbeitszeit-xlsx').exportMonate(payload || {});
+    return { ok: true, dateien };
+  } catch (err) { return { ok: false, error: err.message }; }
+});
+
+ipcMain.handle('path-exists', (_e, p) => {
+  try { return !!p && fs.existsSync(p); } catch { return false; }
 });
 
 ipcMain.handle('open-folder', async (e, folderPath) => {

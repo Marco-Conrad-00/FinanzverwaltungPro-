@@ -1,6 +1,6 @@
 {
   "name": "finanzverwaltung-pro",
-  "version": "1.0.61",
+  "version": "1.0.62",
   "main": "src/main.js",
   "scripts": {
     "start": "electron .",
@@ -61,6 +61,7 @@
     "electron-builder": "^24.0.0"
   },
   "dependencies": {
-    "electron-updater": "^6.1.7"
+    "electron-updater": "^6.1.7",
+    "jszip": "^3.10.1"
   }
 }

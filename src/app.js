@@ -255,6 +255,11 @@ async function checkGeldEingang() {
 // Format je Eintrag: { v: 'Version', date: 'YYYY-MM-DD', changes: ['...','...'] }
 // Änderungen dürfen mit **Fett** Markierung versehen werden.
 const CHANGELOG = [
+  { v: '1.0.62', date: '2026-11-07', changes: [
+    '**Neu: Arbeitszeit für den Nebenjob (⏱️).** Unter Einstellungen → „Arbeitszeit (Nebenjob)" aktivierbar – wie die PV-Anlage erscheint der Reiter erst danach. Du trägst je Arbeitstag Datum, Von, Bis und optional Kürzel/Notiz ein. Die **Nebenjob-Einnahme** des Monats ergibt sich automatisch aus **Stunden × Stundenlohn** (netto, Minijob) und wächst mit jedem Tag; der Schalter „Nebenjob erhalten?" bleibt wie gewohnt. Der Stundenlohn hat eine Historie mit „gültig ab".',
+    '**6-Stunden-Regel automatisch.** Pro Tag werden höchstens 6 h dokumentiert – der Rest wandert auf den Vortag: auf einen freien Vortag mit Ende 20:00, sonst an dessen Zeiten angehängt (nie nach 20:00). Beispiel: Samstag 08:40–17:40 → Samstag 08:40–14:40 + Freitag 17:00–20:00 „Mehrstunden von Samstag". Wird der Vortag dadurch länger als 6 h, markiert die App die Zeile ⚠.',
+    '**DATEV-Stundenliste + Mail-Entwurf.** Die App füllt deine eigene DATEV-Vorlage (einmal auswählen) und legt je Monat „Arbeitszeitdokumentation <Monat Jahr>.xlsx" im Zielordner ab. Am **Stichtag (20.)** – oder wahlweise am Sonntag nach dem letzten Samstag davor – passiert das automatisch, sobald die App läuft: Vormonat + laufender Monat, der Ordner öffnet sich und ein Mail-Entwurf an deinen Empfänger (mit CC, Betreff und Text aus den Einstellungen). Die Dateien ziehst du in die Mail – gesendet wird nie automatisch. Jederzeit auch per Knopf „Excel + Mail jetzt vorbereiten".',
+  ]},
   { v: '1.0.61', date: '2026-10-11', changes: [
     '**Dynamik: automatische Erhöhung für Fixkosten & Sparpläne.** Jede Fixkost/jeder Sparplan hat jetzt einen ⚡-Knopf: Lege fest, dass sich der Betrag ab einem Stichtag automatisch erhöht – wahlweise um einen **festen Betrag (€)** oder um **Prozent (%)**, einmalig oder wiederkehrend (z.B. jährlich). Beispiel Renten-Sparplan: +27,35 € ab dem nächsten Stichtag. Die Erhöhung wirkt überall automatisch: Abbuchung/Kontostand, automatischer Sparplan-Kauf und alle Summen. Der im Eingabefeld gepflegte Wert bleibt der **Grundbetrag**; der aktuell gültige Betrag wird mit ⚡ daneben angezeigt.',
     '**Aussetzen – ganz oder einzeln.** Im Dynamik-Dialog kannst du die Dynamik komplett pausieren (Schalter „aktiv") oder **einzelne Termine abhaken** (z.B. wenn du eine jährliche Erhöhung einmal nicht mitmachen willst, wie bei den Versicherungs-Dynamiken). Eine Vorschau zeigt je Termin den dann gültigen Betrag; Prozent-Erhöhungen wirken zusammengesetzt. Beim Jahreswechsel wird die Dynamik mit übernommen.',
@@ -775,6 +780,7 @@ const DEFAULT_DATA_RAW = {
   backupHistory: [],
   reminders: [],
   versicherungen: [],
+  arbeitszeit: [],
 };
 
 // Year-data accessors
@@ -1274,10 +1280,11 @@ async function loadData() {
   // ── Merge into state (preserves proxy properties) ───────────────────────
   const fields = ['meta','config','customCats','trash','imports','etfKurse','transactions',
                    'years','dataVersion','currentYear','selectedYear','backupHistory','yearEditUnlocked','reminders',
-                   'versicherungen','pv','pvConfig','spesenSaetze'];
+                   'versicherungen','pv','pvConfig','spesenSaetze','arbeitszeit','arbeitszeitConfig'];
   fields.forEach(f => { if (saved[f] !== undefined) state[f] = saved[f]; });
   if (!Array.isArray(state.reminders)) state.reminders = [];
   if (!Array.isArray(state.versicherungen)) state.versicherungen = [];
+  if (!Array.isArray(state.arbeitszeit)) state.arbeitszeit = [];
 
   if (state.meta.email  === undefined) state.meta.email  = '';
   if (state.meta.paypal === undefined) state.meta.paypal = '';
@@ -2143,7 +2150,7 @@ const NAV_DEF = [
     ['jahresuebersicht','📅 Jahresübersicht'], ['suche','🔍 Suche'] ] },
   { sec: 'monat', label: 'Monatsauswertung', items: [
     ['buchungen','📋 Buchungen'], ['einkaeufe','🛒 Einkäufe'], ['ausgaben','💸 Ausgaben'],
-    ['einnahmen','💰 Einnahmen'], ['spesen','✈️ Spesen & Reisen'] ] },
+    ['einnahmen','💰 Einnahmen'], ['arbeitszeit','⏱️ Arbeitszeit'], ['spesen','✈️ Spesen & Reisen'] ] },
   { sec: 'planung', label: 'Planung', items: [
     ['fixkosten','🔁 Fixkosten'], ['sparen','🏦 Sparen & Depot'], ['umbuchungen','🔄 Umbuchungen'],
     ['zaehler','⚡ Zählerstände'], ['pv','☀️ PV-Anlage'], ['finanzprodukte','📋 Finanzprodukte'],
@@ -2259,6 +2266,7 @@ function navigate(page) {
     einkaeufe: ['Monatsauswertung', 'Einkäufe'],
     ausgaben: ['Monatsauswertung', 'Ausgaben'],
     einnahmen: ['Monatsauswertung', 'Einnahmen & Verkäufe'],
+    arbeitszeit: ['Nebenjob', 'Arbeitszeit'],
     spesen: ['Reisen', 'Spesen & Geschäftsreisen'],
     fixkosten: ['Planung', 'Fixkosten'],
     sparen: ['Planung', 'Sparen & Depot'],
@@ -2921,7 +2929,9 @@ async function renderVersDocPreview() {
 function renderPage() {
   Object.values(chartInstances).forEach(c => { try { c.destroy(); } catch {} });
   chartInstances = {};
-  const pages = { dashboard, jahresuebersicht, suche, buchungen, einkaeufe, ausgaben, einnahmen, spesen, fixkosten, sparen, umbuchungen, zaehler, pv, analyse, finanzprodukte, versicherungen, tabellen, einstellungen, importPage };
+  // Nebenjob-Einnahmen aus der Arbeitszeit aktuell halten (alle Ansichten lesen incomeByMonth)
+  try { azSyncEinnahmen(); } catch (e) { console.error('azSyncEinnahmen:', e); }
+  const pages = { dashboard, jahresuebersicht, suche, buchungen, einkaeufe, ausgaben, einnahmen, arbeitszeit, spesen, fixkosten, sparen, umbuchungen, zaehler, pv, analyse, finanzprodukte, versicherungen, tabellen, einstellungen, importPage };
   const fn = pages[currentPage === 'import' ? 'importPage' : currentPage];
   const banner = reminderBannerHtml();
   if (fn) el('pageContent').innerHTML = banner + fn();
@@ -4119,10 +4129,15 @@ function einnahmen() {
           <input type="number" value="${(+inc.gehalt||0).toFixed(2)}" step="0.01"
             onchange="updateFixedIncome('${currentMonth}','gehalt',+this.value)" /> ${currencySymbol()}
         </label>
-        <label class="field">Nebenjob ${monthLabel(currentMonth)}
-          <input type="number" value="${(+inc.nebenjob||0).toFixed(2)}" step="0.01"
-            onchange="updateFixedIncome('${currentMonth}','nebenjob',+this.value)" /> ${currencySymbol()}
-        </label>
+        ${azAktiv() && inc.nebenjobAusAz
+          ? `<label class="field">Nebenjob ${monthLabel(currentMonth)}
+               <input type="number" value="${(+inc.nebenjob||0).toFixed(2)}" readonly title="Wird aus der Arbeitszeit berechnet" /> ${currencySymbol()}
+               <span style="font-size:11px;color:var(--muted)">⏱️ aus der Arbeitszeit (${azDauerText(azMonatsSumme(currentMonth).minuten)}) · <a href="#" onclick="navigate('arbeitszeit');return false">öffnen</a></span>
+             </label>`
+          : `<label class="field">Nebenjob ${monthLabel(currentMonth)}
+               <input type="number" value="${(+inc.nebenjob||0).toFixed(2)}" step="0.01"
+                 onchange="updateFixedIncome('${currentMonth}','nebenjob',+this.value)" /> ${currencySymbol()}
+             </label>`}
         <label class="field">Gehalt → Konto (ganzes Jahr ${getSelectedYear()})
           <select onchange="updateIncomeKonto('gehalt',this.value)" ${lockAttr()}>
             ${getKonten().map(k => '<option value="'+k.id+'"'+(getGehaltKonto()===k.id?' selected':'')+'>'+(k.name||'Konto')+(k.cashflow?' (Cashflow)':' (Reserve)')+'</option>').join('')}
@@ -7195,6 +7210,27 @@ function einstellungen() {
         </div>
       </div>
 
+      <div class="settings-section-header">⏱️ Arbeitszeit (Nebenjob)</div>
+      <div class="card mb-2">
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+          <span style="font-size:16px">⏱️</span>
+          <strong style="font-size:13px">Arbeitszeit-Erfassung</strong>
+          <span style="font-size:12px;color:${azAktiv()?'var(--green)':'var(--muted)'}">
+            ${azAktiv()?'aktiv – Menüpunkt sichtbar':'nicht aktiv'}
+          </span>
+          <span style="flex:1"></span>
+          ${azAktiv()
+            ? `<button class="btn btn-sm btn-ghost" onclick="navigate('arbeitszeit')">Öffnen</button>
+               <button class="btn btn-sm btn-ghost" onclick="azDeaktivieren()">Ausblenden</button>`
+            : `<button class="btn btn-sm btn-primary" onclick="azAktivieren()">Aktivieren</button>`}
+        </div>
+        <div style="font-size:12px;color:var(--muted);margin-top:8px">
+          Arbeitstage des Minijobs erfassen: Die Nebenjob-Einnahme ergibt sich aus Stunden × Stundenlohn.
+          Am Stichtag (20.) erstellt die App die DATEV-Stundenliste als Excel und öffnet einen Mail-Entwurf.
+          Beim Ausblenden bleiben alle Daten erhalten.
+        </div>
+      </div>
+
       <div class="settings-section-header">📊 Analyse</div>
       <div class="card mb-2">
         <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
@@ -8032,6 +8068,7 @@ async function resetApp() {
   // → beim Werksreset explizit mit entfernen.
   state.pv = {};
   state.pvConfig = { jahre: [], chartJahre: [], vergleichAktiv: false };
+  state.arbeitszeitConfig = {};
   saveData();
   // Clear saved data on disk too
   if (window.EA) window.EA.saveData('{}').catch(()=>{});
@@ -11873,6 +11910,686 @@ window.saveRegelEinnahmeModal     = saveRegelEinnahmeModal;
 window.updateRegelEinnahme   = updateRegelEinnahme;
 window.deleteRegelEinnahme   = deleteRegelEinnahme;
 
+// ════════════════════════════════════════════════════════════════════════════
+// ARBEITSZEIT NEBENJOB (optional aktivierbar wie PV, Menüpunkt erst nach Aktivierung)
+// ════════════════════════════════════════════════════════════════════════════
+// Bildet die DATEV-Stundenliste des Minijobs ab. Datenmodell BEWUSST außerhalb
+// der Jahresstruktur (Muster pvConfig); beide Felder stehen in der loadData-Allowlist:
+//   state.arbeitszeit       = [{ id, datum:'YYYY-MM-DD', von:'HH:MM', bis:'HH:MM',
+//                                kuerzel, notiz, erfasstAm:'YYYY-MM-DD' }]
+//   state.arbeitszeitConfig = { loehne:[{ab,satz}], empfaenger, cc, betreff, text,
+//                                vorlage, ordner, stichtag:'20'|'sonntag', autoExport,
+//                                einfuehrungDone, letzterAutoExport, letzterExport }
+// Abrechnungsregel: pro Tag max. 6 h dokumentieren. Der Überhang wandert auf den
+// Vortag – auf einen leeren Vortag mit Ende 20:00, sonst an dessen eigene Zeiten
+// angehängt (nie nach 20:00). Einnahme = dokumentierte Stunden × Stundenlohn
+// (netto, Minijob) und ersetzt je Monat incomeByMonth[m].nebenjob (Flag
+// nebenjobAusAz), sobald Einträge da sind. Das „erhalten"-Gate bleibt unverändert.
+// Excel: die DATEV-Vorlage wählt der Nutzer selbst (enthält Name/Firma, gehört
+// nicht ins öffentliche Repo); gefüllt wird sie in main.js (arbeitszeit-xlsx.js).
+const AZ_MAX_MIN = 360;
+const AZ_SPAET_MIN = 20 * 60;
+const AZ_KUERZEL = [['', '–'], ['K', 'K – Krank'], ['U', 'U – Urlaub'], ['UU', 'UU – Unbezahlter Urlaub'],
+  ['F', 'F – Feiertag'], ['SA', 'SA – Stundenweise abwesend'], ['SU', 'SU – Stundenweise Urlaub']];
+const AZ_WOCHENTAGE = ['Sonntag','Montag','Dienstag','Mittwoch','Donnerstag','Freitag','Samstag'];
+const AZ_STANDARD_BETREFF = 'Arbeitszeitdokumentation {zeitraum}';
+const AZ_STANDARD_TEXT = 'Hallo,\n\nanbei meine Arbeitszeitdokumentation für {zeitraum}.\n\nViele Grüße\n{name}';
+let _azEditId = null;
+let _azAutoLaeuft = false;
+let _azHinweisGezeigt = false;
+
+function azAktiv() { return !!(state.config && state.config.arbeitszeitAktiv); }
+function azListe() {
+  if (!Array.isArray(state.arbeitszeit)) state.arbeitszeit = [];
+  return state.arbeitszeit;
+}
+function azCfg() {
+  if (!state.arbeitszeitConfig || typeof state.arbeitszeitConfig !== 'object') state.arbeitszeitConfig = {};
+  const c = state.arbeitszeitConfig;
+  if (!Array.isArray(c.loehne)) c.loehne = [];
+  if (typeof c.empfaenger !== 'string') c.empfaenger = '';
+  if (typeof c.cc !== 'string') c.cc = '';
+  if (typeof c.betreff !== 'string') c.betreff = AZ_STANDARD_BETREFF;
+  if (typeof c.text !== 'string') c.text = AZ_STANDARD_TEXT;
+  if (typeof c.vorlage !== 'string') c.vorlage = '';
+  if (typeof c.ordner !== 'string') c.ordner = '';
+  if (c.stichtag !== 'sonntag') c.stichtag = '20';
+  if (c.autoExport === undefined) c.autoExport = true;
+  return c;
+}
+
+// ── Zeit-/Datumshelfer ─────────────────────────────────────────────────────
+function azMin(hhmm) {
+  const m = /^(\d{1,2}):(\d{2})$/.exec(String(hhmm || '').trim());
+  return m && +m[1] < 24 && +m[2] < 60 ? (+m[1]) * 60 + (+m[2]) : null;
+}
+function azZeit(min) { return String(Math.floor(min / 60)).padStart(2, '0') + ':' + String(min % 60).padStart(2, '0'); }
+function azHHMM(min) { return Math.floor(min / 60) * 100 + (min % 60); }   // DATEV-Format: 08:40 → 840
+function azDauerText(min) { return Math.floor(min / 60) + ':' + String(min % 60).padStart(2, '0') + ' h'; }
+function azDauer(e) {
+  const v = azMin(e && e.von), b = azMin(e && e.bis);
+  return (v != null && b != null && b > v) ? b - v : 0;
+}
+function azDatumPlus(iso, tage) {
+  const [y, m, d] = iso.split('-').map(Number);
+  return new Date(Date.UTC(y, m - 1, d + tage)).toISOString().slice(0, 10);
+}
+function azWochentag(iso) {
+  const [y, m, d] = iso.split('-').map(Number);
+  return new Date(Date.UTC(y, m - 1, d)).getUTCDay();
+}
+function azHeute() {
+  const d = new Date();
+  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+}
+function azVormonat(ym) {
+  const [y, m] = ym.split('-').map(Number);
+  return m === 1 ? (y - 1) + '-12' : y + '-' + String(m - 1).padStart(2, '0');
+}
+function azMonatName(ym) { const [y, m] = ym.split('-'); return PV_MONATE[+m - 1] + ' ' + y; }
+
+// ── Kernlogik: dokumentierte Tageszeilen (6-h-Regel) ───────────────────────
+// Liefert je Kalendertag eine Zeile, wie sie in die DATEV-Liste kommt:
+// { datum, eintragId, beginn, ende (Minuten), minuten, echt, kuerzel, bemerkung,
+//   aufgezeichnet, verschobenRaus, verschobenRein, warnung }
+function azDokuZeilen(liste) {
+  const tage = {};
+  const ueberhang = [];
+  const leer = (datum, aufgezeichnet) => ({ datum, eintragId: null, beginn: null, ende: null, minuten: 0, echt: 0,
+    kuerzel: '', bemerkung: '', aufgezeichnet, verschobenRaus: 0, verschobenRein: 0, warnung: '' });
+  (liste || []).filter(e => e && /^\d{4}-\d{2}-\d{2}$/.test(e.datum || ''))
+    .sort((a, b) => a.datum.localeCompare(b.datum))
+    .forEach(e => {
+      const t = leer(e.datum, e.erfasstAm || e.datum);
+      const dauer = azDauer(e);
+      t.eintragId = e.id; t.echt = dauer;
+      t.kuerzel = e.kuerzel || ''; t.bemerkung = e.notiz || '';
+      if (dauer > 0) {
+        t.beginn = azMin(e.von);
+        t.minuten = Math.min(dauer, AZ_MAX_MIN);
+        t.ende = t.beginn + t.minuten;
+        if (dauer > AZ_MAX_MIN) {
+          t.verschobenRaus = dauer - AZ_MAX_MIN;
+          ueberhang.push({ ziel: azDatumPlus(e.datum, -1), min: t.verschobenRaus, quelle: e.datum, aufgezeichnet: t.aufgezeichnet });
+        }
+      }
+      tage[e.datum] = t;
+    });
+  ueberhang.forEach(u => {
+    const von = 'Mehrstunden von ' + AZ_WOCHENTAGE[azWochentag(u.quelle)];
+    const t = tage[u.ziel] || (tage[u.ziel] = leer(u.ziel, u.aufgezeichnet));
+    if (t.beginn == null) {
+      t.ende = AZ_SPAET_MIN; t.beginn = AZ_SPAET_MIN - u.min; t.minuten = u.min;
+      t.bemerkung = (t.bemerkung ? t.bemerkung + '; ' : '') + von;
+      if (t.kuerzel) t.warnung = 'Überhang auf einen Tag mit Kürzel ' + t.kuerzel + ' verschoben – bitte prüfen';
+    } else {
+      t.ende += u.min; t.minuten += u.min;
+      if (t.ende > AZ_SPAET_MIN) { t.beginn -= t.ende - AZ_SPAET_MIN; t.ende = AZ_SPAET_MIN; }
+      t.bemerkung = (t.bemerkung ? t.bemerkung + '; ' : '') + 'inkl. ' + von;
+      if (t.minuten > AZ_MAX_MIN) t.warnung = 'Mit dem Überhang mehr als 6 h – bitte Zeiten prüfen';
+    }
+    if (t.beginn < 0) { t.beginn = 0; t.minuten = t.ende; t.warnung = 'Überhang passt nicht vor 20:00 – bitte Zeiten prüfen'; }
+    t.verschobenRein += u.min;
+  });
+  return Object.values(tage).sort((a, b) => a.datum.localeCompare(b.datum));
+}
+// Stundenlohn, der an einem Datum gilt (Historie mit „gültig ab").
+function azLohnSatz(datum) {
+  const l = azCfg().loehne.filter(x => x && x.ab && x.ab <= datum).sort((a, b) => a.ab.localeCompare(b.ab));
+  return l.length ? (+l[l.length - 1].satz || 0) : 0;
+}
+function azMonatsZeilen(ym, zeilen) {
+  return (zeilen || azDokuZeilen(azListe())).filter(z => z.datum.slice(0, 7) === ym);
+}
+function azMonatsSumme(ym, zeilen) {
+  let minuten = 0, betrag = 0;
+  azMonatsZeilen(ym, zeilen).forEach(z => { minuten += z.minuten; betrag += z.minuten / 60 * azLohnSatz(z.datum); });
+  return { minuten, betrag: Math.round(betrag * 100) / 100 };
+}
+// Monatssumme → incomeByMonth[m].nebenjob aller (nicht archivierten) Jahre.
+// Monate ohne Arbeitszeit-Einträge behalten ihren manuell erfassten Wert.
+function azSyncEinnahmen() {
+  if (!azAktiv() || !state.years) return false;
+  const zeilen = azDokuZeilen(azListe());
+  const monate = new Set(zeilen.filter(z => z.minuten > 0).map(z => z.datum.slice(0, 7)));
+  let geaendert = false;
+  Object.keys(state.years).forEach(y => {
+    const yd = state.years[y];
+    if (!yd || yd.status === 'closed' || !yd.incomeByMonth) return;
+    Object.keys(yd.incomeByMonth).forEach(m => {
+      const inc = yd.incomeByMonth[m];
+      if (!inc) return;
+      if (monate.has(m)) {
+        const b = azMonatsSumme(m, zeilen).betrag;
+        if (inc.nebenjob !== b || !inc.nebenjobAusAz) { inc.nebenjob = b; inc.nebenjobAusAz = true; geaendert = true; }
+      } else if (inc.nebenjobAusAz) {
+        inc.nebenjob = 0; delete inc.nebenjobAusAz; geaendert = true;
+      }
+    });
+  });
+  return geaendert;
+}
+
+// ── Export: Excel + Mail-Entwurf ───────────────────────────────────────────
+// Stichtag eines Monats: der 20. oder – wählbar – der Sonntag nach dem letzten
+// Samstag vor dem 20.
+function azStichtag(ym) {
+  if (azCfg().stichtag !== 'sonntag') return ym + '-20';
+  let d = 19;
+  while (azWochentag(ym + '-' + String(d).padStart(2, '0')) !== 6) d--;
+  return ym + '-' + String(d + 1).padStart(2, '0');
+}
+function azExportDaten(ym, zeilen) {
+  const [jahr, monat] = ym.split('-').map(Number);
+  return { jahr, monat, zeilen: azMonatsZeilen(ym, zeilen).map(z => ({
+    tag: +z.datum.slice(8),
+    beginn: z.beginn != null ? azHHMM(z.beginn) : null,
+    ende: z.ende != null ? azHHMM(z.ende) : null,
+    kuerzel: z.kuerzel, aufgezeichnet: z.aufgezeichnet, bemerkung: z.bemerkung,
+  })) };
+}
+function azZeitraum(monate) {
+  const jahre = new Set(monate.map(ym => ym.slice(0, 4)));
+  if (jahre.size === 1 && monate.length > 1) {
+    return monate.map(ym => PV_MONATE[+ym.slice(5) - 1]).join(' und ') + ' ' + monate[0].slice(0, 4);
+  }
+  return monate.map(azMonatName).join(' und ');
+}
+function azPlatzhalter(text, werte) {
+  return String(text || '').replace(/\{(\w+)\}/g, (m, k) => werte[k] != null ? werte[k] : m);
+}
+function azMailtoUrl(monate, dateien) {
+  const c = azCfg();
+  const zeilen = azDokuZeilen(azListe());
+  const minuten = monate.reduce((s, ym) => s + azMonatsSumme(ym, zeilen).minuten, 0);
+  const werte = {
+    zeitraum: azZeitraum(monate),
+    name: (state.meta && state.meta.userName) || '',
+    stunden: azDauerText(minuten),
+    dateien: (dateien || []).map(d => d.name).join('\n'),
+  };
+  const enc = s => encodeURIComponent(String(s).replace(/\r?\n/g, '\r\n'));
+  const adr = s => String(s || '').split(/[;,\s]+/).filter(Boolean).join(',');
+  const teile = [];
+  if (adr(c.cc)) teile.push('cc=' + adr(c.cc));
+  teile.push('subject=' + enc(azPlatzhalter(c.betreff, werte)));
+  teile.push('body=' + enc(azPlatzhalter(c.text, werte)));
+  return 'mailto:' + adr(c.empfaenger) + '?' + teile.join('&');
+}
+// Excel je Monat erzeugen (Monate ohne Einträge werden übersprungen, damit
+// bestehende Dateien im Ordner nicht leer überschrieben werden).
+async function azExportieren(monate, mitMail, auto) {
+  const c = azCfg();
+  if (!window.EA || !window.EA.arbeitszeitExport) {
+    if (!auto) showToast('Excel-Export ist nur in der Desktop-App verfügbar', 'error');
+    return false;
+  }
+  if (!c.vorlage || !c.ordner) {
+    if (!auto) await uiAlert({ title: 'Export noch nicht eingerichtet', icon: '📄',
+      message: 'Bitte zuerst die DATEV-Vorlage und den Zielordner unter „Export & Mail" auswählen.' });
+    return false;
+  }
+  const zeilen = azDokuZeilen(azListe());
+  const daten = monate.map(ym => azExportDaten(ym, zeilen)).filter(d => d.zeilen.length);
+  const leer = monate.filter(ym => !azMonatsZeilen(ym, zeilen).length);
+  if (!daten.length) {
+    if (!auto) await uiAlert({ title: 'Nichts zu exportieren', icon: '📄',
+      message: 'Für ' + monate.map(azMonatName).join(' und ') + ' sind keine Arbeitstage erfasst.' });
+    return false;
+  }
+  const r = await window.EA.arbeitszeitExport({ vorlage: c.vorlage, ordner: c.ordner, monate: daten });
+  if (!r || !r.ok) {
+    await uiAlert({ title: 'Export fehlgeschlagen', icon: '⚠', message: escapeHtml((r && r.error) || 'Unbekannter Fehler') });
+    return false;
+  }
+  const exportiert = daten.map(d => d.jahr + '-' + String(d.monat).padStart(2, '0'));
+  c.letzterExport = { am: new Date().toISOString(), monate: exportiert };
+  saveData();
+  try { await window.EA.openFolder(c.ordner); } catch {}
+  let mailHinweis = '';
+  if (mitMail) {
+    if (c.empfaenger.trim()) {
+      try { await window.EA.openExternal(azMailtoUrl(exportiert, r.dateien)); mailHinweis = ' – Mail-Entwurf geöffnet, Dateien bitte anhängen'; } catch {}
+    } else mailHinweis = ' – kein Empfänger eingetragen, kein Mail-Entwurf';
+  }
+  const namen = r.dateien.map(d => d.name).join(', ');
+  if (auto && window.EA.notify) window.EA.notify({ title: 'Arbeitszeit: Liste vorbereitet', body: namen + mailHinweis });
+  showToast('Excel erstellt: ' + namen + mailHinweis +
+    (leer.length ? ' (ohne Einträge: ' + leer.map(azMonatName).join(', ') + ')' : ''), 'success');
+  if (currentPage === 'arbeitszeit') renderPage();
+  return true;
+}
+// Button „Excel + Mail vorbereiten": Vormonat komplett + laufender Monat.
+function azVorbereiten() {
+  const ym = azHeute().slice(0, 7);
+  return azExportieren([azVormonat(ym), ym], true, false);
+}
+function azMonatExportieren() { return azExportieren([currentMonth], false, false); }
+function azOrdnerOeffnen() {
+  const c = azCfg();
+  if (c.ordner && window.EA && window.EA.openFolder) window.EA.openFolder(c.ordner);
+}
+// Automatik: ab dem Stichtag einmal je Monat (beim Start + alle 30 Min.).
+async function azAutoPruefung() {
+  if (!azAktiv() || _azAutoLaeuft) return;
+  const c = azCfg();
+  const heute = azHeute(), ym = heute.slice(0, 7);
+  if (!c.autoExport || c.letzterAutoExport === ym || heute < azStichtag(ym)) return;
+  if (!c.vorlage || !c.ordner) {
+    if (!_azHinweisGezeigt) {
+      _azHinweisGezeigt = true;
+      showToast('Arbeitszeit: Stichtag erreicht, aber Vorlage/Zielordner fehlen', 'error');
+    }
+    return;
+  }
+  _azAutoLaeuft = true;
+  try {
+    if (await azExportieren([azVormonat(ym), ym], true, true)) { c.letzterAutoExport = ym; saveData(); }
+  } catch (e) { console.error('azAutoPruefung:', e); }
+  finally { _azAutoLaeuft = false; }
+}
+
+// ── Einträge erfassen / bearbeiten ─────────────────────────────────────────
+async function azSpeichern() {
+  const datum = (el('az_datum') || {}).value || '';
+  const von = (el('az_von') || {}).value || '';
+  const bis = (el('az_bis') || {}).value || '';
+  const kuerzel = (el('az_kuerzel') || {}).value || '';
+  const notiz = ((el('az_notiz') || {}).value || '').trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(datum)) { showToast('Bitte ein Datum wählen', 'error'); return; }
+  const hatZeit = von || bis;
+  if (hatZeit && azDauer({ von, bis }) <= 0) { showToast('„Bis" muss nach „Von" liegen', 'error'); return; }
+  if (!hatZeit && !kuerzel) { showToast('Bitte Von/Bis oder ein Kürzel angeben', 'error'); return; }
+  const liste = azListe();
+  const alt = _azEditId ? liste.find(e => String(e.id) === String(_azEditId)) : null;
+  const doppelt = liste.find(e => e.datum === datum && (!alt || String(e.id) !== String(alt.id)));
+  if (doppelt) {
+    const ok = await uiConfirm({ title: 'Tag schon erfasst', icon: '⏱️',
+      message: 'Für den ' + datum.split('-').reverse().join('.') + ' gibt es bereits einen Eintrag (' +
+        (doppelt.von ? doppelt.von + '–' + doppelt.bis : doppelt.kuerzel) + '). Die DATEV-Liste hat nur eine Zeile pro Tag.',
+      okLabel: 'Ersetzen', cancelLabel: 'Abbrechen' });
+    if (!ok) return;
+    state.arbeitszeit = liste.filter(e => e !== doppelt);
+  }
+  const werte = { datum, von: hatZeit ? von : '', bis: hatZeit ? bis : '', kuerzel, notiz };
+  if (alt) Object.assign(alt, werte);
+  else azListe().push(Object.assign({ id: uid(), erfasstAm: azHeute() }, werte));
+  _azEditId = null;
+  azSyncEinnahmen();
+  saveData();
+  if (typeof updateBadges === 'function') updateBadges();
+  if (datum.slice(0, 7) !== currentMonth && allMonths2026.includes(datum.slice(0, 7))) {
+    currentMonth = datum.slice(0, 7);
+    if (el('monthSelector')) el('monthSelector').value = currentMonth;
+  }
+  renderPage();
+  const d = azDauer(werte);
+  showToast(alt ? 'Eintrag aktualisiert' : 'Arbeitstag gespeichert' + (d > AZ_MAX_MIN ? ' – ' + azDauerText(d - AZ_MAX_MIN) + ' gehen auf den Vortag' : ''));
+}
+function azBearbeiten(id) { _azEditId = id; renderPage(); }
+function azAbbrechen() { _azEditId = null; renderPage(); }
+async function azLoeschen(id) {
+  const e = azListe().find(x => String(x.id) === String(id));
+  if (!e) return;
+  const ok = await uiConfirm({ title: 'Eintrag löschen', icon: '🗑', danger: true,
+    message: 'Arbeitstag ' + e.datum.split('-').reverse().join('.') + (e.von ? ' (' + e.von + '–' + e.bis + ')' : '') + ' löschen?',
+    okLabel: 'Löschen', cancelLabel: 'Abbrechen' });
+  if (!ok) return;
+  state.arbeitszeit = azListe().filter(x => x !== e);
+  if (String(_azEditId) === String(id)) _azEditId = null;
+  azSyncEinnahmen();
+  saveData();
+  if (typeof updateBadges === 'function') updateBadges();
+  renderPage();
+  showToast('Eintrag gelöscht', 'info');
+}
+
+// ── Einstellungen ──────────────────────────────────────────────────────────
+function azEmailsOk(s) {
+  return String(s || '').split(/[;,\s]+/).filter(Boolean).every(a => /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(a));
+}
+function azCfgSetzen(feld, wert) {
+  const c = azCfg();
+  if ((feld === 'empfaenger' || feld === 'cc') && !azEmailsOk(wert)) {
+    showToast('Ungültige E-Mail-Adresse', 'error'); renderPage(); return;
+  }
+  c[feld] = typeof c[feld] === 'boolean' ? !!wert : wert;
+  saveData();
+  renderPage();
+}
+async function azVorlageWaehlen() {
+  if (!window.EA || !window.EA.selectFile) return;
+  const r = await window.EA.selectFile({ title: 'DATEV-Vorlage „Arbeitszeitdokumentation" wählen',
+    filters: [{ name: 'Excel', extensions: ['xlsx'] }] });
+  if (!r || !r.path) return;
+  azCfg().vorlage = r.path; saveData(); renderPage();
+}
+async function azOrdnerWaehlen() {
+  if (!window.EA || !window.EA.selectFolder) return;
+  const r = await window.EA.selectFolder('Zielordner für die Arbeitszeit-Listen wählen');
+  if (!r || !r.path) return;
+  azCfg().ordner = r.path; saveData(); renderPage();
+}
+async function azLohnHinzufuegen() {
+  const satz = await uiPrompt({ title: 'Stundenlohn', icon: '💶', type: 'number',
+    message: 'Stundenlohn in ' + currencySymbol() + ' (netto, Minijob):', value: azLohnSatz(azHeute()) || '', okLabel: 'Weiter' });
+  if (satz === null) return;
+  const n = parseFloat(String(satz).replace(',', '.'));
+  if (!(n > 0)) { showToast('Bitte einen gültigen Betrag eingeben', 'error'); return; }
+  const ab = await uiPrompt({ title: 'Gültig ab', icon: '📅', type: 'date',
+    message: 'Ab welchem Tag gilt ' + fmtEur(n) + ' pro Stunde?', value: azHeute().slice(0, 8) + '01', okLabel: 'Speichern' });
+  if (ab === null) return;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(ab)) { showToast('Bitte ein Datum wählen', 'error'); return; }
+  const c = azCfg();
+  c.loehne = c.loehne.filter(l => l.ab !== ab);
+  c.loehne.push({ ab, satz: Math.round(n * 100) / 100 });
+  c.loehne.sort((a, b) => a.ab.localeCompare(b.ab));
+  azSyncEinnahmen(); saveData(); renderPage();
+  showToast('Stundenlohn gespeichert');
+}
+async function azLohnLoeschen(ab) {
+  const ok = await uiConfirm({ title: 'Stundenlohn entfernen', icon: '💶', danger: true,
+    message: 'Den Stundenlohn gültig ab ' + String(ab).split('-').reverse().join('.') + ' entfernen?', okLabel: 'Entfernen' });
+  if (!ok) return;
+  const c = azCfg();
+  c.loehne = c.loehne.filter(l => l.ab !== ab);
+  azSyncEinnahmen(); saveData(); renderPage();
+}
+
+// ── Aktivierung + Einführung ───────────────────────────────────────────────
+async function azAktivieren() {
+  if (!state.config) state.config = {};
+  state.config.arbeitszeitAktiv = true;
+  azCfg();
+  saveData();
+  azNavSichtbarkeit();
+  if (!azCfg().einfuehrungDone) await azEinfuehrung();
+  azSyncEinnahmen();
+  saveData();
+  navigate('arbeitszeit');
+  showToast('Arbeitszeit-Bereich aktiviert', 'info');
+}
+async function azDeaktivieren() {
+  const ok = await uiConfirm({
+    title: 'Arbeitszeit ausblenden', icon: '⏱️',
+    message: 'Den Menüpunkt „Arbeitszeit" ausblenden?',
+    details: ['Alle erfassten Arbeitstage und Einstellungen bleiben erhalten.',
+              'Die Nebenjob-Einnahmen werden nicht mehr automatisch aus den Stunden berechnet.',
+              'Der automatische Export am Stichtag pausiert.'],
+    okLabel: 'Ausblenden', cancelLabel: 'Abbrechen',
+  });
+  if (!ok) return;
+  state.config.arbeitszeitAktiv = false;
+  saveData();
+  azNavSichtbarkeit();
+  navigate('einstellungen');
+  showToast('Arbeitszeit ausgeblendet – Daten bleiben gespeichert', 'info');
+}
+function azNavSichtbarkeit() {
+  const btn = document.getElementById('navAz');
+  if (btn) btn.style.display = azAktiv() ? '' : 'none';
+}
+// Kurze Einführung beim ersten Aktivieren: Empfänger, CC, Mailtext, Stundenlohn,
+// Vorlage + Zielordner. Alles ist später auf der Seite änderbar.
+function azEinfuehrung() {
+  return new Promise(resolve => {
+    const c = azCfg();
+    const lohn = azLohnSatz(azHeute());
+    const feld = 'width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:8px;background:var(--surface-2);color:var(--text);font-size:13px';
+    const schritt = (nr, titel, inhalt) =>
+      '<div style="display:flex;gap:12px;margin-bottom:14px">' +
+        '<div style="flex:0 0 24px;height:24px;border-radius:50%;background:var(--accent,#0f766e);color:#fff;font-size:12px;font-weight:700;display:flex;align-items:center;justify-content:center">' + nr + '</div>' +
+        '<div style="flex:1"><div style="font-weight:600;font-size:13px;margin-bottom:6px">' + titel + '</div>' + inhalt + '</div>' +
+      '</div>';
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-overlay';
+    overlay.innerHTML =
+      '<div class="modal" style="max-width:560px;padding:0;max-height:90vh;overflow:auto" onclick="event.stopPropagation()">' +
+        '<div style="padding:18px 22px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:12px">' +
+          '<div style="font-size:28px;line-height:1">⏱️</div>' +
+          '<div><h3 style="margin:0;font-size:16px;font-weight:600">Arbeitszeit einrichten</h3>' +
+          '<div style="font-size:12px;color:var(--muted)">Du erfasst deine Arbeitstage, die App rechnet die Einnahme aus und bereitet am Stichtag Excel-Liste und Mail vor. Gesendet wird nie automatisch.</div></div>' +
+        '</div>' +
+        '<div style="padding:18px 22px">' +
+          schritt(1, 'Empfänger der Stundenliste', '<input id="_azE_to" type="email" style="' + feld + '" placeholder="z. B. lohn@firma.de" value="' + escapeHtml(c.empfaenger) + '">') +
+          schritt(2, 'CC <span style="font-weight:400;color:var(--muted)">(optional)</span>', '<input id="_azE_cc" type="text" style="' + feld + '" placeholder="mehrere mit Komma trennen" value="' + escapeHtml(c.cc) + '">') +
+          schritt(3, 'Mailtext',
+            '<label style="font-size:12px;margin-right:14px;display:inline-flex;align-items:center;gap:5px"><input type="radio" name="_azE_tm" value="std" checked style="width:auto;margin:0"> Vorgegebene Vorlage</label>' +
+            '<label style="font-size:12px;display:inline-flex;align-items:center;gap:5px"><input type="radio" name="_azE_tm" value="eigen" style="width:auto;margin:0"> Eigener Text</label>' +
+            '<input id="_azE_sub" type="text" style="' + feld + ';margin-top:8px" value="' + escapeHtml(c.betreff) + '" readonly>' +
+            '<textarea id="_azE_txt" rows="6" style="' + feld + ';margin-top:6px;font-family:inherit" readonly>' + escapeHtml(c.text) + '</textarea>' +
+            '<div style="font-size:11px;color:var(--muted);margin-top:4px">Platzhalter: {zeitraum}, {name}, {stunden}, {dateien}</div>') +
+          schritt(4, 'Stundenlohn <span style="font-weight:400;color:var(--muted)">(netto)</span>',
+            '<div style="display:flex;gap:8px"><input id="_azE_lohn" type="number" step="0.01" min="0" style="' + feld + '" placeholder="z. B. 13,90" value="' + (lohn || '') + '">' +
+            '<input id="_azE_ab" type="date" style="' + feld + '" value="' + azHeute().slice(0, 8) + '01" title="gültig ab"></div>') +
+          schritt(5, 'DATEV-Vorlage & Zielordner <span style="font-weight:400;color:var(--muted)">(auch später möglich)</span>',
+            '<div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn btn-ghost btn-sm" data-az="vorlage">📄 Vorlage wählen</button>' +
+            '<button class="btn btn-ghost btn-sm" data-az="ordner">📂 Ordner wählen</button></div>' +
+            '<div id="_azE_pf" style="font-size:11px;color:var(--muted);margin-top:6px;word-break:break-all"></div>') +
+        '</div>' +
+        '<div style="padding:14px 22px;border-top:1px solid var(--border);display:flex;justify-content:flex-end;gap:8px;background:var(--surface);border-radius:0 0 14px 14px">' +
+          '<button class="btn btn-ghost" data-az="spaeter">Später</button>' +
+          '<button class="btn btn-primary" data-az="ok">Speichern & loslegen</button>' +
+        '</div>' +
+      '</div>';
+    document.body.appendChild(overlay);
+    const q = s => overlay.querySelector(s);
+    let vorlage = c.vorlage, ordner = c.ordner;
+    const pfade = () => { q('#_azE_pf').innerHTML = (vorlage ? '📄 ' + escapeHtml(vorlage) + '<br>' : '') + (ordner ? '📂 ' + escapeHtml(ordner) : ''); };
+    pfade();
+    overlay.querySelectorAll('input[name="_azE_tm"]').forEach(r => r.addEventListener('change', () => {
+      const eigen = r.value === 'eigen' && r.checked;
+      q('#_azE_txt').readOnly = !eigen; q('#_azE_sub').readOnly = !eigen;
+      if (!eigen) { q('#_azE_txt').value = AZ_STANDARD_TEXT; q('#_azE_sub').value = AZ_STANDARD_BETREFF; }
+      else q('#_azE_txt').focus();
+    }));
+    q('[data-az="vorlage"]').addEventListener('click', async () => {
+      const r = window.EA && window.EA.selectFile ? await window.EA.selectFile({ title: 'DATEV-Vorlage wählen', filters: [{ name: 'Excel', extensions: ['xlsx'] }] }) : null;
+      if (r && r.path) { vorlage = r.path; pfade(); }
+    });
+    q('[data-az="ordner"]').addEventListener('click', async () => {
+      const r = window.EA && window.EA.selectFolder ? await window.EA.selectFolder('Zielordner für die Arbeitszeit-Listen wählen') : null;
+      if (r && r.path) { ordner = r.path; pfade(); }
+    });
+    const fertig = () => { document.removeEventListener('keydown', kh); overlay.remove(); resolve(); };
+    function kh(e) { if (e.key === 'Escape') fertig(); }
+    document.addEventListener('keydown', kh);
+    q('[data-az="spaeter"]').addEventListener('click', fertig);
+    q('[data-az="ok"]').addEventListener('click', () => {
+      const to = q('#_azE_to').value.trim(), cc = q('#_azE_cc').value.trim();
+      if (!to || !azEmailsOk(to)) { showToast('Bitte eine gültige Empfänger-Adresse eingeben', 'error'); return; }
+      if (!azEmailsOk(cc)) { showToast('Ungültige CC-Adresse', 'error'); return; }
+      c.empfaenger = to; c.cc = cc;
+      c.betreff = q('#_azE_sub').value; c.text = q('#_azE_txt').value;
+      c.vorlage = vorlage; c.ordner = ordner;
+      const n = parseFloat(String(q('#_azE_lohn').value).replace(',', '.'));
+      const ab = q('#_azE_ab').value;
+      if (n > 0 && /^\d{4}-\d{2}-\d{2}$/.test(ab) && Math.round(n * 100) / 100 !== azLohnSatz(ab)) {
+        c.loehne = c.loehne.filter(l => l.ab !== ab);
+        c.loehne.push({ ab, satz: Math.round(n * 100) / 100 });
+        c.loehne.sort((a, b) => a.ab.localeCompare(b.ab));
+      }
+      c.einfuehrungDone = true;
+      saveData();
+      fertig();
+    });
+  });
+}
+async function azEinfuehrungZeigen() { await azEinfuehrung(); azSyncEinnahmen(); saveData(); renderPage(); }
+
+// ── Seite ──────────────────────────────────────────────────────────────────
+function arbeitszeit() {
+  if (!azAktiv()) {
+    return '<div class="empty-state"><div class="empty-icon">⏱️</div>' +
+      '<p>Der Arbeitszeit-Bereich ist nicht aktiviert.</p>' +
+      '<button class="btn btn-primary" onclick="azAktivieren()" style="margin-top:10px">Arbeitszeit aktivieren</button></div>';
+  }
+  const c = azCfg();
+  const ym = currentMonth;
+  const heute = azHeute();
+  const alle = azDokuZeilen(azListe());
+  const zeilen = azMonatsZeilen(ym, alle);
+  const sum = azMonatsSumme(ym, alle);
+  const echtMin = azListe().filter(e => (e.datum || '').slice(0, 7) === ym).reduce((s, e) => s + azDauer(e), 0);
+  const satzAktuell = azLohnSatz(ym === heute.slice(0, 7) ? heute : ym + '-31');
+  const edit = _azEditId ? azListe().find(e => String(e.id) === String(_azEditId)) : null;
+  const inc = state.incomeByMonth[ym] || {};
+  const erhalten = incomeReceived(ym, 'nebenjob');
+  const fehlt = [];
+  if (!c.loehne.length) fehlt.push('Stundenlohn');
+  if (!c.empfaenger) fehlt.push('Mail-Empfänger');
+  if (!c.vorlage) fehlt.push('DATEV-Vorlage');
+  if (!c.ordner) fehlt.push('Zielordner');
+  const stichtag = azStichtag(heute.slice(0, 7));
+  const datumDe = iso => iso.split('-').reverse().join('.');
+
+  const formWerte = edit || { datum: heute.slice(0, 7) === ym ? heute : ym + '-01', von: '', bis: '', kuerzel: '', notiz: '' };
+  const formHtml =
+    '<div class="card mb-2">' +
+      '<div class="card-header"><h3>' + (edit ? '✏️ Arbeitstag bearbeiten' : '➕ Arbeitstag erfassen') + '</h3></div>' +
+      '<div style="display:flex;flex-wrap:wrap;gap:10px;align-items:flex-end">' +
+        '<label class="field" style="flex:0 0 150px">Datum<input id="az_datum" type="date" value="' + formWerte.datum + '"></label>' +
+        '<label class="field" style="flex:0 0 110px">Von<input id="az_von" type="time" value="' + escapeHtml(formWerte.von) + '"></label>' +
+        '<label class="field" style="flex:0 0 110px">Bis<input id="az_bis" type="time" value="' + escapeHtml(formWerte.bis) + '"></label>' +
+        '<label class="field" style="flex:0 0 190px">Kürzel<select id="az_kuerzel">' +
+          AZ_KUERZEL.map(k => '<option value="' + k[0] + '"' + (formWerte.kuerzel === k[0] ? ' selected' : '') + '>' + k[1] + '</option>').join('') +
+        '</select></label>' +
+        '<label class="field" style="flex:1 1 180px">Notiz<input id="az_notiz" type="text" placeholder="z. B. verkaufsoffen" value="' + escapeHtml(formWerte.notiz) + '"></label>' +
+        '<div style="display:flex;gap:6px;padding-bottom:2px">' +
+          (edit ? '<button class="btn btn-ghost" onclick="azAbbrechen()">Abbrechen</button>' : '') +
+          '<button class="btn btn-primary" onclick="azSpeichern()">' + (edit ? 'Speichern' : 'Hinzufügen') + '</button>' +
+        '</div>' +
+      '</div>' +
+      '<div style="font-size:11px;color:var(--muted);margin-top:8px">Trag die echten Zeiten ein. Über 6 h pro Tag verschiebt die App den Rest automatisch auf den Vortag (Ende 20:00), so wie es die Abrechnung verlangt.</div>' +
+    '</div>';
+
+  const rowsHtml = zeilen.map(z => {
+    const e = z.eintragId != null ? azListe().find(x => String(x.id) === String(z.eintragId)) : null;
+    const wt = AZ_WOCHENTAGE[azWochentag(z.datum)].slice(0, 2);
+    const betrag = z.minuten / 60 * azLohnSatz(z.datum);
+    const hinweise = [];
+    if (z.verschobenRaus) hinweise.push('→ ' + azDauerText(z.verschobenRaus) + ' auf Vortag');
+    if (z.verschobenRein) hinweise.push('← ' + azDauerText(z.verschobenRein) + ' vom Folgetag');
+    return '<tr' + (z.warnung ? ' style="background:rgba(234,179,8,.12)" title="' + escapeHtml(z.warnung) + '"' : '') + '>' +
+      '<td style="white-space:nowrap">' + wt + ', ' + datumDe(z.datum).slice(0, 6) + (z.warnung ? ' ⚠' : '') + '</td>' +
+      '<td style="white-space:nowrap">' + (e && e.von ? escapeHtml(e.von) + '–' + escapeHtml(e.bis) + ' <span style="color:var(--muted)">(' + azDauerText(z.echt) + ')</span>' : '<span style="color:var(--muted)">–</span>') + '</td>' +
+      '<td style="white-space:nowrap">' + (z.beginn != null ? azZeit(z.beginn) + '–' + azZeit(z.ende) + ' <span style="color:var(--muted)">(' + azDauerText(z.minuten) + ')</span>' : '–') +
+        (hinweise.length ? '<div style="font-size:11px;color:var(--muted)">' + hinweise.join(' · ') + '</div>' : '') + '</td>' +
+      '<td>' + escapeHtml(z.kuerzel) + '</td>' +
+      '<td style="font-size:12px">' + escapeHtml(z.bemerkung) + (z.warnung ? '<div style="font-size:11px;color:#a86b00">' + escapeHtml(z.warnung) + '</div>' : '') + '</td>' +
+      '<td class="amount">' + (z.minuten ? fmtEur(betrag) : '') + '</td>' +
+      '<td style="white-space:nowrap">' + (e
+        ? '<button class="btn-icon" title="Bearbeiten" onclick="azBearbeiten(\'' + e.id + '\')">✏️</button>' +
+          '<button class="btn-icon danger" title="Löschen" onclick="azLoeschen(\'' + e.id + '\')">×</button>'
+        : '') + '</td>' +
+    '</tr>';
+  }).join('');
+  const tabelleHtml = zeilen.length
+    ? '<div class="table-wrap"><table><thead><tr><th>Tag</th><th>Erfasst</th><th>Für DATEV dokumentiert</th><th>*</th><th>Bemerkung</th><th style="text-align:right">Betrag</th><th></th></tr></thead><tbody>' +
+        rowsHtml + '</tbody><tfoot><tr>' +
+        '<td><strong>Summe</strong></td><td><strong>' + azDauerText(echtMin) + '</strong></td><td><strong>' + azDauerText(sum.minuten) + '</strong></td><td></td><td></td>' +
+        '<td class="amount"><strong>' + fmtEur(sum.betrag) + '</strong></td><td></td></tr></tfoot></table></div>'
+    : '<div class="empty-state" style="padding:20px"><div class="empty-icon">⏱️</div><p>Für ' + azMonatName(ym) + ' sind noch keine Arbeitstage erfasst.</p></div>';
+
+  const lohnHtml = c.loehne.length
+    ? c.loehne.slice().reverse().map(l =>
+        '<div style="display:flex;align-items:center;gap:8px;padding:5px 0;border-bottom:1px solid var(--border);font-size:13px">' +
+          '<span style="flex:1">ab ' + datumDe(l.ab) + '</span><strong>' + fmtEur(l.satz) + ' / h</strong>' +
+          '<button class="btn-icon danger" title="Entfernen" onclick="azLohnLoeschen(\'' + l.ab + '\')">×</button></div>').join('')
+    : '<div style="font-size:12px;color:var(--muted)">Noch kein Stundenlohn hinterlegt – Einnahmen werden mit 0 berechnet.</div>';
+
+  const letzter = c.letzterExport && c.letzterExport.am
+    ? new Date(c.letzterExport.am).toLocaleString('de-DE', { dateStyle: 'short', timeStyle: 'short' }) + ' (' + (c.letzterExport.monate || []).map(azMonatName).join(', ') + ')'
+    : 'noch nie';
+  const exportHtml =
+    '<div class="card mb-2">' +
+      '<div class="card-header"><h3>📤 Export & Mail</h3></div>' +
+      '<div style="font-size:13px;line-height:1.7">' +
+        'Stichtag diesen Monat: <strong>' + datumDe(stichtag) + '</strong>' +
+        (c.autoExport ? (c.letzterAutoExport === heute.slice(0, 7) ? ' <span style="color:var(--green)">✓ erledigt</span>' : ' <span style="color:var(--muted)">(automatisch, wenn die App läuft)</span>') : ' <span style="color:var(--muted)">(Automatik aus)</span>') +
+        '<br>Letzter Export: ' + letzter +
+      '</div>' +
+      '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px">' +
+        '<button class="btn btn-primary btn-sm" onclick="azVorbereiten()">📤 Excel + Mail jetzt vorbereiten</button>' +
+        '<button class="btn btn-ghost btn-sm" onclick="azMonatExportieren()">📄 Nur ' + azMonatName(ym) + ' als Excel</button>' +
+        (c.ordner ? '<button class="btn btn-ghost btn-sm" onclick="azOrdnerOeffnen()">📂 Ordner öffnen</button>' : '') +
+      '</div>' +
+      '<div style="font-size:11px;color:var(--muted);margin-top:8px">„Vorbereiten" erstellt je eine DATEV-Datei für ' + azMonatName(azVormonat(heute.slice(0, 7))) + ' und ' + azMonatName(heute.slice(0, 7)) +
+        ', öffnet den Ordner und einen Mail-Entwurf. Die Dateien ziehst du selbst in die Mail – die App sendet nichts.</div>' +
+    '</div>';
+
+  const einstHtml =
+    '<div class="card mb-2">' +
+      '<div class="card-header"><h3>⚙️ Einstellungen</h3><button class="btn btn-ghost btn-sm" onclick="azEinfuehrungZeigen()">Einführung</button></div>' +
+      '<div class="form-grid form-grid-2">' +
+        '<label class="field">Empfänger<input type="text" value="' + escapeHtml(c.empfaenger) + '" placeholder="lohn@firma.de" onchange="azCfgSetzen(\'empfaenger\',this.value.trim())"></label>' +
+        '<label class="field">CC (optional)<input type="text" value="' + escapeHtml(c.cc) + '" placeholder="mehrere mit Komma" onchange="azCfgSetzen(\'cc\',this.value.trim())"></label>' +
+        '<label class="field" style="grid-column:1/-1">Betreff<input type="text" value="' + escapeHtml(c.betreff) + '" onchange="azCfgSetzen(\'betreff\',this.value)"></label>' +
+        '<label class="field" style="grid-column:1/-1">Mailtext<textarea rows="6" style="font-family:inherit" onchange="azCfgSetzen(\'text\',this.value)">' + escapeHtml(c.text) + '</textarea>' +
+          '<span style="font-size:11px;color:var(--muted)">Platzhalter: {zeitraum}, {name}, {stunden}, {dateien} · <a href="#" onclick="azCfgSetzen(\'text\',AZ_STANDARD_TEXT);return false">Vorlage wiederherstellen</a></span></label>' +
+        '<label class="field">Stichtag<select onchange="azCfgSetzen(\'stichtag\',this.value)">' +
+          '<option value="20"' + (c.stichtag === '20' ? ' selected' : '') + '>am 20. des Monats</option>' +
+          '<option value="sonntag"' + (c.stichtag === 'sonntag' ? ' selected' : '') + '>Sonntag nach dem letzten Samstag vor dem 20.</option>' +
+        '</select></label>' +
+        '<div style="display:flex;align-items:center;gap:8px;padding-top:18px;font-size:13px"><input type="checkbox" id="az_auto" style="width:16px;height:16px;margin:0"' + (c.autoExport ? ' checked' : '') + ' onchange="azCfgSetzen(\'autoExport\',this.checked)"><label for="az_auto">Am Stichtag automatisch vorbereiten (wenn die App läuft)</label></div>' +
+      '</div>' +
+      '<div style="margin-top:12px;font-size:13px">' +
+        '<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px"><span style="flex:0 0 110px;color:var(--muted)">DATEV-Vorlage</span>' +
+          '<span style="flex:1;word-break:break-all;font-size:12px">' + (c.vorlage ? escapeHtml(c.vorlage) : '<span style="color:var(--red)">nicht gewählt</span>') + '</span>' +
+          '<button class="btn btn-ghost btn-sm" onclick="azVorlageWaehlen()">Wählen</button></div>' +
+        '<div style="display:flex;align-items:center;gap:8px"><span style="flex:0 0 110px;color:var(--muted)">Zielordner</span>' +
+          '<span style="flex:1;word-break:break-all;font-size:12px">' + (c.ordner ? escapeHtml(c.ordner) : '<span style="color:var(--red)">nicht gewählt</span>') + '</span>' +
+          '<button class="btn btn-ghost btn-sm" onclick="azOrdnerWaehlen()">Wählen</button></div>' +
+      '</div>' +
+    '</div>';
+
+  return `
+    ${fehlt.length ? '<div class="card mb-2" style="border-left:4px solid #d97706"><strong>Noch einzurichten:</strong> ' + fehlt.join(', ') +
+      ' <button class="btn btn-ghost btn-sm" style="margin-left:8px" onclick="azEinfuehrungZeigen()">Jetzt einrichten</button></div>' : ''}
+    <div class="kpi-grid kpi-grid-4 mb-2">
+      <div class="kpi"><div class="kpi-label">⏱️ Stunden ${monthLabel(ym)}</div>
+        <div class="kpi-value">${azDauerText(sum.minuten)}</div>
+        <div class="kpi-sub">${zeilen.filter(z => z.minuten).length} Arbeitstage dokumentiert</div></div>
+      <div class="kpi"><div class="kpi-label">💶 Stundenlohn</div>
+        <div class="kpi-value">${fmtEur(satzAktuell)}</div>
+        <div class="kpi-sub">netto (Minijob)</div></div>
+      <div class="kpi"><div class="kpi-label">💰 Einnahme</div>
+        <div class="kpi-value positive">${fmtEur(sum.betrag)}</div>
+        <div class="kpi-sub">${inc.nebenjobAusAz ? 'als Nebenjob-Einnahme übernommen' : 'noch keine Einträge'}</div></div>
+      <div class="kpi"><div class="kpi-label">Auszahlung</div>
+        <div class="kpi-value" style="font-size:18px">${erhalten ? '<span style="color:var(--green)">✓ erhalten</span>' : '<span style="color:#d97706">⏳ offen</span>'}</div>
+        <div class="kpi-sub"><a href="#" onclick="toggleIncomeReceived('${ym}','nebenjob');return false">umschalten</a></div></div>
+    </div>
+    ${formHtml}
+    <div class="card mb-2">
+      <div class="card-header"><h3>📋 ${azMonatName(ym)}</h3></div>
+      ${tabelleHtml}
+    </div>
+    ${exportHtml}
+    <div class="card mb-2">
+      <div class="card-header"><h3>💶 Stundenlohn</h3><button class="btn btn-primary btn-sm" onclick="azLohnHinzufuegen()">+ Neuer Satz</button></div>
+      ${lohnHtml}
+    </div>
+    ${einstHtml}`;
+}
+
+window.azAktivieren       = azAktivieren;
+window.azDeaktivieren     = azDeaktivieren;
+window.azSpeichern        = azSpeichern;
+window.azBearbeiten       = azBearbeiten;
+window.azAbbrechen        = azAbbrechen;
+window.azLoeschen         = azLoeschen;
+window.azCfgSetzen        = azCfgSetzen;
+window.azVorlageWaehlen   = azVorlageWaehlen;
+window.azOrdnerWaehlen    = azOrdnerWaehlen;
+window.azLohnHinzufuegen  = azLohnHinzufuegen;
+window.azLohnLoeschen     = azLohnLoeschen;
+window.azVorbereiten      = azVorbereiten;
+window.azMonatExportieren = azMonatExportieren;
+window.azOrdnerOeffnen    = azOrdnerOeffnen;
+window.azEinfuehrungZeigen = azEinfuehrungZeigen;
+window.AZ_STANDARD_TEXT   = AZ_STANDARD_TEXT;
+
 (async () => {
   await loadData();
   // Apply selected year's months to allMonths2026
@@ -11892,6 +12609,7 @@ window.deleteRegelEinnahme   = deleteRegelEinnahme;
 
   applySettings();
   pvNavSichtbarkeit();
+  azNavSichtbarkeit();
   try { applyNavOrder(); } catch (e) { console.error('applyNavOrder:', e); }
   cleanOldTrash();
   checkAutoBackup();
@@ -11905,6 +12623,9 @@ window.deleteRegelEinnahme   = deleteRegelEinnahme;
   setTimeout(() => checkWhatsNew(), 2000);
   // ── Wiederkehrende Einnahmen: „Geld ist eingegangen" am Stichtag ────────
   setTimeout(() => { checkGeldEingang().catch(e => console.error('checkGeldEingang:', e)); }, 2600);
+  // ── Arbeitszeit: Excel + Mail-Entwurf am Stichtag (beim Start + alle 30 Min.) ──
+  setTimeout(() => { azAutoPruefung().catch(e => console.error('azAutoPruefung:', e)); }, 3500);
+  setInterval(() => { azAutoPruefung().catch(e => console.error('azAutoPruefung:', e)); }, 30 * 60 * 1000);
   // ── Robustheit: Backup-Ordner an Hauptprozess melden (für Backup beim Beenden)
   if (window.EA && window.EA.setBackupDir && state.config && state.config.backupPath) {
     try { window.EA.setBackupDir(state.config.backupPath); } catch {}
@@ -11957,7 +12678,7 @@ window.deleteRegelEinnahme   = deleteRegelEinnahme;
     showTermsModal(() => {});
   }
   // Apply saved startPage from settings
-  const validPages = ['dashboard','jahresuebersicht','buchungen','einkaeufe','ausgaben','einnahmen','spesen','fixkosten','sparen','zaehler','pv','analyse','finanzprodukte','versicherungen','tabellen','einstellungen'];
+  const validPages = ['dashboard','jahresuebersicht','buchungen','einkaeufe','ausgaben','einnahmen','arbeitszeit','spesen','fixkosten','sparen','zaehler','pv','analyse','finanzprodukte','versicherungen','tabellen','einstellungen'];
   const savedStart = state.config?.startPage;
   const startPage = (savedStart && validPages.includes(savedStart)) ? savedStart : 'dashboard';
   navigate(startPage);
