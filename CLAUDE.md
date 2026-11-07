@@ -106,8 +106,9 @@ ersetzen, wenn die App komplett beendet ist (inkl. System-Tray).
   außerhalb `YEAR_FIELDS`): `azDokuZeilen` setzt die 6-h-Regel um (Überhang auf
   Vortag, Ende max. 20:00); `azSyncEinnahmen` schreibt die Lohnsumme nach
   `incomeByMonth[m].nebenjob` (Flag `nebenjobAusAz`, läuft in `renderPage`).
-  Lohnzeitraum = 20. Vormonat bis 19. (`azLohnMonat`, v1.0.63); DATEV-Listen
-  bleiben je Kalendermonat.
+  Lohnzeitraum = Starttag `arbeitszeitConfig.lohnStart` (Standard 20, 1 =
+  Kalendermonat) im Vormonat bis Vortag (`azLohnMonat`); DATEV-Listen bleiben
+  je Kalendermonat.
   Excel füllt `src/arbeitszeit-xlsx.js` im Main-Process aus der vom Nutzer
   gewählten DATEV-Vorlage (Vorlage enthält Name → nie ins Repo).
 - **Auto-Einträge** tragen Flags (`autoWork`, `autoAblauf`, `autoFromFixkostenId`)

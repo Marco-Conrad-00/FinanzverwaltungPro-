@@ -255,6 +255,9 @@ async function checkGeldEingang() {
 // Format je Eintrag: { v: 'Version', date: 'YYYY-MM-DD', changes: ['...','...'] }
 // Änderungen dürfen mit **Fett** Markierung versehen werden.
 const CHANGELOG = [
+  { v: '1.0.64', date: '2026-11-07', changes: [
+    '**Arbeitszeit: Lohnzeitraum einstellbar.** Ab welchem Tag ein Lohnzeitraum beginnt, legst du jetzt selbst fest – in der Einführung beim ersten Aktivieren und jederzeit in den Einstellungen der Arbeitszeit-Seite. Standard bleibt der **20.** (Lohn November = 20.10.–19.11.); mit **1** gilt der normale Kalendermonat. Eine Vorschau zeigt sofort, welche Tage ein Monatslohn umfasst, und die Nebenjob-Einnahmen werden direkt neu berechnet.',
+  ]},
   { v: '1.0.63', date: '2026-11-07', changes: [
     '**Arbeitszeit: Lohn nach Abrechnungszeitraum.** Der Nebenjob-Lohn eines Monats umfasst jetzt die Stunden vom **20. des Vormonats bis zum 19.** – z.B. Lohn November = 20.10.–19.11. Die Kachel „Lohn" auf der Arbeitszeit-Seite zeigt Zeitraum, Stunden und Betrag; in der Tabelle markiert eine Trennlinie, ab wann die Tage zum Lohn des Folgemonats zählen. Die DATEV-Listen bleiben wie bisher je Kalendermonat.',
   ]},
@@ -11959,6 +11962,8 @@ function azCfg() {
   if (typeof c.ordner !== 'string') c.ordner = '';
   if (c.stichtag !== 'sonntag') c.stichtag = '20';
   if (c.autoExport === undefined) c.autoExport = true;
+  const ls = parseInt(c.lohnStart, 10);
+  c.lohnStart = ls >= 1 && ls <= 28 ? ls : 20;   // max. 28, damit jeder Monat den Tag hat
   return c;
 }
 
@@ -12052,18 +12057,32 @@ function azSumme(zeilen) {
 }
 // Kalendermonat (DATEV-Liste, Mail)
 function azMonatsSumme(ym, zeilen) { return azSumme(azMonatsZeilen(ym, zeilen)); }
-// Lohnzeitraum: der Lohn eines Monats deckt den 20. des Vormonats bis zum 19.
-// (z.B. November = 20.10.–19.11.). azLohnMonat liefert den Monat, in dem ein
-// Arbeitstag bezahlt wird.
-const AZ_LOHN_STICHTAG = 20;
-function azLohnMonat(datum) {
+// Lohnzeitraum: der Lohn eines Monats deckt den Starttag (Einstellung lohnStart,
+// Standard 20) des Vormonats bis zum Vortag im Monat – z.B. November =
+// 20.10.–19.11. Starttag 1 = Kalendermonat. azLohnMonat liefert den Monat, in
+// dem ein Arbeitstag bezahlt wird.
+function azLohnStart() { return azCfg().lohnStart; }
+function azLohnMonat(datum, start) {
+  const s = start || azLohnStart();
   const ym = datum.slice(0, 7);
-  if (+datum.slice(8) < AZ_LOHN_STICHTAG) return ym;
+  if (s === 1 || +datum.slice(8) < s) return ym;
   const [y, m] = ym.split('-').map(Number);
   return m === 12 ? (y + 1) + '-01' : y + '-' + String(m + 1).padStart(2, '0');
 }
-function azLohnZeitraum(ym) {
-  return { von: azVormonat(ym) + '-' + AZ_LOHN_STICHTAG, bis: ym + '-' + String(AZ_LOHN_STICHTAG - 1).padStart(2, '0') };
+function azLohnZeitraum(ym, start) {
+  const s = start || azLohnStart();
+  if (s === 1) {
+    const [y, m] = ym.split('-').map(Number);
+    return { von: ym + '-01', bis: ym + '-' + String(new Date(Date.UTC(y, m, 0)).getUTCDate()).padStart(2, '0') };
+  }
+  return { von: azVormonat(ym) + '-' + String(s).padStart(2, '0'), bis: ym + '-' + String(s - 1).padStart(2, '0') };
+}
+// Beispieltext für Einführung/Einstellungen, z.B. „Lohn November = 20.10.–19.11."
+function azLohnBeispiel(start) {
+  const ym = azHeute().slice(0, 7);
+  const z = azLohnZeitraum(ym, start);
+  const kurz = iso => iso.slice(8) + '.' + iso.slice(5, 7) + '.';
+  return 'Lohn ' + PV_MONATE[+ym.slice(5) - 1] + ' = ' + kurz(z.von) + '–' + kurz(z.bis);
 }
 function azLohnSumme(ym, zeilen) {
   return azSumme((zeilen || azDokuZeilen(azListe())).filter(z => azLohnMonat(z.datum) === ym));
@@ -12275,7 +12294,16 @@ function azCfgSetzen(feld, wert) {
   if ((feld === 'empfaenger' || feld === 'cc') && !azEmailsOk(wert)) {
     showToast('Ungültige E-Mail-Adresse', 'error'); renderPage(); return;
   }
-  c[feld] = typeof c[feld] === 'boolean' ? !!wert : wert;
+  if (feld === 'lohnStart') {
+    const n = parseInt(wert, 10);
+    if (!(n >= 1 && n <= 28)) { showToast('Bitte einen Tag zwischen 1 und 28 eingeben', 'error'); renderPage(); return; }
+    c.lohnStart = n;
+    azSyncEinnahmen();
+    if (typeof updateBadges === 'function') updateBadges();
+    showToast('Lohnzeitraum: ' + azLohnBeispiel(n), 'info');
+  } else {
+    c[feld] = typeof c[feld] === 'boolean' ? !!wert : wert;
+  }
   saveData();
   renderPage();
 }
@@ -12384,7 +12412,12 @@ function azEinfuehrung() {
           schritt(4, 'Stundenlohn <span style="font-weight:400;color:var(--muted)">(netto)</span>',
             '<div style="display:flex;gap:8px"><input id="_azE_lohn" type="number" step="0.01" min="0" style="' + feld + '" placeholder="z. B. 13,90" value="' + (lohn || '') + '">' +
             '<input id="_azE_ab" type="date" style="' + feld + '" value="' + azHeute().slice(0, 8) + '01" title="gültig ab"></div>') +
-          schritt(5, 'DATEV-Vorlage & Zielordner <span style="font-weight:400;color:var(--muted)">(auch später möglich)</span>',
+          schritt(5, 'Lohnzeitraum',
+            '<div style="display:flex;align-items:center;gap:8px;font-size:13px">beginnt am Tag' +
+            '<input id="_azE_ls" type="number" min="1" max="28" step="1" style="' + feld + ';width:70px" value="' + c.lohnStart + '">' +
+            '<span id="_azE_lsb" style="color:var(--muted);font-size:12px">' + azLohnBeispiel(c.lohnStart) + '</span></div>' +
+            '<div style="font-size:11px;color:var(--muted);margin-top:4px">Welche Tage dein Arbeitgeber mit einem Monatslohn bezahlt. 1 = Kalendermonat.</div>') +
+          schritt(6, 'DATEV-Vorlage & Zielordner <span style="font-weight:400;color:var(--muted)">(auch später möglich)</span>',
             '<div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn btn-ghost btn-sm" data-az="vorlage">📄 Vorlage wählen</button>' +
             '<button class="btn btn-ghost btn-sm" data-az="ordner">📂 Ordner wählen</button></div>' +
             '<div id="_azE_pf" style="font-size:11px;color:var(--muted);margin-top:6px;word-break:break-all"></div>') +
@@ -12413,6 +12446,11 @@ function azEinfuehrung() {
       const r = window.EA && window.EA.selectFolder ? await window.EA.selectFolder('Zielordner für die Arbeitszeit-Listen wählen') : null;
       if (r && r.path) { ordner = r.path; pfade(); }
     });
+    const lsWert = () => { const n = parseInt(q('#_azE_ls').value, 10); return n >= 1 && n <= 28 ? n : null; };
+    q('#_azE_ls').addEventListener('input', () => {
+      const n = lsWert();
+      q('#_azE_lsb').textContent = n ? azLohnBeispiel(n) : 'bitte 1–28';
+    });
     const fertig = () => { document.removeEventListener('keydown', kh); overlay.remove(); resolve(); };
     function kh(e) { if (e.key === 'Escape') fertig(); }
     document.addEventListener('keydown', kh);
@@ -12421,7 +12459,9 @@ function azEinfuehrung() {
       const to = q('#_azE_to').value.trim(), cc = q('#_azE_cc').value.trim();
       if (!to || !azEmailsOk(to)) { showToast('Bitte eine gültige Empfänger-Adresse eingeben', 'error'); return; }
       if (!azEmailsOk(cc)) { showToast('Ungültige CC-Adresse', 'error'); return; }
+      if (!lsWert()) { showToast('Lohnzeitraum: bitte einen Tag zwischen 1 und 28 eingeben', 'error'); return; }
       c.empfaenger = to; c.cc = cc;
+      c.lohnStart = lsWert();
       c.betreff = q('#_azE_sub').value; c.text = q('#_azE_txt').value;
       c.vorlage = vorlage; c.ordner = ordner;
       const n = parseFloat(String(q('#_azE_lohn').value).replace(',', '.'));
@@ -12492,7 +12532,7 @@ function arbeitszeit() {
     if (!trenner && azLohnMonat(z.datum) !== ym) {
       trenner = true;
       vorspann = '<tr><td colspan="7" style="font-size:11px;color:var(--muted);border-top:2px dashed var(--border);padding-top:6px">' +
-        'ab ' + AZ_LOHN_STICHTAG + '. → zählt zum Lohn ' + azMonatName(azLohnMonat(z.datum)) + '</td></tr>';
+        'ab ' + azLohnStart() + '. → zählt zum Lohn ' + azMonatName(azLohnMonat(z.datum)) + '</td></tr>';
     }
     const e = z.eintragId != null ? azListe().find(x => String(x.id) === String(z.eintragId)) : null;
     const wt = AZ_WOCHENTAGE[azWochentag(z.datum)].slice(0, 2);
@@ -12557,7 +12597,9 @@ function arbeitszeit() {
         '<label class="field" style="grid-column:1/-1">Betreff<input type="text" value="' + escapeHtml(c.betreff) + '" onchange="azCfgSetzen(\'betreff\',this.value)"></label>' +
         '<label class="field" style="grid-column:1/-1">Mailtext<textarea rows="6" style="font-family:inherit" onchange="azCfgSetzen(\'text\',this.value)">' + escapeHtml(c.text) + '</textarea>' +
           '<span style="font-size:11px;color:var(--muted)">Platzhalter: {zeitraum}, {name}, {stunden}, {dateien} · <a href="#" onclick="azCfgSetzen(\'text\',AZ_STANDARD_TEXT);return false">Vorlage wiederherstellen</a></span></label>' +
-        '<label class="field">Stichtag<select onchange="azCfgSetzen(\'stichtag\',this.value)">' +
+        '<label class="field">Lohnzeitraum beginnt am Tag<input type="number" min="1" max="28" step="1" value="' + c.lohnStart + '" onchange="azCfgSetzen(\'lohnStart\',this.value)">' +
+          '<span style="font-size:11px;color:var(--muted)">' + azLohnBeispiel(c.lohnStart) + ' · 1 = Kalendermonat</span></label>' +
+        '<label class="field">Versand-Stichtag<select onchange="azCfgSetzen(\'stichtag\',this.value)">' +
           '<option value="20"' + (c.stichtag === '20' ? ' selected' : '') + '>am 20. des Monats</option>' +
           '<option value="sonntag"' + (c.stichtag === 'sonntag' ? ' selected' : '') + '>Sonntag nach dem letzten Samstag vor dem 20.</option>' +
         '</select></label>' +
