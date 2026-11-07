@@ -255,6 +255,9 @@ async function checkGeldEingang() {
 // Format je Eintrag: { v: 'Version', date: 'YYYY-MM-DD', changes: ['...','...'] }
 // Änderungen dürfen mit **Fett** Markierung versehen werden.
 const CHANGELOG = [
+  { v: '1.0.65', date: '2026-11-07', changes: [
+    '**Arbeitszeit: Betreff & Mailtext passen sich jeden Monat an – mit Vorschau.** Neue Platzhalter **{monat}** (laufender Monat, z.B. „November 2026") und **{vormonat}** zusätzlich zu {zeitraum} („Oktober und November 2026"), {name}, {stunden} und {dateien}. Sie werden bei jedem Versand automatisch ersetzt. In den Einstellungen der Arbeitszeit-Seite zeigt eine **Vorschau**, wie Betreff und Text beim nächsten Versand aussehen.',
+  ]},
   { v: '1.0.64', date: '2026-11-07', changes: [
     '**Arbeitszeit: Lohnzeitraum einstellbar.** Ab welchem Tag ein Lohnzeitraum beginnt, legst du jetzt selbst fest – in der Einführung beim ersten Aktivieren und jederzeit in den Einstellungen der Arbeitszeit-Seite. Standard bleibt der **20.** (Lohn November = 20.10.–19.11.); mit **1** gilt der normale Kalendermonat. Eine Vorschau zeigt sofort, welche Tage ein Monatslohn umfasst, und die Nebenjob-Einnahmen werden direkt neu berechnet.',
   ]},
@@ -12139,16 +12142,26 @@ function azZeitraum(monate) {
 function azPlatzhalter(text, werte) {
   return String(text || '').replace(/\{(\w+)\}/g, (m, k) => werte[k] != null ? werte[k] : m);
 }
-function azMailtoUrl(monate, dateien) {
-  const c = azCfg();
+// Platzhalter-Werte für Betreff/Text – werden bei jedem Versand neu aus den
+// exportierten Monaten berechnet, der Text passt sich also jeden Monat an.
+// {monat} = laufender (letzter) Monat, {vormonat} = Monat davor.
+function azMailWerte(monate, dateien) {
   const zeilen = azDokuZeilen(azListe());
   const minuten = monate.reduce((s, ym) => s + azMonatsSumme(ym, zeilen).minuten, 0);
-  const werte = {
+  const letzter = monate[monate.length - 1];
+  return {
     zeitraum: azZeitraum(monate),
+    monat: azMonatName(letzter),
+    vormonat: azMonatName(azVormonat(letzter)),
     name: (state.meta && state.meta.userName) || '',
     stunden: azDauerText(minuten),
     dateien: (dateien || []).map(d => d.name).join('\n'),
   };
+}
+const AZ_PLATZHALTER_INFO = 'Platzhalter: {zeitraum} (z.B. „Oktober und November 2026"), {monat}, {vormonat}, {name}, {stunden}, {dateien}';
+function azMailtoUrl(monate, dateien) {
+  const c = azCfg();
+  const werte = azMailWerte(monate, dateien);
   const enc = s => encodeURIComponent(String(s).replace(/\r?\n/g, '\r\n'));
   const adr = s => String(s || '').split(/[;,\s]+/).filter(Boolean).join(',');
   const teile = [];
@@ -12408,7 +12421,7 @@ function azEinfuehrung() {
             '<label style="font-size:12px;display:inline-flex;align-items:center;gap:5px"><input type="radio" name="_azE_tm" value="eigen" style="width:auto;margin:0"> Eigener Text</label>' +
             '<input id="_azE_sub" type="text" style="' + feld + ';margin-top:8px" value="' + escapeHtml(c.betreff) + '" readonly>' +
             '<textarea id="_azE_txt" rows="6" style="' + feld + ';margin-top:6px;font-family:inherit" readonly>' + escapeHtml(c.text) + '</textarea>' +
-            '<div style="font-size:11px;color:var(--muted);margin-top:4px">Platzhalter: {zeitraum}, {name}, {stunden}, {dateien}</div>') +
+            '<div style="font-size:11px;color:var(--muted);margin-top:4px">' + escapeHtml(AZ_PLATZHALTER_INFO) + ' – sie werden bei jedem Versand automatisch ersetzt.</div>') +
           schritt(4, 'Stundenlohn <span style="font-weight:400;color:var(--muted)">(netto)</span>',
             '<div style="display:flex;gap:8px"><input id="_azE_lohn" type="number" step="0.01" min="0" style="' + feld + '" placeholder="z. B. 13,90" value="' + (lohn || '') + '">' +
             '<input id="_azE_ab" type="date" style="' + feld + '" value="' + azHeute().slice(0, 8) + '01" title="gültig ab"></div>') +
@@ -12504,6 +12517,11 @@ function arbeitszeit() {
   if (!c.vorlage) fehlt.push('DATEV-Vorlage');
   if (!c.ordner) fehlt.push('Zielordner');
   const stichtag = azStichtag(heute.slice(0, 7));
+  // Vorschau für den nächsten Versand (nach dem Stichtag: Folgemonat)
+  const vsYm = heute > stichtag ? azDatumPlus(heute.slice(0, 7) + '-28', 7).slice(0, 7) : heute.slice(0, 7);
+  const vsTag = vsYm === heute.slice(0, 7) ? stichtag : azStichtag(vsYm);
+  const vorschauMonate = [azVormonat(vsYm), vsYm];
+  const vorschauWerte = azMailWerte(vorschauMonate, vorschauMonate.map(m => ({ name: 'Arbeitszeitdokumentation ' + azMonatName(m) + '.xlsx' })));
   const datumDe = iso => iso.split('-').reverse().join('.');
 
   const formWerte = edit || { datum: heute.slice(0, 7) === ym ? heute : ym + '-01', von: '', bis: '', kuerzel: '', notiz: '' };
@@ -12596,7 +12614,12 @@ function arbeitszeit() {
         '<label class="field">CC (optional)<input type="text" value="' + escapeHtml(c.cc) + '" placeholder="mehrere mit Komma" onchange="azCfgSetzen(\'cc\',this.value.trim())"></label>' +
         '<label class="field" style="grid-column:1/-1">Betreff<input type="text" value="' + escapeHtml(c.betreff) + '" onchange="azCfgSetzen(\'betreff\',this.value)"></label>' +
         '<label class="field" style="grid-column:1/-1">Mailtext<textarea rows="6" style="font-family:inherit" onchange="azCfgSetzen(\'text\',this.value)">' + escapeHtml(c.text) + '</textarea>' +
-          '<span style="font-size:11px;color:var(--muted)">Platzhalter: {zeitraum}, {name}, {stunden}, {dateien} · <a href="#" onclick="azCfgSetzen(\'text\',AZ_STANDARD_TEXT);return false">Vorlage wiederherstellen</a></span></label>' +
+          '<span style="font-size:11px;color:var(--muted)">' + escapeHtml(AZ_PLATZHALTER_INFO) + ' · <a href="#" onclick="azCfgSetzen(\'text\',AZ_STANDARD_TEXT);return false">Vorlage wiederherstellen</a></span></label>' +
+        '<div style="grid-column:1/-1;background:var(--surface-2,var(--surface));border:1px dashed var(--border);border-radius:8px;padding:10px 12px;font-size:12px">' +
+          '<div style="color:var(--muted);margin-bottom:6px">👁 Vorschau für den Versand am ' + datumDe(vsTag) + ' – passt sich jeden Monat automatisch an:</div>' +
+          '<div><strong>Betreff:</strong> ' + escapeHtml(azPlatzhalter(c.betreff, vorschauWerte)) + '</div>' +
+          '<div style="white-space:pre-wrap;margin-top:6px">' + escapeHtml(azPlatzhalter(c.text, vorschauWerte)) + '</div>' +
+        '</div>' +
         '<label class="field">Lohnzeitraum beginnt am Tag<input type="number" min="1" max="28" step="1" value="' + c.lohnStart + '" onchange="azCfgSetzen(\'lohnStart\',this.value)">' +
           '<span style="font-size:11px;color:var(--muted)">' + azLohnBeispiel(c.lohnStart) + ' · 1 = Kalendermonat</span></label>' +
         '<label class="field">Versand-Stichtag<select onchange="azCfgSetzen(\'stichtag\',this.value)">' +
