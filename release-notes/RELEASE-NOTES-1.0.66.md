@@ -41,8 +41,8 @@
 
 ## ✅ Geprüft
 - `node --check` für alle geänderten Dateien, `src/check.js` – 0 Fehler
-- Einlesen der echten Listen Juni–Oktober 2026: alle fünf Dateien gelesen,
-  erneutes Ausfüllen ergibt inhaltlich identische Listen.
+- Einlesen ausgefüllter Listen (auch in Excel nachbearbeitete): erneutes
+  Ausfüllen ergibt inhaltlich identische Listen.
 - Import-Simulation (Node, 12 Prüfungen): neue Tage, identische Tage,
   Konflikt, unvollständiger Juni bleibt fest, Juli–Oktober berechnet,
   November aus 20.10.–heute, Re-Import ohne Duplikate, Fest/Berechnen

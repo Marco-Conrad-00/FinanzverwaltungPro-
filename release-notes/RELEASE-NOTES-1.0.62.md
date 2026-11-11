@@ -60,9 +60,8 @@
 ## ✅ Geprüft
 - `node --check` für `app.js`, `main.js`, `preload.js`, `arbeitszeit-xlsx.js`
 - `src/check.js` – 0 Fehler, 0 Warnungen
-- Excel (Node): Oktober 2026 mit der echten DATEV-Vorlage nachgebaut – alle
-  Zellen (Beginn, Ende, aufgezeichnet am, Bemerkung, Monat) identisch mit der
-  bisher von Hand erstellten Datei.
+- Excel (Node): eine von Hand ausgefüllte Monatsliste nachgebaut – alle Zellen
+  (Beginn, Ende, aufgezeichnet am, Bemerkung, Monat) identisch.
 - Logiktests (Node, 24 Prüfungen): 6-h-Regel (leerer Vortag 17:00–20:00,
   Anhängen 15:00–20:00, Kappung bei 20:00 mit ⚠, Monatsgrenze, Kürzel-Tag),
   Lohnhistorie (Satzwechsel im Monat), Einnahmen-Sync inkl. Rücksetzen und
