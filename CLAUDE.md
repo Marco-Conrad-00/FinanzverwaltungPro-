@@ -110,7 +110,9 @@ ersetzen, wenn die App komplett beendet ist (inkl. System-Tray).
   Kalendermonat) im Vormonat bis Vortag (`azLohnMonat`); DATEV-Listen bleiben
   je Kalendermonat.
   Excel füllt `src/arbeitszeit-xlsx.js` im Main-Process aus der vom Nutzer
-  gewählten DATEV-Vorlage (Vorlage enthält Name → nie ins Repo).
+  gewählten DATEV-Vorlage (Vorlage enthält Name → nie ins Repo); `readMonth`
+  liest ausgefüllte Listen für den Import (`azImportPlan`). Monate mit
+  `incomeByMonth[m].nebenjobFix` überspringt der Sync (fester Wert).
 - **Auto-Einträge** tragen Flags (`autoWork`, `autoAblauf`, `autoFromFixkostenId`)
   zur Nachvollziehbarkeit.
 

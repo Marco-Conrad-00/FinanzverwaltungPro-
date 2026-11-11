@@ -14,6 +14,7 @@ window.EA = {
   selectFolder:   (title) => ipcRenderer.invoke('select-folder', title),
   selectFile:     (opts)  => ipcRenderer.invoke('select-file', opts),
   arbeitszeitExport: (payload) => ipcRenderer.invoke('arbeitszeit-export', payload),
+  arbeitszeitImport: (startOrdner) => ipcRenderer.invoke('arbeitszeit-import', startOrdner),
   pathExists:     (p) => ipcRenderer.invoke('path-exists', p),
   openFolder:     (p) => ipcRenderer.invoke('open-folder', p),
   writeBackup:    (path, content) => ipcRenderer.invoke('write-backup', path, content),

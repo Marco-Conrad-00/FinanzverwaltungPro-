@@ -679,6 +679,20 @@ ipcMain.handle('arbeitszeit-export', async (_e, payload) => {
   } catch (err) { return { ok: false, error: err.message }; }
 });
 
+// Arbeitszeit-Import: ausgefüllte DATEV-Listen wählen und einlesen.
+ipcMain.handle('arbeitszeit-import', async (_e, startOrdner) => {
+  try {
+    const r = await dialog.showOpenDialog(win, {
+      title: 'Ausgefüllte Arbeitszeitlisten wählen (mehrere möglich)',
+      defaultPath: startOrdner && fs.existsSync(startOrdner) ? startOrdner : undefined,
+      filters: [{ name: 'Excel', extensions: ['xlsx'] }],
+      properties: ['openFile', 'multiSelections'],
+    });
+    if (r.canceled || !r.filePaths.length) return { ok: true, monate: [] };
+    return { ok: true, monate: await require('./arbeitszeit-xlsx').readDateien(r.filePaths) };
+  } catch (err) { return { ok: false, error: err.message }; }
+});
+
 ipcMain.handle('path-exists', (_e, p) => {
   try { return !!p && fs.existsSync(p); } catch { return false; }
 });

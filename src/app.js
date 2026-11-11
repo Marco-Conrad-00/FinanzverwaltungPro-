@@ -255,6 +255,11 @@ async function checkGeldEingang() {
 // Format je Eintrag: { v: 'Version', date: 'YYYY-MM-DD', changes: ['...','...'] }
 // Änderungen dürfen mit **Fett** Markierung versehen werden.
 const CHANGELOG = [
+  { v: '1.0.66', date: '2026-11-11', changes: [
+    '**Arbeitszeit: frühere Monate aus den Excel-Listen übernehmen.** Neuer Knopf „📥 Frühere Listen importieren" (Arbeitszeit → Export & Mail): Du wählst eine oder mehrere bereits ausgefüllte DATEV-Listen, und die App übernimmt die Tage so, wie sie dokumentiert sind. Bereits erfasste Tage bleiben unverändert; Abweichungen werden angezeigt.',
+    '**Vergleich vor dem Übernehmen.** Je Lohnmonat zeigt die Vorschau Stunden, den aus Stunden × Stundenlohn berechneten Betrag, den **bisherigen Nebenjob-Wert** in der App, die Differenz und den daraus folgenden Stundenlohn. Per Haken entscheidest du, ob der Monat künftig aus den Stunden berechnet wird oder seinen bisherigen Wert fest behält (Standard: fest bei nur teilweise abgedeckten Zeiträumen). Der laufende Zeitraum (z.B. 20.10.–heute) wird sofort berechnet.',
+    '**Fester Nebenjob-Wert je Monat.** Unter Einnahmen kannst du einen Monat mit „festen Wert eintragen" von der Berechnung ausnehmen und mit „aus Stunden berechnen" wieder zurückholen.',
+  ]},
   { v: '1.0.65', date: '2026-11-07', changes: [
     '**Arbeitszeit: Betreff & Mailtext passen sich jeden Monat an – mit Vorschau.** Neue Platzhalter **{monat}** (laufender Monat, z.B. „November 2026") und **{vormonat}** zusätzlich zu {zeitraum} („Oktober und November 2026"), {name}, {stunden} und {dateien}. Sie werden bei jedem Versand automatisch ersetzt. In den Einstellungen der Arbeitszeit-Seite zeigt eine **Vorschau**, wie Betreff und Text beim nächsten Versand aussehen.',
   ]},
@@ -4141,11 +4146,12 @@ function einnahmen() {
         ${azAktiv() && inc.nebenjobAusAz
           ? `<label class="field">Nebenjob ${monthLabel(currentMonth)}
                <input type="number" value="${(+inc.nebenjob||0).toFixed(2)}" readonly title="Wird aus der Arbeitszeit berechnet" /> ${currencySymbol()}
-               <span style="font-size:11px;color:var(--muted)">⏱️ aus der Arbeitszeit (${azDauerText(azLohnSumme(currentMonth).minuten)}, ${azLohnZeitraum(currentMonth).von.slice(5).split('-').reverse().join('.')}.–${azLohnZeitraum(currentMonth).bis.slice(5).split('-').reverse().join('.')}.) ·<a href="#" onclick="navigate('arbeitszeit');return false">öffnen</a></span>
+               <span style="font-size:11px;color:var(--muted)">⏱️ aus der Arbeitszeit (${azDauerText(azLohnSumme(currentMonth).minuten)}, ${azLohnZeitraum(currentMonth).von.slice(5).split('-').reverse().join('.')}.–${azLohnZeitraum(currentMonth).bis.slice(5).split('-').reverse().join('.')}.) ·<a href="#" onclick="navigate('arbeitszeit');return false">öffnen</a> · <a href="#" onclick="azFixSetzen('${currentMonth}');return false">festen Wert eintragen</a></span>
              </label>`
           : `<label class="field">Nebenjob ${monthLabel(currentMonth)}
                <input type="number" value="${(+inc.nebenjob||0).toFixed(2)}" step="0.01"
                  onchange="updateFixedIncome('${currentMonth}','nebenjob',+this.value)" /> ${currencySymbol()}
+               ${azAktiv() && inc.nebenjobFix ? `<span style="font-size:11px;color:var(--muted)">📌 fester Wert – Arbeitszeit wird für diesen Monat ignoriert · <a href="#" onclick="azFixAufheben('${currentMonth}');return false">aus Stunden berechnen</a></span>` : ''}
              </label>`}
         <label class="field">Gehalt → Konto (ganzes Jahr ${getSelectedYear()})
           <select onchange="updateIncomeKonto('gehalt',this.value)" ${lockAttr()}>
@@ -12091,7 +12097,26 @@ function azLohnSumme(ym, zeilen) {
   return azSumme((zeilen || azDokuZeilen(azListe())).filter(z => azLohnMonat(z.datum) === ym));
 }
 // Lohnsumme → incomeByMonth[m].nebenjob aller (nicht archivierten) Jahre.
-// Monate ohne Arbeitszeit im Lohnzeitraum behalten ihren manuell erfassten Wert.
+// Monate ohne Arbeitszeit im Lohnzeitraum behalten ihren manuell erfassten Wert,
+// ebenso Monate mit Flag nebenjobFix (fester Wert, Sync überspringt sie).
+function azIncome(m) {
+  const yd = state.years && state.years[m.slice(0, 4)];
+  return yd && yd.incomeByMonth ? yd.incomeByMonth[m] || null : null;
+}
+function azFixSetzen(m) {
+  const inc = azIncome(m);
+  if (!inc || !requireUnlocked()) return;
+  inc.nebenjobFix = true; delete inc.nebenjobAusAz;
+  saveData(); renderPage();
+  showToast('Nebenjob ' + monthLabel(m) + ': fester Wert – wird nicht mehr aus der Arbeitszeit berechnet', 'info');
+}
+function azFixAufheben(m) {
+  const inc = azIncome(m);
+  if (!inc || !requireUnlocked()) return;
+  delete inc.nebenjobFix;
+  azSyncEinnahmen(); saveData(); renderPage();
+  showToast('Nebenjob ' + monthLabel(m) + ': wird wieder aus der Arbeitszeit berechnet', 'info');
+}
 function azSyncEinnahmen() {
   if (!azAktiv() || !state.years) return false;
   const zeilen = azDokuZeilen(azListe());
@@ -12102,7 +12127,7 @@ function azSyncEinnahmen() {
     if (!yd || yd.status === 'closed' || !yd.incomeByMonth) return;
     Object.keys(yd.incomeByMonth).forEach(m => {
       const inc = yd.incomeByMonth[m];
-      if (!inc) return;
+      if (!inc || inc.nebenjobFix) return;   // fester Wert (z.B. unvollständiger Zeitraum beim Import)
       if (monate.has(m)) {
         const b = azLohnSumme(m, zeilen).betrag;
         if (inc.nebenjob !== b || !inc.nebenjobAusAz) { inc.nebenjob = b; inc.nebenjobAusAz = true; geaendert = true; }
@@ -12279,6 +12304,133 @@ async function azSpeichern() {
   renderPage();
   const d = azDauer(werte);
   showToast(alt ? 'Eintrag aktualisiert' : 'Arbeitstag gespeichert' + (d > AZ_MAX_MIN ? ' – ' + azDauerText(d - AZ_MAX_MIN) + ' gehen auf den Vortag' : ''));
+}
+// ── Import früherer Monate aus ausgefüllten DATEV-Listen ───────────────────
+// Plan (ohne Seiteneffekte): neue Einträge, Konflikte und je Lohnmonat der
+// Vergleich „aus Stunden berechnet" ↔ „bisher in der App".
+function azImportPlan(monate, liste) {
+  const bestehend = {};
+  (liste || []).forEach(e => { bestehend[e.datum] = e; });
+  const neu = [], konflikte = [], dateien = [];
+  let gleich = 0;
+  (monate || []).forEach(mo => {
+    if (mo.fehler) { dateien.push({ datei: mo.datei, fehler: mo.fehler }); return; }
+    let anz = 0, min = 0;
+    mo.zeilen.forEach(z => {
+      const e = { datum: z.datum, von: z.beginn, bis: z.ende, kuerzel: z.kuerzel || '', notiz: z.bemerkung || '' };
+      min += azDauer(e);
+      const alt = bestehend[z.datum];
+      if (alt) {
+        if (alt.von === e.von && alt.bis === e.bis && (alt.kuerzel || '') === e.kuerzel) gleich++;
+        else konflikte.push({ datum: z.datum, app: alt.von ? alt.von + '–' + alt.bis : alt.kuerzel, excel: e.von ? e.von + '–' + e.bis : e.kuerzel });
+        return;
+      }
+      bestehend[z.datum] = e;
+      neu.push(Object.assign({ id: uid(), erfasstAm: z.aufgezeichnet || z.datum, importiert: true }, e));
+      anz++;
+    });
+    dateien.push({ datei: mo.datei, ym: mo.jahr + '-' + String(mo.monat).padStart(2, '0'), tage: mo.zeilen.length, neu: anz, minuten: min });
+  });
+  const zeilen = azDokuZeilen((liste || []).concat(neu));
+  const abgedeckt = new Set(dateien.filter(d => d.ym).map(d => d.ym).concat((liste || []).map(e => e.datum.slice(0, 7))));
+  const heute = azHeute();
+  const lohnMonate = [...new Set(azDokuZeilen(neu).map(z => azLohnMonat(z.datum)))].sort().map(m => {
+    const s = azLohnSumme(m, zeilen);
+    const zr = azLohnZeitraum(m);
+    const inc = azIncome(m);
+    const vollstaendig = abgedeckt.has(zr.von.slice(0, 7)) && abgedeckt.has(zr.bis.slice(0, 7));
+    const laufend = heute <= zr.bis;
+    return { m, von: zr.von, bis: zr.bis, minuten: s.minuten, betrag: s.betrag,
+      bisher: inc ? (+inc.nebenjob || 0) : null, bisherAusAz: !!(inc && inc.nebenjobAusAz), jahrFehlt: !inc,
+      vollstaendig, laufend, ohneLohn: azLohnSatz(zr.von) === 0 || azLohnSatz(zr.bis) === 0,
+      uebernehmen: vollstaendig || laufend };
+  });
+  return { neu, konflikte, gleich, dateien, lohnMonate };
+}
+async function azImportStarten() {
+  if (!window.EA || !window.EA.arbeitszeitImport) { showToast('Import ist nur in der Desktop-App verfügbar', 'error'); return; }
+  const r = await window.EA.arbeitszeitImport(azCfg().ordner);
+  if (!r || !r.ok) { await uiAlert({ title: 'Import fehlgeschlagen', icon: '⚠', message: escapeHtml((r && r.error) || 'Unbekannter Fehler') }); return; }
+  if (!r.monate.length) return;
+  azImportVorschau(azImportPlan(r.monate, azListe()));
+}
+function azImportVorschau(plan) {
+  const datumDe = iso => iso.split('-').reverse().join('.');
+  const kurz = iso => iso.slice(8) + '.' + iso.slice(5, 7) + '.';
+  const dateiRows = plan.dateien.map(d => d.fehler
+    ? '<tr><td>' + escapeHtml(d.datei) + '</td><td colspan="3" style="color:var(--red)">⚠ ' + escapeHtml(d.fehler) + '</td></tr>'
+    : '<tr><td>' + escapeHtml(d.datei) + '</td><td>' + d.tage + '</td><td>' + azDauerText(d.minuten) + '</td><td>' + d.neu + ' neu</td></tr>').join('');
+  const lohnRows = plan.lohnMonate.map((l, i) => {
+    const diff = l.bisher != null ? Math.round((l.betrag - l.bisher) * 100) / 100 : null;
+    const satzBisher = l.bisher && l.minuten ? l.bisher / (l.minuten / 60) : null;
+    const hinweise = [];
+    if (!l.vollstaendig && !l.laufend) hinweise.push('Zeitraum nur teilweise in den Listen');
+    if (l.laufend) hinweise.push('laufender Zeitraum – wächst mit jedem Tag');
+    if (l.ohneLohn) hinweise.push('kein Stundenlohn für diesen Zeitraum hinterlegt');
+    if (l.jahrFehlt) hinweise.push('Jahr ' + l.m.slice(0, 4) + ' ist in der App nicht angelegt');
+    return '<tr>' +
+      '<td><strong>' + monthLabel(l.m) + '</strong><div style="font-size:11px;color:var(--muted)">' + kurz(l.von) + '–' + kurz(l.bis) + '</div></td>' +
+      '<td>' + azDauerOderStrich(l.minuten) + '</td>' +
+      '<td class="amount">' + fmtEur(l.betrag) + '</td>' +
+      '<td class="amount">' + (l.bisher != null ? fmtEur(l.bisher) + (l.bisherAusAz ? ' <span title="bereits aus der Arbeitszeit">⏱️</span>' : '') : '–') +
+        (satzBisher ? '<div style="font-size:11px;color:var(--muted)">≙ ' + fmtEur(satzBisher) + ' / h</div>' : '') + '</td>' +
+      '<td class="amount" style="color:' + (diff == null || Math.abs(diff) < 0.01 ? 'var(--muted)' : (diff > 0 ? 'var(--green)' : 'var(--red)')) + '">' +
+        (diff == null ? '' : (diff > 0 ? '+' : '') + fmtEur(diff)) + '</td>' +
+      '<td style="text-align:center"><input type="checkbox" data-az-lm="' + i + '" style="width:16px;height:16px"' + (l.uebernehmen ? ' checked' : '') + (l.jahrFehlt ? ' disabled' : '') + '></td>' +
+    '</tr>' + (hinweise.length ? '<tr><td colspan="6" style="font-size:11px;color:#a86b00;padding-top:0">' + hinweise.join(' · ') + '</td></tr>' : '');
+  }).join('');
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.innerHTML =
+    '<div class="modal" style="width:min(820px,95vw);max-width:820px;padding:0;max-height:90vh;overflow:auto" onclick="event.stopPropagation()">' +
+      '<div style="padding:18px 22px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:12px">' +
+        '<div style="font-size:28px;line-height:1">📥</div>' +
+        '<div><h3 style="margin:0;font-size:16px;font-weight:600">Frühere Arbeitszeitlisten importieren</h3>' +
+        '<div style="font-size:12px;color:var(--muted)">Die Tage werden so übernommen, wie sie in den Listen dokumentiert sind. Bereits erfasste Tage bleiben unverändert.</div></div>' +
+      '</div>' +
+      '<div style="padding:16px 22px">' +
+        '<div class="table-wrap"><table><thead><tr><th>Datei</th><th>Tage</th><th>Stunden</th><th>Übernahme</th></tr></thead><tbody>' + dateiRows + '</tbody></table></div>' +
+        '<div style="font-size:12px;color:var(--muted);margin:8px 0 16px">' + plan.neu.length + (plan.neu.length === 1 ? ' Tag wird' : ' Tage werden') + ' neu übernommen' +
+          (plan.gleich ? ', ' + plan.gleich + (plan.gleich === 1 ? ' ist' : ' sind') + ' schon identisch erfasst' : '') +
+          (plan.konflikte.length ? '. <span style="color:#a86b00">' + (plan.konflikte.length === 1 ? '1 Tag weicht' : plan.konflikte.length + ' Tage weichen') + ' von der App ab und ' + (plan.konflikte.length === 1 ? 'bleibt' : 'bleiben') + ' wie in der App: ' +
+            plan.konflikte.map(k => datumDe(k.datum).slice(0, 6) + ' (App ' + escapeHtml(k.app) + ', Liste ' + escapeHtml(k.excel) + ')').join(', ') + '</span>' : '') + '.</div>' +
+        (plan.lohnMonate.length
+          ? '<div style="font-weight:600;font-size:13px;margin-bottom:6px">Vergleich Nebenjob-Lohn je Monat</div>' +
+            '<div class="table-wrap"><table><thead><tr><th>Lohn</th><th>Stunden</th><th style="text-align:right">Aus Stunden</th><th style="text-align:right">Bisher in der App</th><th style="text-align:right">Differenz</th><th title="Nebenjob-Wert künftig aus den Stunden berechnen">Berechnen</th></tr></thead><tbody>' +
+              lohnRows + '</tbody></table></div>' +
+            '<div style="font-size:11px;color:var(--muted);margin-top:6px">✔ = der Nebenjob-Wert des Monats wird aus den Stunden × Stundenlohn berechnet. Ohne Haken bleibt der bisherige Wert fest stehen (änderbar unter Einnahmen). Stimmt der Stundenlohn früherer Monate nicht, trag ihn unter „Stundenlohn" mit „gültig ab" nach – berechnete Monate passen sich automatisch an.</div>'
+          : '') +
+      '</div>' +
+      '<div style="padding:14px 22px;border-top:1px solid var(--border);display:flex;justify-content:flex-end;gap:8px;background:var(--surface);border-radius:0 0 14px 14px">' +
+        '<button class="btn btn-ghost" data-az="abbrechen">Abbrechen</button>' +
+        '<button class="btn btn-primary" data-az="ok"' + (plan.neu.length ? '' : ' disabled') + '>' + plan.neu.length + ' Tage importieren</button>' +
+      '</div>' +
+    '</div>';
+  document.body.appendChild(overlay);
+  const zu = () => { document.removeEventListener('keydown', kh); overlay.remove(); };
+  function kh(e) { if (e.key === 'Escape') zu(); }
+  document.addEventListener('keydown', kh);
+  overlay.querySelector('[data-az="abbrechen"]').addEventListener('click', zu);
+  overlay.querySelector('[data-az="ok"]').addEventListener('click', () => {
+    overlay.querySelectorAll('[data-az-lm]').forEach(cb => { plan.lohnMonate[+cb.dataset.azLm].uebernehmen = cb.checked; });
+    zu();
+    azImportAnwenden(plan);
+  });
+}
+function azDauerOderStrich(min) { return min ? azDauerText(min) : '–'; }
+function azImportAnwenden(plan) {
+  azListe().push(...plan.neu);
+  plan.lohnMonate.forEach(l => {
+    const inc = azIncome(l.m);
+    if (!inc) return;
+    if (l.uebernehmen) delete inc.nebenjobFix;
+    else { inc.nebenjobFix = true; delete inc.nebenjobAusAz; }
+  });
+  azSyncEinnahmen();
+  saveData();
+  if (typeof updateBadges === 'function') updateBadges();
+  renderPage();
+  showToast(plan.neu.length + ' Arbeitstage importiert');
 }
 function azBearbeiten(id) { _azEditId = id; renderPage(); }
 function azAbbrechen() { _azEditId = null; renderPage(); }
@@ -12601,6 +12753,7 @@ function arbeitszeit() {
         '<button class="btn btn-primary btn-sm" onclick="azVorbereiten()">📤 Excel + Mail jetzt vorbereiten</button>' +
         '<button class="btn btn-ghost btn-sm" onclick="azMonatExportieren()">📄 Nur ' + azMonatName(ym) + ' als Excel</button>' +
         (c.ordner ? '<button class="btn btn-ghost btn-sm" onclick="azOrdnerOeffnen()">📂 Ordner öffnen</button>' : '') +
+        '<button class="btn btn-ghost btn-sm" onclick="azImportStarten()" title="Bereits verschickte Listen einlesen">📥 Frühere Listen importieren</button>' +
       '</div>' +
       '<div style="font-size:11px;color:var(--muted);margin-top:8px">„Vorbereiten" erstellt je eine DATEV-Datei für ' + azMonatName(azVormonat(heute.slice(0, 7))) + ' und ' + azMonatName(heute.slice(0, 7)) +
         ', öffnet den Ordner und einen Mail-Entwurf. Die Dateien ziehst du selbst in die Mail – die App sendet nichts.</div>' +
@@ -12683,6 +12836,9 @@ window.azVorbereiten      = azVorbereiten;
 window.azMonatExportieren = azMonatExportieren;
 window.azOrdnerOeffnen    = azOrdnerOeffnen;
 window.azEinfuehrungZeigen = azEinfuehrungZeigen;
+window.azImportStarten    = azImportStarten;
+window.azFixSetzen        = azFixSetzen;
+window.azFixAufheben      = azFixAufheben;
 window.AZ_STANDARD_TEXT   = AZ_STANDARD_TEXT;
 
 (async () => {
