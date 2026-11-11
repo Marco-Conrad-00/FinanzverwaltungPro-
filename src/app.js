@@ -255,6 +255,10 @@ async function checkGeldEingang() {
 // Format je Eintrag: { v: 'Version', date: 'YYYY-MM-DD', changes: ['...','...'] }
 // Änderungen dürfen mit **Fett** Markierung versehen werden.
 const CHANGELOG = [
+  { v: '1.0.67', date: '2026-11-11', changes: [
+    '**Arbeitszeit: Sonntags- und Feiertagszuschlag.** Unter „Stundenlohn" legst du einen Zuschlag in % für Sonntage und für gesetzliche Feiertage (Baden-Württemberg) fest – z.B. 50 % für den verkaufsoffenen Sonntag. Die betroffenen Tage zeigen den Zuschlag in der Tabelle, Lohn und Nebenjob-Einnahme rechnen ihn automatisch ein. Fällt Sonntag und Feiertag zusammen, gilt der höhere Satz.',
+    '**Import sicherer.** Beim Import früherer Listen werden Monate, für die noch kein Stundenlohn hinterlegt ist, nicht mehr vorab zum Berechnen angehakt – so kann ein bisheriger Nebenjob-Wert nicht versehentlich durch 0 € ersetzt werden. Wer es trotzdem anhakt, bekommt vorher eine Rückfrage.',
+  ]},
   { v: '1.0.66', date: '2026-11-11', changes: [
     '**Arbeitszeit: frühere Monate aus den Excel-Listen übernehmen.** Neuer Knopf „📥 Frühere Listen importieren" (Arbeitszeit → Export & Mail): Du wählst eine oder mehrere bereits ausgefüllte DATEV-Listen, und die App übernimmt die Tage so, wie sie dokumentiert sind. Bereits erfasste Tage bleiben unverändert; Abweichungen werden angezeigt.',
     '**Vergleich vor dem Übernehmen.** Je Lohnmonat zeigt die Vorschau Stunden, den aus Stunden × Stundenlohn berechneten Betrag, den **bisherigen Nebenjob-Wert** in der App, die Differenz und den daraus folgenden Stundenlohn. Per Haken entscheidest du, ob der Monat künftig aus den Stunden berechnet wird oder seinen bisherigen Wert fest behält (Standard: fest bei nur teilweise abgedeckten Zeiträumen). Der laufende Zeitraum (z.B. 20.10.–heute) wird sofort berechnet.',
@@ -11973,6 +11977,10 @@ function azCfg() {
   if (c.autoExport === undefined) c.autoExport = true;
   const ls = parseInt(c.lohnStart, 10);
   c.lohnStart = ls >= 1 && ls <= 28 ? ls : 20;   // max. 28, damit jeder Monat den Tag hat
+  ['zuschlagSonntag', 'zuschlagFeiertag'].forEach(k => {
+    const n = parseFloat(c[k]);
+    c[k] = n >= 0 && n <= 300 ? n : 0;            // Prozent auf den Stundenlohn
+  });
   return c;
 }
 
@@ -12059,9 +12067,20 @@ function azLohnSatz(datum) {
 function azMonatsZeilen(ym, zeilen) {
   return (zeilen || azDokuZeilen(azListe())).filter(z => z.datum.slice(0, 7) === ym);
 }
+// Zuschlag in % für einen Tag: Sonntag bzw. gesetzlicher Feiertag (BW, Helfer
+// aus den Spesen). Fällt beides zusammen, gilt der höhere Satz (nicht addiert).
+// Maßgeblich ist der dokumentierte Tag (wie in der DATEV-Liste).
+function azZuschlagProzent(datum) {
+  const c = azCfg();
+  let p = 0;
+  if (azWochentag(datum) === 0) p = Math.max(p, c.zuschlagSonntag);
+  if (c.zuschlagFeiertag && bwFeiertageSet(+datum.slice(0, 4)).has(datum)) p = Math.max(p, c.zuschlagFeiertag);
+  return p;
+}
+function azZeilenBetrag(z) { return z.minuten / 60 * azLohnSatz(z.datum) * (1 + azZuschlagProzent(z.datum) / 100); }
 function azSumme(zeilen) {
   let minuten = 0, betrag = 0;
-  zeilen.forEach(z => { minuten += z.minuten; betrag += z.minuten / 60 * azLohnSatz(z.datum); });
+  zeilen.forEach(z => { minuten += z.minuten; betrag += azZeilenBetrag(z); });
   return { minuten, betrag: Math.round(betrag * 100) / 100 };
 }
 // Kalendermonat (DATEV-Liste, Mail)
@@ -12340,10 +12359,13 @@ function azImportPlan(monate, liste) {
     const inc = azIncome(m);
     const vollstaendig = abgedeckt.has(zr.von.slice(0, 7)) && abgedeckt.has(zr.bis.slice(0, 7));
     const laufend = heute <= zr.bis;
+    const ohneLohn = azLohnSatz(zr.von) === 0 || azLohnSatz(zr.bis) === 0;
+    // Nie vorab anhaken, wenn ein Stundenlohn fehlt – sonst würde ein bisheriger
+    // Wert durch 0 € bzw. einen Teilbetrag ersetzt.
     return { m, von: zr.von, bis: zr.bis, minuten: s.minuten, betrag: s.betrag,
       bisher: inc ? (+inc.nebenjob || 0) : null, bisherAusAz: !!(inc && inc.nebenjobAusAz), jahrFehlt: !inc,
-      vollstaendig, laufend, ohneLohn: azLohnSatz(zr.von) === 0 || azLohnSatz(zr.bis) === 0,
-      uebernehmen: vollstaendig || laufend };
+      vollstaendig, laufend, ohneLohn,
+      uebernehmen: (vollstaendig || laufend) && !ohneLohn };
   });
   return { neu, konflikte, gleich, dateien, lohnMonate };
 }
@@ -12411,8 +12433,17 @@ function azImportVorschau(plan) {
   function kh(e) { if (e.key === 'Escape') zu(); }
   document.addEventListener('keydown', kh);
   overlay.querySelector('[data-az="abbrechen"]').addEventListener('click', zu);
-  overlay.querySelector('[data-az="ok"]').addEventListener('click', () => {
+  overlay.querySelector('[data-az="ok"]').addEventListener('click', async () => {
     overlay.querySelectorAll('[data-az-lm]').forEach(cb => { plan.lohnMonate[+cb.dataset.azLm].uebernehmen = cb.checked; });
+    const riskant = plan.lohnMonate.filter(l => l.uebernehmen && l.ohneLohn && (l.bisher || 0) > 0);
+    if (riskant.length) {
+      const ok = await uiConfirm({ title: 'Stundenlohn fehlt', icon: '⚠', danger: true,
+        message: 'Für ' + riskant.map(l => monthLabel(l.m)).join(', ') + ' ist kein Stundenlohn hinterlegt. ' +
+          'Mit Haken würde der bisherige Nebenjob-Wert durch ' + riskant.map(l => fmtEur(l.betrag)).join(' / ') + ' ersetzt.',
+        details: ['Besser: Abbrechen, unter „Stundenlohn" den Satz mit „gültig ab" nachtragen und den Import erneut öffnen.'],
+        okLabel: 'Trotzdem übernehmen', cancelLabel: 'Zurück' });
+      if (!ok) return;
+    }
     zu();
     azImportAnwenden(plan);
   });
@@ -12459,7 +12490,13 @@ function azCfgSetzen(feld, wert) {
   if ((feld === 'empfaenger' || feld === 'cc') && !azEmailsOk(wert)) {
     showToast('Ungültige E-Mail-Adresse', 'error'); renderPage(); return;
   }
-  if (feld === 'lohnStart') {
+  if (feld === 'zuschlagSonntag' || feld === 'zuschlagFeiertag') {
+    const n = parseFloat(String(wert).replace(',', '.'));
+    if (!(n >= 0 && n <= 300)) { showToast('Bitte einen Zuschlag zwischen 0 und 300 % eingeben', 'error'); renderPage(); return; }
+    c[feld] = n;
+    azSyncEinnahmen();
+    if (typeof updateBadges === 'function') updateBadges();
+  } else if (feld === 'lohnStart') {
     const n = parseInt(wert, 10);
     if (!(n >= 1 && n <= 28)) { showToast('Bitte einen Tag zwischen 1 und 28 eingeben', 'error'); renderPage(); return; }
     c.lohnStart = n;
@@ -12706,8 +12743,10 @@ function arbeitszeit() {
     }
     const e = z.eintragId != null ? azListe().find(x => String(x.id) === String(z.eintragId)) : null;
     const wt = AZ_WOCHENTAGE[azWochentag(z.datum)].slice(0, 2);
-    const betrag = z.minuten / 60 * azLohnSatz(z.datum);
+    const betrag = azZeilenBetrag(z);
+    const zuschlag = z.minuten ? azZuschlagProzent(z.datum) : 0;
     const hinweise = [];
+    if (zuschlag) hinweise.push('+' + String(zuschlag).replace('.', ',') + ' % Zuschlag');
     if (z.verschobenRaus) hinweise.push('→ ' + azDauerText(z.verschobenRaus) + ' auf Vortag');
     if (z.verschobenRein) hinweise.push('← ' + azDauerText(z.verschobenRein) + ' vom Folgetag');
     return vorspann + '<tr' + (z.warnung ? ' style="background:rgba(234,179,8,.12)" title="' + escapeHtml(z.warnung) + '"' : '') + '>' +
@@ -12817,6 +12856,11 @@ function arbeitszeit() {
     <div class="card mb-2">
       <div class="card-header"><h3>💶 Stundenlohn</h3><button class="btn btn-primary btn-sm" onclick="azLohnHinzufuegen()">+ Neuer Satz</button></div>
       ${lohnHtml}
+      <div class="form-grid form-grid-2" style="margin-top:12px">
+        <label class="field">Sonntagszuschlag (%)<input type="number" min="0" max="300" step="1" value="${c.zuschlagSonntag}" onchange="azCfgSetzen('zuschlagSonntag',this.value)"></label>
+        <label class="field">Feiertagszuschlag (%)<input type="number" min="0" max="300" step="1" value="${c.zuschlagFeiertag}" onchange="azCfgSetzen('zuschlagFeiertag',this.value)"></label>
+      </div>
+      <div style="font-size:11px;color:var(--muted);margin-top:4px">Aufschlag auf den Stundenlohn für Stunden an Sonntagen bzw. gesetzlichen Feiertagen (Baden-Württemberg). Fällt beides zusammen, gilt der höhere Satz. 0 = kein Zuschlag.</div>
     </div>
     ${einstHtml}`;
 }
