@@ -255,6 +255,12 @@ async function checkGeldEingang() {
 // Format je Eintrag: { v: 'Version', date: 'YYYY-MM-DD', changes: ['...','...'] }
 // Änderungen dürfen mit **Fett** Markierung versehen werden.
 const CHANGELOG = [
+  { v: '1.0.68', date: '2026-11-15', changes: [
+    '**Neu: Jahreswechsel-Assistent.** Ab dem 1. Januar fragt die App beim Start, ob das neue Jahr angelegt werden soll, und führt dich in drei Schritten durch: **(1) Verträge prüfen** – alle Fixkosten, Sparpläne, wiederkehrenden Einnahmen und Umbuchungen mit Betrag „zuletzt" und „ab neuem Jahr"; abhaken oder Betrag anpassen. **(2) Kontostände, Depot & Zähler** – echten Kontostand zum 31.12. eintragen (die Differenz wird als Abgleich in den Dezember gebucht), Depot-Bestand mit Wert und Gewinn/Verlust, Zählerstände, Gehalt fürs neue Jahr. **(3) Zusammenfassung des Vorjahres** – Einnahmen, Ausgaben, Überschuss, Konten, Depot, größte Kategorien; auf Wunsch als PDF. Erst „Jahr anlegen" ändert etwas. „+ Neues Jahr…" öffnet denselben Assistenten.',
+    '**Jahreswechsel: Fehler behoben.** Verträge mit Rhythmus (vierteljährlich, halbjährlich, jährlich) bleiben jetzt in ihrem Monat – bisher rutschte z.B. eine Jahresrechnung vom Juni auf den Januar. Unterjährig beendete Fixkosten, Einnahmen und Umbuchungen werden nicht mehr wiederbelebt. Neu übernommen werden Gehalt, Finanzprodukte (samt Verknüpfung zum Vertrag), eigene Tabellen und offene Auslagen. Beim Depot bleibt das ursprünglich eingesetzte Geld erhalten, sodass Gewinn/Verlust über den Jahreswechsel hinweg stimmt.',
+    '**Startstände bleiben aktuell.** Änderst du nachträglich etwas im Vorjahr, bietet die App beim Start an, die Startstände des neuen Jahres anzupassen.',
+    '**Arbeitszeit: Erinnerung und Schnellerfassung.** An deinen Arbeitstagen (Standard: Samstag ab 18:00, einstellbar) erinnert die App ans Eintragen – auch beim nächsten Start, falls der Tag noch fehlt. Im Dialog ist deine übliche Zeit vorausgefüllt: „Eintragen", „Nicht gearbeitet" oder „Später". Auf der Arbeitszeit-Seite gibt es dazu Ein-Klick-Knöpfe „⚡ Heute 08:40–14:40".',
+  ]},
   { v: '1.0.67', date: '2026-11-11', changes: [
     '**Arbeitszeit: Sonntags- und Feiertagszuschlag.** Unter „Stundenlohn" legst du einen Zuschlag in % für Sonntage und für gesetzliche Feiertage (Baden-Württemberg) fest – z.B. 50 % für den verkaufsoffenen Sonntag. Die betroffenen Tage zeigen den Zuschlag in der Tabelle, Lohn und Nebenjob-Einnahme rechnen ihn automatisch ein. Fällt Sonntag und Feiertag zusammen, gilt der höhere Satz.',
     '**Import sicherer.** Beim Import früherer Listen werden Monate, für die noch kein Stundenlohn hinterlegt ist, nicht mehr vorab zum Berechnen angehakt – so kann ein bisheriger Nebenjob-Wert nicht versehentlich durch 0 € ersetzt werden. Wer es trotzdem anhakt, bekommt vorher eine Rückfrage.',
@@ -2360,6 +2366,11 @@ function closeNewYearModal() {
 // fürs neue Jahr. Wertpapiere: Netto-Stückzahl je Symbol, bewertet mit letztem Kurs
 // (sonst Ø-Kaufpreis). Bargeld/Tagesgeld etc.: Netto-Betrag je Kategorie+Depot.
 // txType 'bestand' + skipCashflow: zählt NICHT als neuer Geldfluss.
+// Eingesetztes Geld eines Sparen-Eintrags: bei übernommenem Bestand der
+// ursprüngliche Einstand (falls gespeichert), sonst der Betrag.
+function sparenEinstand(s) {
+  return (s && s.txType === 'bestand' && typeof s.einstand === 'number') ? s.einstand : (+(s && s.amount) || 0);
+}
 function buildDepotSnapshot(prev, ny) {
   const src = (state.years[prev] && state.years[prev].sparen) || [];
   const kurse = state.etfKurse || {};
@@ -2372,7 +2383,7 @@ function buildDepotSnapshot(prev, ny) {
         wp: { symbol: sym, name: wp.name || sym, isin: wp.isin || '', wkn: wp.wkn || '', typ: wp.typ || 'etf' },
         kategorie: s.kategorie || 'ETF', depot: s.depot || '' };
       secs[sym].units += (+s.units || 0);
-      secs[sym].invested += (+s.amount || 0);
+      secs[sym].invested += sparenEinstand(s);
     } else {
       const key = (s.kategorie || 'Sonstiges') + '|' + (s.depot || '');
       if (!cash[key]) cash[key] = { amount: 0, kategorie: s.kategorie || 'Sonstiges', depot: s.depot || '' };
@@ -2383,12 +2394,18 @@ function buildDepotSnapshot(prev, ny) {
   Object.values(secs).forEach(p => {
     if (Math.abs(p.units) < 1e-9) return;
     const k = kurse[p.wp.symbol];
-    const price = (k && k.kurs) ? kursEUR(k) : (p.units ? p.invested / p.units : 0);
-    out.push({ id: uid(), month: m, date: d, kategorie: p.kategorie, depot: p.depot,
+    const hatKurs = !!(k && k.kurs);
+    const price = hatKurs ? kursEUR(k) : (p.units ? p.invested / p.units : 0);
+    // amount = Wert zum Jahreswechsel (zählt in allen Summen); einstand = das
+    // ursprünglich eingesetzte Geld, damit Gewinn/Verlust über Jahre erhalten bleibt.
+    const e = { id: uid(), month: m, date: d, kategorie: p.kategorie, depot: p.depot,
       wertpapier: p.wp, etf: { name: p.wp.name, ticker: p.wp.symbol, isin: p.wp.isin, wkn: p.wp.wkn },
       txType: 'bestand', skipCashflow: true, units: Math.round(p.units * 1e6) / 1e6,
       price: Math.round(price * 100) / 100, amount: Math.round(p.units * price * 100) / 100,
-      note: 'Bestand aus ' + prev });
+      einstand: Math.round(p.invested * 100) / 100,
+      note: 'Bestand aus ' + prev };
+    if (!hatKurs) e.kursFehlt = true;
+    out.push(e);
   });
   Object.values(cash).forEach(c => {
     if (Math.abs(c.amount) < 0.005) return;
@@ -2406,124 +2423,14 @@ async function confirmNewYear() {
   const newYr = parseInt(input);
   if (!newYr || newYr < 2000 || newYr > 2100) { showToast('Ungültiges Jahr (2000–2100)', 'error'); return; }
   if (state.years[String(newYr)]) { showToast('Jahr ' + newYr + ' existiert bereits', 'error'); return; }
-  const chk = id => !!(document.getElementById(id) && document.getElementById(id).checked);
-  const takeBalance = chk('newYear_takeBalance');
-  const takeFixkosten = chk('newYear_takeFixkosten');
-  const takeRegel = chk('newYear_takeRegel');
-  const takeKonten = chk('newYear_takeKonten');
-  const takeZaehler = chk('newYear_takeZaehler');
-  const takeSparen = chk('newYear_takeSparen');
-  const takeUmb = chk('newYear_takeUmbuchungen');
-  const askStaende = chk('newYear_askStaende');
-  const makePdf = chk('newYear_makePdf');
-
   const ny = String(newYr);
-  const prev = String(newYr - 1);
-  const prevYr = state.years[prev];
-  state.years[ny] = createEmptyYearData(newYr);
-
-  // Vorjahres-Endstände robust berechnen – unabhängig vom aktuell gewählten Jahr:
-  // temporär das Vorjahr "auswählen", damit kontoSaldo/getKonten dessen Daten lesen.
-  let prevKonten = [];
-  if (prevYr) {
-    const origSel = state.selectedYear;
-    try {
-      state.selectedYear = Number(prev);
-      prevKonten = getKonten(prev).map(k => ({ id: k.id, name: k.name, cashflow: k.cashflow, start: kontoSaldo(k.id, prev + '-12') }));
-    } finally { state.selectedYear = origSel; }
-  }
-  const prevEnd = Math.round(prevKonten.reduce((s, k) => s + (+k.start || 0), 0) * 100) / 100;
-
-  if (prevYr) {
-    if (takeBalance) state.years[ny].startBalance = prevEnd;
-    if (takeFixkosten) {
-      state.years[ny].fixkosten = (prevYr.fixkosten || [])
-        // Verträge mit echtem Vertragsende VOR dem neuen Jahr laufen automatisch aus
-        .filter(f => !(f.laufzeitEnde && f.laufzeitEnde < ny + '-01'))
-        .map(f => {
-          // Endet der Vertrag IM neuen Jahr, gilt er nur bis dahin; sonst ganzjährig aktiv.
-          const perYearEnd = (f.laufzeitEnde && f.laufzeitEnde <= ny + '-12') ? f.laufzeitEnde : (ny + '-12');
-          const copy = { ...f, id: uid(), start: ny + '-01', end: perYearEnd };
-          if (f.dynamik) copy.dynamik = { ...f.dynamik, uebersprungen: [ ...(f.dynamik.uebersprungen || []) ] };
-          return copy;
-        });
-    }
-    if (takeRegel) {
-      state.years[ny].regelEinnahmen = (prevYr.regelEinnahmen || []).map(r => ({ ...r, id: uid(), startMonth: ny + '-01', endMonth: '' }));
-    }
-    if (takeKonten && prevKonten.length) {
-      state.years[ny].konten = prevKonten.map(k => ({ id: k.id, name: k.name, cashflow: k.cashflow, start: +k.start || 0 }));
-      state.years[ny].startBalance = prevEnd;
-      if (state.config && state.config.incomeKonten && state.config.incomeKonten[prev]) {
-        state.config.incomeKonten[ny] = { ...state.config.incomeKonten[prev] };
-      }
-    }
-    if (takeZaehler) {
-      // Letzten Stand je Zählertyp als Startpunkt ins neue Jahr übernehmen
-      const byType = {};
-      (prevYr.zaehler || []).slice().sort((a, b) => (a.date || '').localeCompare(b.date || '')).forEach(z => { byType[z.type] = z; });
-      state.years[ny].zaehler = Object.values(byType).map(z => ({
-        id: uid(), date: ny + '-01-01', time: '', type: z.type, value: z.value,
-        einheit: z.einheit, einheitCustom: z.einheitCustom, note: 'Übertrag ' + prev }));
-    }
-    if (takeSparen) {
-      state.years[ny].sparen = buildDepotSnapshot(prev, ny);
-    }
-    if (takeUmb) {
-      state.years[ny].umbuchungen = (prevYr.umbuchungen || []).filter(u => u.wiederkehrend).map(u => ({
-        ...u, id: uid(), month: ny + '-01', date: ny + '-01-01', endMonth: '' }));
-    }
-  }
-
   closeNewYearModal();
+  // Gibt es ein Vorjahr, führt der Assistent durch Verträge, Kontostände und
+  // Zusammenfassung; sonst wird ein leeres Jahr angelegt.
+  if (state.years[String(newYr - 1)]) { jahreswechselAssistent(ny); return; }
+  state.years[ny] = createEmptyYearData(newYr);
   setSelectedYear(newYr);
   showToast('Jahr ' + newYr + ' angelegt');
-
-  // ── Optionale Abfragen nach dem Anlegen ──────────────────────────────────
-  // 1) Aktuelle Zählerstände eintragen
-  if (askStaende && takeZaehler && (state.years[ny].zaehler || []).length) {
-    const typen = [...new Set(state.years[ny].zaehler.map(z => z.type))];
-    for (const t of typen) {
-      const base = state.years[ny].zaehler.filter(z => z.type === t).slice(-1)[0];
-      const v = await uiPrompt({ title: 'Aktueller Zählerstand', message: 'Aktueller Stand für „' + t + '" zum Jahreswechsel (leer = überspringen):', placeholder: 'z.B. 12345', value: '' });
-      if (v !== null && String(v).trim() !== '' && !isNaN(+v)) {
-        state.years[ny].zaehler.push({ id: uid(), date: ny + '-01-01', time: nowTime(), type: t, value: +v, einheit: base ? base.einheit : '', einheitCustom: base ? base.einheitCustom : '', note: 'Jahreswechsel' });
-      }
-    }
-    saveData(); renderPage();
-  }
-
-  // 2) Sparpläne: laufen sie im neuen Jahr weiter?
-  if (takeFixkosten) {
-    const sps = (state.years[ny].fixkosten || []).filter(f => f.sparenLink);
-    for (const f of sps) {
-      const weiter = await uiConfirm({ title: 'Sparplan im neuen Jahr?', icon: '📈',
-        message: 'Läuft der Sparplan „' + (f.name || '—') + '" (' + fmtEur(f.amount) + ' / Monat) im Jahr ' + ny + ' weiter?',
-        okLabel: 'Ja, weiter', cancelLabel: 'Nein, entfernen' });
-      if (!weiter) state.years[ny].fixkosten = state.years[ny].fixkosten.filter(x => x.id !== f.id);
-    }
-    saveData(); renderPage();
-  }
-
-  // 3) Jahresübersicht des Vorjahres als PDF
-  if (makePdf && prevYr) {
-    const doPdf = await uiConfirm({ title: 'Jahresübersicht als PDF?', icon: '📄',
-      message: 'Für ' + prev + ' eine Jahresübersicht als PDF erstellen?', okLabel: 'PDF erstellen', cancelLabel: 'Nein danke' });
-    if (doPdf) {
-      try {
-        // Für den Bericht kurz aufs Vorjahr umschalten (Daten + Monatsliste), dann zurück.
-        const savedSel = state.selectedYear, savedMonths = allMonths2026.slice();
-        state.selectedYear = Number(prev);
-        allMonths2026.splice(0, allMonths2026.length, ...monthsBetween(prev + '-01', prev + '-12'));
-        const { rows, totals } = berichtDatenSammeln(prev);
-        const html = buildJahresberichtHTML(prev, state.meta.userName || 'Nutzer', totals, rows, { typ: 'jahresabschluss' });
-        state.selectedYear = savedSel;
-        allMonths2026.splice(0, allMonths2026.length, ...savedMonths);
-        if (window.EA && window.EA.printToPdf) { await window.EA.printToPdf({ html, filename: 'Jahresuebersicht_' + prev + '.pdf' }); showToast('PDF erstellt', 'info'); }
-        else { await uiAlert({ title: 'Nicht verfügbar', icon: '⚠', message: 'Der PDF-Export benötigt die Desktop-App.' }); }
-      } catch (e) { console.error('Jahres-PDF:', e); }
-    }
-  }
 }
 
 function onYearChange(val) {
@@ -5649,7 +5556,7 @@ function buildEtfLiveSection() {
       };
     }
     const p = positions[sym];
-    p.invested += (+s.amount) || 0;
+    p.invested += sparenEinstand(s);
     if (typeof s.units === 'number') p.units += s.units;
     p.trades.push(s);
     // Depot merken – Bestandsübernahmen sind die verlässlichste Quelle
@@ -11930,6 +11837,442 @@ window.updateRegelEinnahme   = updateRegelEinnahme;
 window.deleteRegelEinnahme   = deleteRegelEinnahme;
 
 // ════════════════════════════════════════════════════════════════════════════
+// JAHRESWECHSEL-ASSISTENT
+// ════════════════════════════════════════════════════════════════════════════
+// Ab dem 01.01. fragt die App beim Start, ob das neue Jahr angelegt werden soll.
+// Der Assistent geht in drei Schritten durch: (1) Verträge prüfen, (2) Kontostände,
+// Depot und Zähler abgleichen, (3) Zusammenfassung des Vorjahres. Erst „Jahr
+// anlegen" ändert Daten – Abbrechen lässt alles unverändert.
+// jwPlan() sammelt die Übernahme ohne Seiteneffekte, jwAnwenden() setzt sie um.
+const JW_RHYTHMUS = { 1: 'monatlich', 2: 'alle 2 Monate', 3: 'vierteljährlich', 6: 'halbjährlich', 12: 'jährlich' };
+function jwRund(n) { return Math.round((+n || 0) * 100) / 100; }
+// Führt fn mit temporär gewähltem Jahr aus (kontoSaldo/getKonten/state.* lesen
+// immer das gewählte Jahr).
+function jwMitJahr(yr, fn) {
+  const orig = state.selectedYear;
+  state.selectedYear = Number(yr);
+  try { return fn(); } finally { state.selectedYear = orig; }
+}
+// Nächster Fälligkeitsmonat ≥ abM im Rhythmus der Fixkost. Der Rhythmus hängt am
+// Startmonat (fixkostenAktivImMonat) – ein Vertrag „jährlich im Juni" muss auch
+// im neuen Jahr im Juni fällig sein, nicht im Januar.
+function jwNaechsteFaelligkeit(f, abM) {
+  const iv = +f.interval || 1;
+  if (iv <= 1 || !f.start) return abM;
+  let d = monthDiff(f.start, abM) % iv;
+  if (d < 0) d += iv;
+  return d === 0 ? abM : monthShift(abM, iv - d);
+}
+function jwFixkostPlan(f, ny) {
+  const prev = String(+ny - 1);
+  let uebernehmen = true, grund = '';
+  if (f.laufzeitEnde && f.laufzeitEnde < ny + '-01') { uebernehmen = false; grund = 'Vertrag endete ' + f.laufzeitEnde; }
+  else if (f.end && f.end < prev + '-12') { uebernehmen = false; grund = 'lief nur bis ' + f.end; }
+  const start = jwNaechsteFaelligkeit(f, ny + '-01');
+  const end = (f.laufzeitEnde && f.laufzeitEnde >= ny + '-01' && f.laufzeitEnde <= ny + '-12') ? f.laufzeitEnde : ny + '-12';
+  if (uebernehmen && start > end) { uebernehmen = false; grund = 'keine Fälligkeit mehr in ' + ny; }
+  let betragAlt = null;
+  for (let i = 12; i >= 1 && betragAlt === null; i--) {
+    const m = prev + '-' + String(i).padStart(2, '0');
+    if (fixkostenAktivImMonat(f, m)) betragAlt = fixkostBetrag(f, m);
+  }
+  return { src: f, uebernehmen, grund, start, end, betragAlt, amount: +f.amount || 0 };
+}
+// Beträge im neuen Jahr (erste und letzte Fälligkeit) für den ggf. geänderten Grundbetrag.
+function jwFixkostBetraege(p) {
+  const f = Object.assign({}, p.src, { amount: p.amount, start: p.start, end: p.end });
+  let letzte = p.start;
+  const iv = +f.interval || 1;
+  while (monthShift(letzte, iv) <= p.end) letzte = monthShift(letzte, iv);
+  return { neu: fixkostBetrag(f, p.start), ende: fixkostBetrag(f, letzte) };
+}
+function jwStartstaendeBerechnen(ny) {
+  const prev = String(+ny - 1);
+  if (!state.years[prev]) return [];
+  return jwMitJahr(prev, () => getKonten(prev).map(k => ({ id: k.id, name: k.name, cashflow: k.cashflow, start: kontoSaldo(k.id, prev + '-12') })));
+}
+function jwPlan(ny) {
+  ny = String(ny);
+  const prev = String(+ny - 1);
+  const py = state.years[prev] || {};
+  const aktiv = (x, feld) => !(x[feld] && x[feld] < ny + '-01');
+  let gehalt = 0, nebenjob = 0;
+  Object.keys(py.incomeByMonth || {}).sort().forEach(m => {
+    const inc = py.incomeByMonth[m] || {};
+    if (+inc.gehalt) gehalt = +inc.gehalt;
+    if (+inc.nebenjob && !inc.nebenjobAusAz) nebenjob = +inc.nebenjob;
+  });
+  const zByType = {};
+  (py.zaehler || []).slice().sort((a, b) => (a.date || '').localeCompare(b.date || '')).forEach(z => { zByType[z.type] = z; });
+  return {
+    ny, prev, prevClosed: py.status === 'closed',
+    fixkosten: (py.fixkosten || []).map(f => jwFixkostPlan(f, ny)),
+    regel: (py.regelEinnahmen || []).map(r => ({ src: r, uebernehmen: aktiv(r, 'endMonth'), grund: aktiv(r, 'endMonth') ? '' : 'endete ' + r.endMonth })),
+    umb: (py.umbuchungen || []).filter(u => u.wiederkehrend).map(u => ({ src: u, uebernehmen: aktiv(u, 'endMonth'), grund: aktiv(u, 'endMonth') ? '' : 'endete ' + u.endMonth })),
+    konten: jwStartstaendeBerechnen(ny).map(k => ({ id: k.id, name: k.name, cashflow: k.cashflow, berechnet: k.start, ist: null })),
+    depot: buildDepotSnapshot(prev, ny),
+    zaehler: Object.values(zByType).map(z => ({ src: z, neu: '' })),
+    gehalt, nebenjob,
+    offeneAuslagen: (py.erstattungen || []).filter(e => e.status !== 'erstattet').length,
+    opt: { konten: true, depot: true, zaehler: true, finanzprodukte: true, tabellen: true, auslagen: true },
+  };
+}
+// Tatsächlichen Kontostand zum 31.12. setzen: Korrekturbuchung im Dezember des
+// Vorjahres – ersetzt eine bestehende Korrektur des Monats, stapelt nie.
+function jwKorrektur(prev, kontoId, ziel) {
+  jwMitJahr(prev, () => {
+    const m = prev + '-12', yd = state.years[prev];
+    yd.ausgaben  = (yd.ausgaben  || []).filter(a => !(a._korrektur && String(a.kontoId) === String(kontoId) && a.month === m));
+    yd.einnahmen = (yd.einnahmen || []).filter(e => !(e._korrektur && String(e.kontoId) === String(kontoId) && e.month === m));
+    const diff = jwRund(ziel - kontoSaldo(kontoId, m));
+    if (Math.abs(diff) < 0.01) return;
+    if (diff > 0) yd.einnahmen.push({ id: uid(), month: m, date: prev + '-12-31', source: 'Kontostand-Abgleich (Jahreswechsel)',
+      type: 'Sonstiges', amount: diff, bar: false, kontoId, _korrektur: true });
+    else yd.ausgaben.push({ id: uid(), month: m, date: prev + '-12-31', desc: 'Kontostand-Abgleich (Jahreswechsel)',
+      category: 'Sonstige Ausgaben', amount: Math.abs(diff), kontoId, _korrektur: true });
+  });
+}
+function jwAnwenden(plan) {
+  const { ny, prev } = plan;
+  const py = state.years[prev] || {};
+  state.years[ny] = createEmptyYearData(Number(ny));
+  const yd = state.years[ny];
+  // 1) Tatsächliche Kontostände → Korrektur im Vorjahr, dann Endstände übernehmen
+  if (!plan.prevClosed) plan.konten.forEach(k => { if (k.ist !== null && !isNaN(k.ist)) jwKorrektur(prev, k.id, k.ist); });
+  if (plan.opt.konten) {
+    const ks = jwStartstaendeBerechnen(ny);
+    if (ks.length) {
+      yd.konten = ks.map(k => ({ id: k.id, name: k.name, cashflow: k.cashflow, start: +k.start || 0 }));
+      yd.startBalance = jwRund(ks.reduce((s, k) => s + (+k.start || 0), 0));
+      yd.startAusVorjahr = true;
+      if (state.config && state.config.incomeKonten && state.config.incomeKonten[prev]) {
+        state.config.incomeKonten[ny] = Object.assign({}, state.config.incomeKonten[prev]);
+      }
+    }
+  }
+  // 2) Verträge (Fixkosten/Sparpläne) – Rhythmus bleibt am ursprünglichen Monat
+  const idMap = {};
+  yd.fixkosten = plan.fixkosten.filter(p => p.uebernehmen).map(p => {
+    const copy = Object.assign({}, p.src, { id: uid(), start: p.start, end: p.end, amount: p.amount });
+    if (p.src.dynamik) copy.dynamik = Object.assign({}, p.src.dynamik, { uebersprungen: (p.src.dynamik.uebersprungen || []).slice() });
+    if (p.src.sparenLink) copy.sparenLink = Object.assign({}, p.src.sparenLink);
+    idMap[String(p.src.id)] = copy.id;
+    return copy;
+  });
+  yd.regelEinnahmen = plan.regel.filter(p => p.uebernehmen).map(p => {
+    const r = Object.assign({}, p.src, { id: uid(),
+      startMonth: (p.src.startMonth && p.src.startMonth > ny + '-01') ? p.src.startMonth : ny + '-01',
+      endMonth: (p.src.endMonth && p.src.endMonth >= ny + '-01') ? p.src.endMonth : '' });
+    delete r._eingangNotified;
+    return r;
+  });
+  yd.umbuchungen = plan.umb.filter(p => p.uebernehmen).map(p => Object.assign({}, p.src, { id: uid(), month: ny + '-01', date: ny + '-01-01',
+    endMonth: (p.src.endMonth && p.src.endMonth >= ny + '-01') ? p.src.endMonth : '' }));
+  // 3) Zähler: letzter Stand als Übertrag + optional aktueller Stand
+  if (plan.opt.zaehler) {
+    plan.zaehler.forEach(p => {
+      const z = p.src;
+      yd.zaehler.push({ id: uid(), date: ny + '-01-01', time: '', type: z.type, value: z.value, einheit: z.einheit, einheitCustom: z.einheitCustom, note: 'Übertrag ' + prev });
+      if (String(p.neu).trim() !== '' && !isNaN(+p.neu)) {
+        yd.zaehler.push({ id: uid(), date: ny + '-01-01', time: nowTime(), type: z.type, value: +p.neu, einheit: z.einheit, einheitCustom: z.einheitCustom, note: 'Jahreswechsel' });
+      }
+    });
+  }
+  // 4) Depot/Sparen als Bestand (neu berechnet – die Kontokorrektur ändert daran nichts)
+  if (plan.opt.depot) yd.sparen = buildDepotSnapshot(prev, ny);
+  // 5) Feste Einnahmen
+  Object.keys(yd.incomeByMonth).forEach(m => {
+    if (plan.gehalt > 0) yd.incomeByMonth[m].gehalt = jwRund(plan.gehalt);
+    if (plan.nebenjob > 0 && !azAktiv()) yd.incomeByMonth[m].nebenjob = jwRund(plan.nebenjob);
+  });
+  // 6) Finanzprodukte (Verknüpfung auf die neuen Fixkosten-IDs umhängen), Tabellen
+  if (plan.opt.finanzprodukte) {
+    yd.finanzprodukte = JSON.parse(JSON.stringify(py.finanzprodukte || [])).map(fp => {
+      if (fp.fixkostenId != null) {
+        const neu = idMap[String(fp.fixkostenId)];
+        if (neu) fp.fixkostenId = neu; else delete fp.fixkostenId;
+      }
+      return fp;
+    });
+  }
+  if (plan.opt.tabellen) yd.tabellen = JSON.parse(JSON.stringify(py.tabellen || []));
+  // 7) Offene Auslagen: Erstattung kommt erst im neuen Jahr → dort weiterführen
+  if (plan.opt.auslagen) {
+    yd.erstattungen = (py.erstattungen || []).filter(e => e.status !== 'erstattet')
+      .map(e => Object.assign({}, e, { id: uid(), uebertragAus: prev }));
+  }
+  if (typeof azSyncEinnahmen === 'function') azSyncEinnahmen();
+  saveData();
+}
+// Zusammenfassung eines Jahres (für Schritt 3 und die Jahresübersicht).
+function jwZusammenfassung(yr) {
+  yr = String(yr);
+  return jwMitJahr(yr, () => {
+    const t = { gehalt: 0, nebenjob: 0, sonstige: 0, einnahmen: 0, fix: 0, eink: 0, ausg: 0, ausgaben: 0, spesen: 0, cashflow: 0 };
+    monthsBetween(yr + '-01', yr + '-12').forEach(m => {
+      const f = monthFinancials(m, false);
+      t.gehalt += incomeReceived(m, 'gehalt') ? (+f.inc.gehalt || 0) : 0;
+      t.nebenjob += incomeReceived(m, 'nebenjob') ? (+f.inc.nebenjob || 0) : 0;
+      t.sonstige += f.extraIncome; t.einnahmen += f.totalIncome;
+      t.fix += f.fixTotal; t.eink += f.einkTotal; t.ausg += f.ausgTotal; t.ausgaben += f.totalExpenses;
+      t.spesen += f.spesenSaldo; t.cashflow += f.cashflow;
+    });
+    Object.keys(t).forEach(k => { t[k] = jwRund(t[k]); });
+    const kats = {};
+    (state.ausgaben || []).filter(a => !a._korrektur).forEach(a => { const k = a.category || 'Sonstige'; kats[k] = (kats[k] || 0) + (+a.amount || 0); });
+    const top = Object.keys(kats).map(k => ({ name: k, summe: jwRund(kats[k]) })).sort((a, b) => b.summe - a.summe).slice(0, 5);
+    const konten = getKonten(yr).map(k => ({ name: k.name, start: +k.start || 0, ende: kontoSaldo(k.id, yr + '-12') }));
+    let depotEinstand = 0, depotWert = 0, kursFehlt = 0;
+    buildDepotSnapshot(yr, String(+yr + 1)).forEach(s => {
+      depotEinstand += (typeof s.einstand === 'number' ? s.einstand : s.amount) || 0;
+      depotWert += +s.amount || 0;
+      if (s.kursFehlt) kursFehlt++;
+    });
+    let azMinuten = 0;
+    if (azAktiv()) azDokuZeilen(azListe()).forEach(z => { if (z.datum.slice(0, 4) === yr) azMinuten += z.minuten; });
+    return { jahr: yr, t, top, konten, depotEinstand: jwRund(depotEinstand), depotWert: jwRund(depotWert), kursFehlt, azMinuten,
+      sparquote: t.einnahmen > 0 ? t.cashflow / t.einnahmen : null };
+  });
+}
+function jwZusammenfassungHtml(z) {
+  const zeile = (l, v, fett, farbe) => '<div style="display:flex;justify-content:space-between;padding:3px 0;font-size:13px' + (fett ? ';font-weight:700;border-top:1px solid var(--border);margin-top:4px;padding-top:6px' : '') + '">' +
+    '<span>' + l + '</span><span' + (farbe ? ' style="color:' + farbe + '"' : '') + '>' + v + '</span></div>';
+  const box = (titel, inhalt) => '<div style="flex:1 1 240px;border:1px solid var(--border);border-radius:10px;padding:12px 14px">' +
+    '<div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;margin-bottom:6px">' + titel + '</div>' + inhalt + '</div>';
+  const t = z.t;
+  const kStart = jwRund(z.konten.reduce((s, k) => s + k.start, 0)), kEnde = jwRund(z.konten.reduce((s, k) => s + k.ende, 0));
+  const gv = jwRund(z.depotWert - z.depotEinstand);
+  return '<div style="display:flex;flex-wrap:wrap;gap:12px">' +
+    box('Einnahmen ' + z.jahr, zeile('Gehalt', fmtEur(t.gehalt)) + zeile('Nebenjob', fmtEur(t.nebenjob)) + zeile('Sonstige / wiederkehrend', fmtEur(t.sonstige)) +
+      zeile('Gesamt', fmtEur(t.einnahmen), true)) +
+    box('Ausgaben ' + z.jahr, zeile('Fixkosten', fmtEur(t.fix)) + zeile('Einkäufe', fmtEur(t.eink)) + zeile('Ausgaben', fmtEur(t.ausg)) +
+      zeile('Gesamt', fmtEur(t.ausgaben), true)) +
+    box('Ergebnis', zeile('Spesen-Saldo', fmtEur(t.spesen)) +
+      zeile('Überschuss (Cashflow)', (t.cashflow >= 0 ? '+' : '') + fmtEur(t.cashflow), true, t.cashflow >= 0 ? 'var(--green)' : 'var(--red)') +
+      (z.sparquote !== null ? zeile('Anteil der Einnahmen', (z.sparquote * 100).toFixed(1).replace('.', ',') + ' %') : '') +
+      (z.azMinuten ? zeile('Nebenjob-Stunden', azDauerText(z.azMinuten)) : '')) +
+    box('Konten', z.konten.map(k => zeile(escapeHtml(k.name || 'Konto'), fmtEur(k.start) + ' → <strong>' + fmtEur(k.ende) + '</strong>')).join('') +
+      zeile('Gesamt', fmtEur(kStart) + ' → ' + fmtEur(kEnde), true)) +
+    (z.depotWert || z.depotEinstand ? box('Depot & Sparen', zeile('Eingesetzt', fmtEur(z.depotEinstand)) + zeile('Wert zum Jahresende', fmtEur(z.depotWert)) +
+      zeile('Gewinn / Verlust', (gv >= 0 ? '+' : '') + fmtEur(gv), true, gv >= 0 ? 'var(--green)' : 'var(--red)') +
+      (z.kursFehlt ? '<div style="font-size:11px;color:#a86b00">' + z.kursFehlt + ' Position(en) ohne aktuellen Kurs – mit Kaufpreis bewertet</div>' : '')) : '') +
+    (z.top.length ? box('Größte Ausgaben-Kategorien', z.top.map(k => zeile(escapeHtml(k.name), fmtEur(k.summe))).join('')) : '') +
+  '</div>';
+}
+async function jwPdf(yr) {
+  yr = String(yr);
+  try {
+    const savedSel = state.selectedYear, savedMonths = allMonths2026.slice();
+    let html;
+    try {
+      state.selectedYear = Number(yr);
+      allMonths2026.splice(0, allMonths2026.length, ...monthsBetween(yr + '-01', yr + '-12'));
+      const { rows, totals } = berichtDatenSammeln(yr);
+      html = buildJahresberichtHTML(yr, state.meta.userName || 'Nutzer', totals, rows, { typ: 'jahresabschluss' });
+    } finally {
+      state.selectedYear = savedSel;
+      allMonths2026.splice(0, allMonths2026.length, ...savedMonths);
+    }
+    if (window.EA && window.EA.printToPdf) { await window.EA.printToPdf({ html, filename: 'Jahresuebersicht_' + yr + '.pdf' }); showToast('PDF erstellt', 'info'); }
+    else await uiAlert({ title: 'Nicht verfügbar', icon: '⚠', message: 'Der PDF-Export benötigt die Desktop-App.' });
+  } catch (e) { console.error('Jahres-PDF:', e); showToast('PDF konnte nicht erstellt werden', 'error'); }
+}
+// Der Assistent selbst (dynamisches Overlay, Schritte 1–3).
+function jahreswechselAssistent(ny) {
+  ny = String(ny);
+  const plan = jwPlan(ny);
+  const prev = plan.prev;
+  let schritt = 1, fertig = null;
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  document.body.appendChild(overlay);
+  const zu = () => { overlay.remove(); };
+  const cb = (typ, i, an, aus) => '<input type="checkbox" data-jw="' + typ + '" data-i="' + i + '" style="width:16px;height:16px"' + (an ? ' checked' : '') + (aus ? ' disabled' : '') + '>';
+  const num = 'style="width:110px;text-align:right;padding:5px 7px;border:1px solid var(--border);border-radius:6px;background:var(--surface-2);color:var(--text)"';
+  const monat = m => monthLabel(m);
+
+  function schritt1() {
+    let sumAlt = 0, sumNeu = 0;
+    const rows = plan.fixkosten.map((p, i) => {
+      const f = p.src, iv = +f.interval || 1, b = jwFixkostBetraege(p), dyn = hatAktiveDynamik(f);
+      if (p.betragAlt !== null) sumAlt += p.betragAlt / iv;
+      if (p.uebernehmen) sumNeu += b.neu / iv;
+      const diff = p.betragAlt !== null ? jwRund(b.neu - p.betragAlt) : 0;
+      const hinweise = [];
+      if (p.grund) hinweise.push(p.grund);
+      if (f.sparenLink) hinweise.push('Sparplan');
+      if (f.laufzeitEnde && f.laufzeitEnde >= ny + '-01') hinweise.push('endet ' + monat(f.laufzeitEnde));
+      if (dyn && b.ende !== b.neu) hinweise.push('⚡ steigt bis ' + monat(p.end) + ' auf ' + fmtEur(b.ende));
+      else if (dyn) hinweise.push('⚡ Dynamik');
+      if (iv > 1) hinweise.push('fällig ab ' + monat(p.start));
+      return '<tr' + (p.uebernehmen ? '' : ' style="opacity:.55"') + '>' +
+        '<td>' + cb('fix', i, p.uebernehmen) + '</td>' +
+        '<td><strong>' + escapeHtml(f.name || '–') + '</strong><div style="font-size:11px;color:var(--muted)">' + escapeHtml(f.category || f.cat || '') + ' · ' + (JW_RHYTHMUS[iv] || 'alle ' + iv + ' Monate') + '</div></td>' +
+        '<td class="amount">' + (p.betragAlt !== null ? fmtEur(p.betragAlt) : '–') + '</td>' +
+        '<td class="amount">' + fmtEur(b.neu) + (Math.abs(diff) >= 0.01 ? '<div style="font-size:11px;color:' + (diff > 0 ? 'var(--red)' : 'var(--green)') + '">' + (diff > 0 ? '+' : '') + fmtEur(diff) + '</div>' : '') + '</td>' +
+        '<td><input type="number" step="0.01" data-jw="fixamt" data-i="' + i + '" value="' + p.amount.toFixed(2) + '" ' + num + (dyn ? ' readonly title="Grundbetrag – Dynamik rechnet darauf auf"' : '') + '></td>' +
+        '<td style="font-size:11px;color:var(--muted)">' + hinweise.join(' · ') + '</td></tr>';
+    }).join('');
+    const liste = (titel, arr, typ, text) => arr.length
+      ? '<div style="font-weight:600;font-size:13px;margin:16px 0 6px">' + titel + '</div><div class="table-wrap"><table><tbody>' +
+        arr.map((p, i) => '<tr' + (p.uebernehmen ? '' : ' style="opacity:.55"') + '><td style="width:30px">' + cb(typ, i, p.uebernehmen) + '</td><td>' + text(p.src) + '</td>' +
+          '<td class="amount">' + fmtEur(+p.src.amount || 0) + ' / Monat</td><td style="font-size:11px;color:var(--muted)">' + (p.grund || '') + '</td></tr>').join('') +
+        '</tbody></table></div>' : '';
+    return '<p style="font-size:13px;margin:0 0 10px">Diese Verträge laufen in <strong>' + prev + '</strong>. Haken = wird nach ' + ny + ' übernommen. Stimmt ein Betrag nicht mehr (z. B. Beitragserhöhung), trag den neuen Grundbetrag ein.</p>' +
+      (plan.fixkosten.length
+        ? '<div class="table-wrap"><table><thead><tr><th></th><th>Vertrag</th><th style="text-align:right">Zuletzt ' + prev + '</th><th style="text-align:right">Ab ' + ny + '</th><th>Grundbetrag</th><th>Hinweis</th></tr></thead><tbody>' + rows +
+          '</tbody><tfoot><tr><td></td><td><strong>Pro Monat (umgerechnet)</strong></td><td class="amount"><strong>' + fmtEur(sumAlt) + '</strong></td><td class="amount"><strong>' + fmtEur(sumNeu) + '</strong></td><td></td><td></td></tr></tfoot></table></div>'
+        : '<div style="font-size:13px;color:var(--muted)">Keine Fixkosten in ' + prev + '.</div>') +
+      liste('Wiederkehrende Einnahmen', plan.regel, 'regel', r => escapeHtml(r.source || 'Einnahme')) +
+      liste('Wiederkehrende Umbuchungen', plan.umb, 'umb', u => escapeHtml((kontoById(u.vonKonto, prev) || {}).name || '?') + ' → ' + escapeHtml((kontoById(u.nachKonto, prev) || {}).name || '?') + (u.note ? ' · ' + escapeHtml(u.note) : ''));
+  }
+  function schritt2() {
+    const opt = (key, text) => '<label style="display:inline-flex;align-items:center;gap:6px;font-size:12px;margin-right:14px"><input type="checkbox" data-jw="opt" data-i="' + key + '" style="width:15px;height:15px"' + (plan.opt[key] ? ' checked' : '') + '> ' + text + '</label>';
+    const kRows = plan.konten.map((k, i) => '<tr><td>' + escapeHtml(k.name || 'Konto') + (k.cashflow ? '' : ' <span style="font-size:11px;color:var(--muted)">(Reserve)</span>') + '</td>' +
+      '<td class="amount">' + fmtEur(k.berechnet) + '</td>' +
+      '<td><input type="number" step="0.01" data-jw="ist" data-i="' + i + '" value="' + (k.ist !== null ? k.ist : '') + '" placeholder="' + k.berechnet.toFixed(2) + '" ' + num + (plan.prevClosed ? ' disabled' : '') + '></td>' +
+      '<td class="amount" style="font-size:12px">' + (k.ist !== null && Math.abs(k.ist - k.berechnet) >= 0.01 ? (k.ist > k.berechnet ? '+' : '') + fmtEur(jwRund(k.ist - k.berechnet)) + ' Korrektur' : '') + '</td></tr>').join('');
+    const dRows = plan.depot.map(s => {
+      const wp = s.wertpapier;
+      const einstand = typeof s.einstand === 'number' ? s.einstand : s.amount;
+      const gv = jwRund(s.amount - einstand);
+      return '<tr><td>' + escapeHtml(wp ? wp.name : s.kategorie) + (s.depot ? '<div style="font-size:11px;color:var(--muted)">' + escapeHtml(s.depot) + '</div>' : '') + '</td>' +
+        '<td class="amount">' + (wp ? String(s.units).replace('.', ',') + ' Stk.' : '') + '</td>' +
+        '<td class="amount">' + fmtEur(einstand) + '</td>' +
+        '<td class="amount">' + fmtEur(s.amount) + (s.kursFehlt ? ' <span title="Kein aktueller Kurs – mit Kaufpreis bewertet">⚠</span>' : '') + '</td>' +
+        '<td class="amount" style="color:' + (gv >= 0 ? 'var(--green)' : 'var(--red)') + '">' + (wp ? (gv >= 0 ? '+' : '') + fmtEur(gv) : '') + '</td></tr>';
+    }).join('');
+    const fehlt = plan.depot.filter(s => s.kursFehlt).length;
+    const zRows = plan.zaehler.map((p, i) => '<tr><td>' + escapeHtml(p.src.type || '') + '</td><td class="amount">' + p.src.value + ' ' + escapeHtml(p.src.einheitCustom || p.src.einheit || '') + '</td>' +
+      '<td><input type="number" step="any" data-jw="zaehler" data-i="' + i + '" value="' + escapeHtml(String(p.neu)) + '" placeholder="aktueller Stand" ' + num + '></td></tr>').join('');
+    return '<div style="font-weight:600;font-size:13px;margin-bottom:6px">Kontostände zum 31.12.' + prev + '</div>' +
+      '<p style="font-size:12px;color:var(--muted);margin:0 0 8px">Vergleiche mit deinem Online-Banking. Weicht ein Konto ab, trag den echten Stand ein – die App bucht die Differenz als Abgleich in den Dezember ' + prev + ' und startet ' + ny + ' mit dem richtigen Wert.' +
+        (plan.prevClosed ? ' <strong>' + prev + ' ist abgeschlossen</strong> – Korrekturen sind dort nicht möglich.' : '') + '</p>' +
+      '<div class="table-wrap"><table><thead><tr><th>Konto</th><th style="text-align:right">Laut App</th><th>Tatsächlich</th><th></th></tr></thead><tbody>' + kRows + '</tbody></table></div>' +
+      '<div style="display:flex;gap:16px;flex-wrap:wrap;margin:14px 0 4px;font-size:13px;align-items:center">' +
+        '<label>Gehalt pro Monat in ' + ny + ' <input type="number" step="0.01" data-jw="gehalt" value="' + (plan.gehalt || '') + '" ' + num + '></label>' +
+        (azAktiv() ? '<span style="font-size:12px;color:var(--muted)">Nebenjob: wird aus der Arbeitszeit berechnet</span>'
+          : '<label>Nebenjob pro Monat <input type="number" step="0.01" data-jw="nebenjob" value="' + (plan.nebenjob || '') + '" ' + num + '></label>') +
+      '</div>' +
+      (plan.depot.length
+        ? '<div style="font-weight:600;font-size:13px;margin:16px 0 6px;display:flex;align-items:center;gap:10px">Depot & Sparen – Bestand für ' + ny +
+            '<button class="btn btn-ghost btn-sm" data-jw-btn="kurse">🔄 Kurse aktualisieren</button></div>' +
+          '<div class="table-wrap"><table><thead><tr><th>Position</th><th style="text-align:right">Stück</th><th style="text-align:right">Eingesetzt</th><th style="text-align:right">Wert</th><th style="text-align:right">Gewinn/Verlust</th></tr></thead><tbody>' + dRows + '</tbody></table></div>' +
+          (fehlt ? '<div style="font-size:11px;color:#a86b00;margin-top:4px">⚠ ' + fehlt + ' Position(en) ohne aktuellen Kurs – sie würden mit dem Kaufpreis übernommen. Bitte erst Kurse aktualisieren.</div>' : '')
+        : '') +
+      (plan.zaehler.length
+        ? '<div style="font-weight:600;font-size:13px;margin:16px 0 6px">Zählerstände</div>' +
+          '<div class="table-wrap"><table><thead><tr><th>Zähler</th><th style="text-align:right">Letzter Stand</th><th>Stand zum Jahreswechsel (optional)</th></tr></thead><tbody>' + zRows + '</tbody></table></div>'
+        : '') +
+      '<div style="margin-top:16px;padding-top:12px;border-top:1px solid var(--border)"><div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;margin-bottom:6px">Außerdem übernehmen</div>' +
+        opt('konten', 'Konten & Endstände') + opt('depot', 'Depot-Bestand') + opt('zaehler', 'Zählerstände') + opt('finanzprodukte', 'Finanzprodukte') +
+        opt('tabellen', 'Eigene Tabellen') + opt('auslagen', 'Offene Auslagen (' + plan.offeneAuslagen + ')') + '</div>';
+  }
+  function schritt3() {
+    return '<p style="font-size:13px;margin:0 0 12px">✅ <strong>' + ny + ' ist angelegt</strong> – ' + fertig.vertraege + ' Verträge übernommen. So lief ' + prev + ':</p>' +
+      jwZusammenfassungHtml(jwZusammenfassung(prev));
+  }
+  function render() {
+    const titel = ['Verträge prüfen', 'Kontostände, Depot & Zähler', 'Zusammenfassung ' + prev][schritt - 1];
+    overlay.innerHTML =
+      '<div class="modal" style="width:min(900px,96vw);max-width:900px;padding:0;max-height:92vh;display:flex;flex-direction:column">' +
+        '<div style="padding:16px 22px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:12px">' +
+          '<div style="font-size:28px;line-height:1">🎆</div>' +
+          '<div style="flex:1"><h3 style="margin:0;font-size:16px;font-weight:600">Jahreswechsel ' + prev + ' → ' + ny + '</h3>' +
+          '<div style="font-size:12px;color:var(--muted)">Schritt ' + schritt + ' von 3 · ' + titel + '</div></div>' +
+        '</div>' +
+        '<div style="padding:16px 22px;overflow:auto;flex:1">' + (schritt === 1 ? schritt1() : schritt === 2 ? schritt2() : schritt3()) + '</div>' +
+        '<div style="padding:12px 22px;border-top:1px solid var(--border);display:flex;justify-content:flex-end;gap:8px;background:var(--surface);border-radius:0 0 14px 14px">' +
+          (schritt === 3
+            ? '<button class="btn btn-ghost" data-jw-btn="pdf">📄 Als PDF speichern</button><button class="btn btn-primary" data-jw-btn="zu">Fertig</button>'
+            : '<button class="btn btn-ghost" data-jw-btn="zu">Abbrechen</button>' +
+              (schritt === 2 ? '<button class="btn btn-ghost" data-jw-btn="zurueck">Zurück</button><button class="btn btn-primary" data-jw-btn="anlegen">Jahr ' + ny + ' anlegen</button>'
+                             : '<button class="btn btn-primary" data-jw-btn="weiter">Weiter</button>')) +
+        '</div>' +
+      '</div>';
+  }
+  overlay.addEventListener('change', e => {
+    const t = e.target, typ = t.dataset && t.dataset.jw, i = t.dataset && t.dataset.i;
+    if (!typ) return;
+    const zahl = () => { const n = parseFloat(String(t.value).replace(',', '.')); return isNaN(n) ? null : n; };
+    if (typ === 'fix') plan.fixkosten[+i].uebernehmen = t.checked;
+    else if (typ === 'regel') plan.regel[+i].uebernehmen = t.checked;
+    else if (typ === 'umb') plan.umb[+i].uebernehmen = t.checked;
+    else if (typ === 'fixamt') { const n = zahl(); if (n !== null && n >= 0) plan.fixkosten[+i].amount = jwRund(n); }
+    else if (typ === 'ist') plan.konten[+i].ist = zahl();
+    else if (typ === 'zaehler') plan.zaehler[+i].neu = t.value;
+    else if (typ === 'gehalt') plan.gehalt = zahl() || 0;
+    else if (typ === 'nebenjob') plan.nebenjob = zahl() || 0;
+    else if (typ === 'opt') plan.opt[i] = t.checked;
+    if (typ !== 'zaehler' && typ !== 'gehalt' && typ !== 'nebenjob') render();
+  });
+  overlay.addEventListener('click', async e => {
+    const b = e.target.closest && e.target.closest('[data-jw-btn]');
+    if (!b) return;
+    const a = b.dataset.jwBtn;
+    if (a === 'zu') { zu(); if (fertig) renderPage(); }
+    else if (a === 'weiter') { schritt = 2; render(); }
+    else if (a === 'zurueck') { schritt = 1; render(); }
+    else if (a === 'pdf') jwPdf(prev);
+    else if (a === 'kurse') {
+      b.disabled = true; b.textContent = '⏳ lädt …';
+      try { if (typeof refreshAllWertpapierKurseSilent === 'function') await refreshAllWertpapierKurseSilent(); } catch (err) { console.error(err); }
+      plan.depot = buildDepotSnapshot(prev, ny);
+      render();
+    }
+    else if (a === 'anlegen') {
+      if (state.years[ny]) { showToast('Jahr ' + ny + ' existiert bereits', 'error'); return; }
+      jwAnwenden(plan);
+      fertig = { vertraege: (state.years[ny].fixkosten || []).length };
+      setSelectedYear(ny);
+      schritt = 3; render();
+      showToast('Jahr ' + ny + ' angelegt');
+    }
+  });
+  render();
+}
+// Beim Start: ab dem 01.01. den Jahreswechsel anbieten; besteht das Jahr schon,
+// prüfen, ob sich das Vorjahr nachträglich geändert hat (Startstände anpassen).
+async function jwPruefung() {
+  const cy = String(new Date().getFullYear()), prev = String(+cy - 1);
+  if (state.years[cy]) return jwStartstandPruefung(cy);
+  if (!state.years[prev]) return;
+  if (!state.config) state.config = {};
+  if (state.config.jwSpaeterAm === azHeute()) return;
+  const ok = await uiConfirm({ title: 'Jahreswechsel', icon: '🎆',
+    message: 'Willkommen in ' + cy + '! Soll das neue Jahr jetzt angelegt werden?',
+    details: ['Du gehst alle Verträge durch und siehst, welche Beträge sich ändern.',
+              'Kontostände, Depot und Zähler werden abgeglichen.',
+              'Am Ende bekommst du eine Zusammenfassung für ' + prev + '.'],
+    okLabel: 'Jahreswechsel starten', cancelLabel: 'Später' });
+  if (!ok) { state.config.jwSpaeterAm = azHeute(); saveData(); return; }
+  jahreswechselAssistent(cy);
+}
+async function jwStartstandPruefung(ny) {
+  const yd = state.years[ny];
+  if (!yd || !yd.startAusVorjahr || yd.status === 'closed' || !Array.isArray(yd.konten)) return;
+  const diffs = jwStartstaendeBerechnen(ny).map(k => {
+    const ziel = yd.konten.find(x => String(x.id) === String(k.id));
+    return ziel ? { k, ziel, diff: jwRund(k.start - (+ziel.start || 0)) } : null;
+  }).filter(d => d && Math.abs(d.diff) >= 0.01);
+  if (!diffs.length) return;
+  const sig = diffs.map(d => d.k.id + ':' + d.k.start).join('|');
+  if (yd.startHinweisSig === sig) return;
+  const ok = await uiConfirm({ title: 'Startstände ' + ny + ' anpassen?', icon: '🏦',
+    message: 'Im Vorjahr ' + (+ny - 1) + ' hat sich nachträglich etwas geändert. Die Startstände von ' + ny + ' passen nicht mehr zum Jahresende:',
+    details: diffs.map(d => (d.k.name || 'Konto') + ': ' + fmtEur(+d.ziel.start || 0) + ' → ' + fmtEur(d.k.start) + ' (' + (d.diff > 0 ? '+' : '') + fmtEur(d.diff) + ')'),
+    okLabel: 'Startstände anpassen', cancelLabel: 'So lassen' });
+  if (ok) {
+    diffs.forEach(d => { d.ziel.start = d.k.start; });
+    yd.startBalance = jwRund(yd.konten.reduce((s, k) => s + (+k.start || 0), 0));
+    delete yd.startHinweisSig;
+    showToast('Startstände ' + ny + ' aktualisiert');
+  } else yd.startHinweisSig = sig;
+  saveData(); renderPage();
+}
+window.jahreswechselAssistent = jahreswechselAssistent;
+
+// ════════════════════════════════════════════════════════════════════════════
 // ARBEITSZEIT NEBENJOB (optional aktivierbar wie PV, Menüpunkt erst nach Aktivierung)
 // ════════════════════════════════════════════════════════════════════════════
 // Bildet die DATEV-Stundenliste des Minijobs ab. Datenmodell BEWUSST außerhalb
@@ -11981,6 +12324,10 @@ function azCfg() {
     const n = parseFloat(c[k]);
     c[k] = n >= 0 && n <= 300 ? n : 0;            // Prozent auf den Stundenlohn
   });
+  // Erinnerung „Zeiten eintragen": an diesen Wochentagen (0 = So … 6 = Sa) ab Uhrzeit
+  if (c.erinnerungAktiv === undefined) c.erinnerungAktiv = true;
+  if (!Array.isArray(c.erinnerungTage)) c.erinnerungTage = [6];
+  if (azMin(c.erinnerungZeit) === null) c.erinnerungZeit = '18:00';
   return c;
 }
 
@@ -12324,6 +12671,115 @@ async function azSpeichern() {
   const d = azDauer(werte);
   showToast(alt ? 'Eintrag aktualisiert' : 'Arbeitstag gespeichert' + (d > AZ_MAX_MIN ? ' – ' + azDauerText(d - AZ_MAX_MIN) + ' gehen auf den Vortag' : ''));
 }
+// ── Schnell erfassen + Erinnerung ──────────────────────────────────────────
+// Übliche Arbeitszeit = häufigstes Von/Bis der bisherigen Einträge (ab 3 h, damit
+// verschobene Reststunden wie 19:40–20:00 nicht zählen).
+function azStandardZeit() {
+  const zaehl = {};
+  azListe().forEach(e => { if (e.von && e.bis && azDauer(e) >= 180) { const k = e.von + '|' + e.bis; zaehl[k] = (zaehl[k] || 0) + 1; } });
+  const top = Object.keys(zaehl).sort((a, b) => zaehl[b] - zaehl[a])[0];
+  if (!top) return { von: '08:00', bis: '14:00' };
+  const [von, bis] = top.split('|');
+  return { von, bis };
+}
+function azHatEintrag(datum) { return azListe().some(e => e.datum === datum); }
+// Jüngster Erinnerungstag (heute erst ab der Uhrzeit) ohne Eintrag, für den noch
+// nicht gefragt wurde. Ist der jüngste Tag schon erfasst, wird nicht weiter zurück gefragt.
+function azOffenerTag(jetzt) {
+  const c = azCfg();
+  const d0 = jetzt || new Date();
+  const heute = d0.getFullYear() + '-' + String(d0.getMonth() + 1).padStart(2, '0') + '-' + String(d0.getDate()).padStart(2, '0');
+  const jetztMin = d0.getHours() * 60 + d0.getMinutes();
+  for (let i = 0; i <= 7; i++) {
+    const d = azDatumPlus(heute, -i);
+    if (!c.erinnerungTage.includes(azWochentag(d))) continue;
+    if (i === 0 && jetztMin < azMin(c.erinnerungZeit)) continue;
+    if (azHatEintrag(d) || (c.erinnertFuer && c.erinnertFuer >= d)) return null;
+    return d;
+  }
+  return null;
+}
+// Ein-Klick-Eintrag mit der üblichen Zeit (nur wenn der Tag noch frei ist).
+function azSchnell(datum, von, bis, notiz) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(datum || '')) return false;
+  if (azHatEintrag(datum)) { showToast('Für den ' + datum.split('-').reverse().join('.') + ' gibt es schon einen Eintrag', 'error'); return false; }
+  const std = azStandardZeit();
+  const e = { id: uid(), erfasstAm: azHeute(), datum, von: von || std.von, bis: bis || std.bis, kuerzel: '', notiz: notiz || '' };
+  if (azDauer(e) <= 0) { showToast('„Bis" muss nach „Von" liegen', 'error'); return false; }
+  azListe().push(e);
+  const c = azCfg();
+  if (!c.erinnertFuer || c.erinnertFuer < datum) c.erinnertFuer = datum;
+  azSyncEinnahmen();
+  saveData();
+  if (typeof updateBadges === 'function') updateBadges();
+  renderPage();
+  const d = azDauer(e);
+  showToast('Eingetragen: ' + datum.split('-').reverse().join('.') + ' ' + e.von + '–' + e.bis +
+    (d > AZ_MAX_MIN ? ' – ' + azDauerText(d - AZ_MAX_MIN) + ' gehen auf den Vortag' : ''));
+  return true;
+}
+let _azDialogOffen = false, _azSpaeterBis = 0;
+function azSchnellDialog(datum, ausErinnerung) {
+  if (_azDialogOffen) return;
+  _azDialogOffen = true;
+  const std = azStandardZeit();
+  const tag = datum || azHeute();
+  const feld = 'padding:8px 10px;border:1px solid var(--border);border-radius:8px;background:var(--surface-2);color:var(--text);font-size:14px';
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.innerHTML =
+    '<div class="modal" style="max-width:460px;padding:0" onclick="event.stopPropagation()">' +
+      '<div style="padding:18px 22px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:12px">' +
+        '<div style="font-size:28px;line-height:1">⏱️</div>' +
+        '<div><h3 style="margin:0;font-size:16px;font-weight:600">' + (ausErinnerung ? 'Arbeitszeit eintragen?' : 'Arbeitszeit schnell erfassen') + '</h3>' +
+        '<div style="font-size:12px;color:var(--muted)">' + (ausErinnerung ? 'Für ' + AZ_WOCHENTAGE[azWochentag(tag)] + ', ' + tag.split('-').reverse().join('.') + ' ist noch nichts erfasst.' : 'Übliche Zeit ist vorausgefüllt.') + '</div></div>' +
+      '</div>' +
+      '<div style="padding:18px 22px;display:flex;gap:10px;flex-wrap:wrap">' +
+        '<label style="font-size:12px;flex:1 1 150px">Datum<br><input id="_azS_d" type="date" value="' + tag + '" style="' + feld + ';width:100%"></label>' +
+        '<label style="font-size:12px;flex:1 1 100px">Von<br><input id="_azS_v" type="time" value="' + std.von + '" style="' + feld + ';width:100%"></label>' +
+        '<label style="font-size:12px;flex:1 1 100px">Bis<br><input id="_azS_b" type="time" value="' + std.bis + '" style="' + feld + ';width:100%"></label>' +
+        '<label style="font-size:12px;flex:1 1 100%">Notiz (optional)<br><input id="_azS_n" type="text" style="' + feld + ';width:100%"></label>' +
+      '</div>' +
+      '<div style="padding:14px 22px;border-top:1px solid var(--border);display:flex;justify-content:flex-end;gap:8px;background:var(--surface);border-radius:0 0 14px 14px">' +
+        '<button class="btn btn-ghost" data-az="spaeter">' + (ausErinnerung ? 'Später' : 'Abbrechen') + '</button>' +
+        (ausErinnerung ? '<button class="btn btn-ghost" data-az="nein">Nicht gearbeitet</button>' : '') +
+        '<button class="btn btn-primary" data-az="ok">Eintragen</button>' +
+      '</div>' +
+    '</div>';
+  document.body.appendChild(overlay);
+  const q = s => overlay.querySelector(s);
+  const zu = () => { document.removeEventListener('keydown', kh); overlay.remove(); _azDialogOffen = false; };
+  function kh(e) { if (e.key === 'Escape') { _azSpaeterBis = Date.now() + 2 * 3600 * 1000; zu(); } else if (e.key === 'Enter') { e.preventDefault(); q('[data-az="ok"]').click(); } }
+  document.addEventListener('keydown', kh);
+  q('[data-az="spaeter"]').addEventListener('click', () => { _azSpaeterBis = Date.now() + 2 * 3600 * 1000; zu(); });
+  if (ausErinnerung) q('[data-az="nein"]').addEventListener('click', () => {
+    azCfg().erinnertFuer = tag; saveData(); zu();
+    showToast('Okay – für diesen Tag frage ich nicht mehr', 'info');
+  });
+  q('[data-az="ok"]').addEventListener('click', () => {
+    if (azSchnell(q('#_azS_d').value, q('#_azS_v').value, q('#_azS_b').value, q('#_azS_n').value.trim())) zu();
+  });
+  setTimeout(() => { const b = q('[data-az="ok"]'); if (b) b.focus(); }, 50);
+}
+async function azErinnerungPruefung() {
+  if (!azAktiv() || !azCfg().erinnerungAktiv || _azDialogOffen || Date.now() < _azSpaeterBis) return;
+  if (document.querySelector('.modal-overlay:not(.hidden)')) return;   // kein Dialog über einem anderen
+  const tag = azOffenerTag();
+  if (!tag) return;
+  try {
+    if (window.EA && window.EA.notify) window.EA.notify({ title: '⏱️ Arbeitszeit eintragen?',
+      body: AZ_WOCHENTAGE[azWochentag(tag)] + ', ' + tag.split('-').reverse().join('.') + ' ist noch nicht erfasst.' });
+  } catch (e) { /* ignore */ }
+  azSchnellDialog(tag, true);
+}
+function azErinnerungTag(wd, an) {
+  const c = azCfg();
+  c.erinnerungTage = c.erinnerungTage.filter(x => x !== wd);
+  if (an) c.erinnerungTage.push(wd);
+  c.erinnerungTage.sort();
+  saveData(); renderPage();
+}
+
 // ── Import früherer Monate aus ausgefüllten DATEV-Listen ───────────────────
 // Plan (ohne Seiteneffekte): neue Einträge, Konflikte und je Lohnmonat der
 // Vergleich „aus Stunden berechnet" ↔ „bisher in der App".
@@ -12714,9 +13170,21 @@ function arbeitszeit() {
   const datumDe = iso => iso.split('-').reverse().join('.');
 
   const formWerte = edit || { datum: heute.slice(0, 7) === ym ? heute : ym + '-01', von: '', bis: '', kuerzel: '', notiz: '' };
+  // Schnell-Knöpfe: heute und der letzte übliche Arbeitstag, sofern noch frei
+  const stdZeit = azStandardZeit();
+  const schnellTage = [];
+  for (let i = 0; i < 8 && schnellTage.length < 2; i++) {
+    const d = azDatumPlus(heute, -i);
+    if (!azHatEintrag(d) && (i === 0 || c.erinnerungTage.includes(azWochentag(d)))) schnellTage.push(d);
+  }
   const formHtml =
     '<div class="card mb-2">' +
       '<div class="card-header"><h3>' + (edit ? '✏️ Arbeitstag bearbeiten' : '➕ Arbeitstag erfassen') + '</h3></div>' +
+      (edit ? '' : '<div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:12px">' +
+        '<span style="font-size:12px;color:var(--muted)">Schnell erfassen:</span>' +
+        schnellTage.map(d => '<button class="btn btn-ghost btn-sm" onclick="azSchnell(\'' + d + '\')" title="Ein Klick – mit deiner üblichen Zeit">⚡ ' +
+          (d === heute ? 'Heute' : AZ_WOCHENTAGE[azWochentag(d)].slice(0, 2) + ', ' + datumDe(d).slice(0, 6)) + ' ' + stdZeit.von + '–' + stdZeit.bis + '</button>').join('') +
+        '<button class="btn btn-ghost btn-sm" onclick="azSchnellDialog()">Andere Zeit …</button></div>') +
       '<div style="display:flex;flex-wrap:wrap;gap:10px;align-items:flex-end">' +
         '<label class="field" style="flex:0 0 150px">Datum<input id="az_datum" type="date" value="' + formWerte.datum + '"></label>' +
         '<label class="field" style="flex:0 0 110px">Von<input id="az_von" type="time" value="' + escapeHtml(formWerte.von) + '"></label>' +
@@ -12819,6 +13287,17 @@ function arbeitszeit() {
           '<option value="sonntag"' + (c.stichtag === 'sonntag' ? ' selected' : '') + '>Sonntag nach dem letzten Samstag vor dem 20.</option>' +
         '</select></label>' +
         '<div style="display:flex;align-items:center;gap:8px;padding-top:18px;font-size:13px"><input type="checkbox" id="az_auto" style="width:16px;height:16px;margin:0"' + (c.autoExport ? ' checked' : '') + ' onchange="azCfgSetzen(\'autoExport\',this.checked)"><label for="az_auto">Am Stichtag automatisch vorbereiten (wenn die App läuft)</label></div>' +
+        '<div style="grid-column:1/-1;border-top:1px solid var(--border);padding-top:12px;font-size:13px">' +
+          '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">' +
+            '<input type="checkbox" id="az_erin" style="width:16px;height:16px;margin:0"' + (c.erinnerungAktiv ? ' checked' : '') + ' onchange="azCfgSetzen(\'erinnerungAktiv\',this.checked)">' +
+            '<label for="az_erin">🔔 Ans Eintragen erinnern, ab</label>' +
+            '<input type="time" value="' + c.erinnerungZeit + '" onchange="azCfgSetzen(\'erinnerungZeit\',this.value)" style="width:110px;padding:5px 7px;border:1px solid var(--border);border-radius:6px;background:var(--surface-2);color:var(--text)">' +
+            '<span>Uhr an:</span>' +
+            [1, 2, 3, 4, 5, 6, 0].map(wd => '<label style="display:inline-flex;align-items:center;gap:3px;font-size:12px"><input type="checkbox" style="width:14px;height:14px;margin:0"' +
+              (c.erinnerungTage.includes(wd) ? ' checked' : '') + ' onchange="azErinnerungTag(' + wd + ',this.checked)">' + AZ_WOCHENTAGE[wd].slice(0, 2) + '</label>').join('') +
+          '</div>' +
+          '<div style="font-size:11px;color:var(--muted);margin-top:4px">Ist an einem dieser Tage nach der Uhrzeit noch nichts erfasst, fragt die App nach (auch beim nächsten Start) und trägt die übliche Zeit mit einem Klick ein.</div>' +
+        '</div>' +
       '</div>' +
       '<div style="margin-top:12px;font-size:13px">' +
         '<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px"><span style="flex:0 0 110px;color:var(--muted)">DATEV-Vorlage</span>' +
@@ -12881,6 +13360,9 @@ window.azMonatExportieren = azMonatExportieren;
 window.azOrdnerOeffnen    = azOrdnerOeffnen;
 window.azEinfuehrungZeigen = azEinfuehrungZeigen;
 window.azImportStarten    = azImportStarten;
+window.azSchnell          = azSchnell;
+window.azSchnellDialog    = azSchnellDialog;
+window.azErinnerungTag    = azErinnerungTag;
 window.azFixSetzen        = azFixSetzen;
 window.azFixAufheben      = azFixAufheben;
 window.AZ_STANDARD_TEXT   = AZ_STANDARD_TEXT;
@@ -12920,7 +13402,15 @@ window.AZ_STANDARD_TEXT   = AZ_STANDARD_TEXT;
   setTimeout(() => { checkGeldEingang().catch(e => console.error('checkGeldEingang:', e)); }, 2600);
   // ── Arbeitszeit: Excel + Mail-Entwurf am Stichtag (beim Start + alle 30 Min.) ──
   setTimeout(() => { azAutoPruefung().catch(e => console.error('azAutoPruefung:', e)); }, 3500);
-  setInterval(() => { azAutoPruefung().catch(e => console.error('azAutoPruefung:', e)); }, 30 * 60 * 1000);
+  setInterval(() => {
+    azAutoPruefung().catch(e => console.error('azAutoPruefung:', e));
+    azErinnerungPruefung().catch(e => console.error('azErinnerungPruefung:', e));
+  }, 10 * 60 * 1000);
+  // ── Jahreswechsel (ab 01.01.) bzw. Startstände prüfen; danach Nebenjob-Erinnerung ──
+  setTimeout(() => {
+    jwPruefung().catch(e => console.error('jwPruefung:', e))
+      .then(() => azErinnerungPruefung()).catch(e => console.error('azErinnerungPruefung:', e));
+  }, 5000);
   // ── Robustheit: Backup-Ordner an Hauptprozess melden (für Backup beim Beenden)
   if (window.EA && window.EA.setBackupDir && state.config && state.config.backupPath) {
     try { window.EA.setBackupDir(state.config.backupPath); } catch {}

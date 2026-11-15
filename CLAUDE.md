@@ -97,9 +97,13 @@ ersetzen, wenn die App komplett beendet ist (inkl. System-Tray).
   `kursEUR(kInfo)` (FX live via frankfurter.app, Fallback `FX_DEFAULT`).
 - **Sparplan ↔ Depot**: `f.sparenLink.zielDepot`, Auto-Buchungen über
   `runSparenAutoEintragung` (`autoFromFixkostenId`).
-- **Jahreswechsel** (`confirmNewYear`): Übernahme von Konten, Zählern, Sparen
-  (`buildDepotSnapshot`), wiederkehrenden Umbuchungen, Fixkosten
-  (`laufzeitEnde`, Dynamik deep-copy).
+- **Jahreswechsel** (v1.0.68, `jahreswechselAssistent`): `jwPlan` sammelt ohne
+  Seiteneffekte, `jwAnwenden` setzt um. Fixkosten behalten ihren Rhythmus-Monat
+  (`jwNaechsteFaelligkeit`, Anker = `f.start`); beendete Posten werden nicht
+  übernommen; Kontokorrektur landet im Dezember des Vorjahres (`jwKorrektur`).
+  `buildDepotSnapshot`: `amount` = Wert zum Jahreswechsel, `einstand` =
+  eingesetztes Geld (immer über `sparenEinstand(s)` lesen). `jwPruefung` beim
+  Start (ab 01.01.) bzw. `jwStartstandPruefung` (Flag `startAusVorjahr`).
 - **Ablauf-Erinnerungen**: `checkAblaufReminders()` beim Start (Fixkosten +
   Versicherungen, Vorlauf `state.config.ablaufVorlauf`).
 - **Arbeitszeit Nebenjob** (v1.0.62, `state.arbeitszeit` + `arbeitszeitConfig`,
