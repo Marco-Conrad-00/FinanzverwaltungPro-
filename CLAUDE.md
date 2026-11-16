@@ -93,6 +93,10 @@ ersetzen, wenn die App komplett beendet ist (inkl. System-Tray).
   `status='erstattet'` am `erstattetAm` zurück (netto 0).
 - **Dynamik** (v1.0.61): `f.amount` bleibt Grundbetrag; effektiver Betrag immer
   über `fixkostBetrag(f, m)` – nie direkt `f.amount` in Monatsrechnungen.
+- **Betragsänderung ab Datum** (v1.0.69): `f.betraege = [{ ab:'YYYY-MM', amount }]`
+  ersetzt den Grundbetrag ab dem Monat (`fixkostAenderung`); Dynamik-Termine bis
+  dahin gelten als enthalten. Setzen nur über `fixkostBetragSetzen`. „Verträge
+  prüfen": `vertraegePruefen`, Erinnerung über `state.config.vertragsCheck`.
 - **Währungen**: `etfKurse` stehen in Handelswährung → Werte immer über
   `kursEUR(kInfo)` (FX live via frankfurter.app, Fallback `FX_DEFAULT`).
 - **Sparplan ↔ Depot**: `f.sparenLink.zielDepot`, Auto-Buchungen über
