@@ -255,6 +255,10 @@ async function checkGeldEingang() {
 // Format je Eintrag: { v: 'Version', date: 'YYYY-MM-DD', changes: ['...','...'] }
 // Änderungen dürfen mit **Fett** Markierung versehen werden.
 const CHANGELOG = [
+  { v: '1.0.69', date: '2026-11-16', changes: [
+    '**Vertragsbetrag ändern ab Datum.** In der Fixkosten-Tabelle hat jeder Vertrag einen ✏️-Knopf: neuen Betrag und „gilt ab" eintragen – fertig. Der Vertrag läuft weiter, frühere Monate behalten den alten Betrag, Kontostand und Auswertungen bleiben richtig. Du musst ihn nicht mehr beenden und neu anlegen. Mehrere Änderungen sind möglich, der Verlauf steht im Dialog. Eine ⚡ Dynamik rechnet ab ihrem nächsten Termin auf den neuen Betrag auf.',
+    '**„Verträge prüfen" – jederzeit und auf Wunsch automatisch.** Neuer Knopf „🔍 Verträge prüfen" auf der Fixkosten-Seite: alle laufenden Verträge mit aktuellem Betrag in einer Liste, neue Beträge samt „gilt ab" direkt eintragen. Im selben Dialog stellst du ein, ob die App dich automatisch erinnert (jeden Monat, alle 3, 6 oder 12 Monate).',
+  ]},
   { v: '1.0.68', date: '2026-11-15', changes: [
     '**Neu: Jahreswechsel-Assistent.** Ab dem 1. Januar fragt die App beim Start, ob das neue Jahr angelegt werden soll, und führt dich in drei Schritten durch: **(1) Verträge prüfen** – alle Fixkosten, Sparpläne, wiederkehrenden Einnahmen und Umbuchungen mit Betrag „zuletzt" und „ab neuem Jahr"; abhaken oder Betrag anpassen. **(2) Kontostände, Depot & Zähler** – echten Kontostand zum 31.12. eintragen (die Differenz wird als Abgleich in den Dezember gebucht), Depot-Bestand mit Wert und Gewinn/Verlust, Zählerstände, Gehalt fürs neue Jahr. **(3) Zusammenfassung des Vorjahres** – Einnahmen, Ausgaben, Überschuss, Konten, Depot, größte Kategorien; auf Wunsch als PDF. Erst „Jahr anlegen" ändert etwas. „+ Neues Jahr…" öffnet denselben Assistenten.',
     '**Jahreswechsel: Fehler behoben.** Verträge mit Rhythmus (vierteljährlich, halbjährlich, jährlich) bleiben jetzt in ihrem Monat – bisher rutschte z.B. eine Jahresrechnung vom Juni auf den Januar. Unterjährig beendete Fixkosten, Einnahmen und Umbuchungen werden nicht mehr wiederbelebt. Neu übernommen werden Gehalt, Finanzprodukte (samt Verknüpfung zum Vertrag), eigene Tabellen und offene Auslagen. Beim Depot bleibt das ursprünglich eingesetzte Geld erhalten, sodass Gewinn/Verlust über den Jahreswechsel hinweg stimmt.',
@@ -1505,13 +1509,27 @@ function dynamikTermine(f, bisM) {
   }
   return out;
 }
+// Betragsänderungen: f.betraege = [{ ab:'YYYY-MM', amount }]. Ab dem Monat gilt
+// der neue Betrag (z.B. Beitragsanpassung) – der Vertrag muss dafür nicht beendet
+// und neu angelegt werden. Liefert die im Monat m gültige Änderung oder null.
+function fixkostAenderung(f, m) {
+  const l = (f && Array.isArray(f.betraege)) ? f.betraege : [];
+  let treffer = null;
+  l.forEach(a => { if (a && a.ab && m && a.ab <= m && (!treffer || a.ab > treffer.ab)) treffer = a; });
+  return treffer;
+}
 function fixkostBetrag(f, m) {
   let amt = +f.amount || 0;
+  // Eine Betragsänderung ersetzt den Grundbetrag ab ihrem Monat; Dynamik-Termine
+  // bis dahin gelten als im neuen Betrag enthalten und wirken erst danach wieder.
+  const ae = fixkostAenderung(f, m);
+  const abFix = ae ? ae.ab : '';
+  if (ae) amt = +ae.amount || 0;
   const d = f && f.dynamik;
   if (d && d.aktiv && d.abMonat && (+d.wert || 0) !== 0 && m && m >= d.abMonat) {
     const skip = d.uebersprungen || [];
     dynamikTermine(f, m).forEach(s => {
-      if (skip.includes(s)) return;
+      if (skip.includes(s) || (abFix && s <= abFix)) return;
       if (d.typ === 'prozent') amt = Math.round(amt * (1 + (+d.wert || 0) / 100) * 100) / 100;
       else amt = Math.round((amt + (+d.wert || 0)) * 100) / 100;
     });
@@ -4870,6 +4888,7 @@ function fixkosten() {
         <h3>Fixkosten ${monthLabel(currentMonth)}</h3>
         <div class="actions">
           <span class="badge badge-muted">Gesamt: ${fmtEur(total)}</span>
+          <button class="btn btn-ghost btn-sm" onclick="vertraegePruefen()" ${lockAttr()} title="Alle Verträge durchgehen und geänderte Beträge mit Datum eintragen">🔍 Verträge prüfen</button>
           <button class="btn btn-primary btn-sm" onclick="addFixkosten()" ${lockAttr()}>+ Posten</button>
         </div>
       </div>
@@ -4913,8 +4932,8 @@ function fixkosten() {
               <td><input type="month" value="${f.end}" onchange="updateFixk('${f.id}','end',this.value)" style="width:145px"/></td>
               <td><input type="month" value="${f.laufzeitEnde||''}" onchange="updateFixk('${f.id}','laufzeitEnde',this.value)" style="width:145px" title="Echtes Vertragsende – wird beim Jahreswechsel übernommen; leer = unbefristet"/></td>
               <td><input type="number" value="${f.day||1}" onchange="updateFixk('${f.id}','day',+this.value)" style="width:60px;text-align:center" min="1" max="31"/></td>
-              <td style="white-space:nowrap"><input type="number" value="${(+f.amount||0).toFixed(2)}" onchange="updateFixk('${f.id}','amount',+this.value)" step="0.01" style="width:90px;text-align:right" title="Grundbetrag${hatAktiveDynamik(f)?' (ohne Dynamik)':''}"/> ${currencySymbol()}${(() => { if (!hatAktiveDynamik(f)) return ''; const eff = fixkostBetrag(f, currentMonth); const d = f.dynamik; const istZukunft = d.abMonat > currentMonth; const lbl = istZukunft ? ('ab ' + monthLabel(d.abMonat)) : 'akt.'; const wlbl = d.typ==='prozent' ? ('+'+fmt(+d.wert||0)+' %') : ('+'+fmtEur(+d.wert||0)); return `<div style="font-size:10px;color:var(--accent);white-space:nowrap;margin-top:2px" title="Dynamik ${wlbl}${d.intervallMonate>0?(' alle '+d.intervallMonate+' Monate'):' einmalig'} ab ${monthLabel(d.abMonat)}">⚡ ${fmtEur(eff)} ${lbl}</div>`; })()}</td>
-              <td style="white-space:nowrap"><button class="btn-icon" title="Dynamik (automatische Erhöhung) einrichten/bearbeiten" onclick="openDynamikModal('${f.id}')" style="width:auto;min-width:0;padding:0 8px;font-size:12px;${hatAktiveDynamik(f)?'color:var(--accent)':''}">⚡</button>${_vonBtn}${_zielBtn}${_depotBtn}<button class="btn-icon danger" onclick="deleteFixk('${f.id}')">×</button></td>
+              <td style="white-space:nowrap"><input type="number" value="${(+f.amount||0).toFixed(2)}" onchange="updateFixk('${f.id}','amount',+this.value)" step="0.01" style="width:90px;text-align:right" title="Grundbetrag${hatAktiveDynamik(f)?' (ohne Dynamik)':''}"/> ${currencySymbol()}${(() => { if (!hatAktiveDynamik(f)) return ''; const eff = fixkostBetrag(f, currentMonth); const d = f.dynamik; const istZukunft = d.abMonat > currentMonth; const lbl = istZukunft ? ('ab ' + monthLabel(d.abMonat)) : 'akt.'; const wlbl = d.typ==='prozent' ? ('+'+fmt(+d.wert||0)+' %') : ('+'+fmtEur(+d.wert||0)); return `<div style="font-size:10px;color:var(--accent);white-space:nowrap;margin-top:2px" title="Dynamik ${wlbl}${d.intervallMonate>0?(' alle '+d.intervallMonate+' Monate'):' einmalig'} ab ${monthLabel(d.abMonat)}">⚡ ${fmtEur(eff)} ${lbl}</div>`; })()}${(() => { const l = f.betraege || []; if (!l.length) return ''; const ae = fixkostAenderung(f, currentMonth); const next = l.filter(a => a.ab > currentMonth).sort((a, b) => a.ab.localeCompare(b.ab))[0]; return `<div style="font-size:10px;color:var(--accent);white-space:nowrap;margin-top:2px" title="Betragsänderung – Verlauf über ✏️">` + (ae ? `✏️ ${fmtEur(fixkostBetrag(f, currentMonth))} seit ${monthLabel(ae.ab)}` : '') + (next ? `${ae ? ' · ' : '✏️ '}${fmtEur(next.amount)} ab ${monthLabel(next.ab)}` : '') + `</div>`; })()}</td>
+              <td style="white-space:nowrap"><button class="btn-icon" title="Betrag ändern ab einem Datum (Vertrag läuft weiter)" onclick="openBetragModal('${f.id}')" style="width:auto;min-width:0;padding:0 8px;font-size:12px;${(f.betraege||[]).length?'color:var(--accent)':''}">✏️</button><button class="btn-icon" title="Dynamik (automatische Erhöhung) einrichten/bearbeiten" onclick="openDynamikModal('${f.id}')" style="width:auto;min-width:0;padding:0 8px;font-size:12px;${hatAktiveDynamik(f)?'color:var(--accent)':''}">⚡</button>${_vonBtn}${_zielBtn}${_depotBtn}<button class="btn-icon danger" onclick="deleteFixk('${f.id}')">×</button></td>
             </tr>`;
           }).join('')}
         </tbody>
@@ -11837,6 +11856,192 @@ window.updateRegelEinnahme   = updateRegelEinnahme;
 window.deleteRegelEinnahme   = deleteRegelEinnahme;
 
 // ════════════════════════════════════════════════════════════════════════════
+// VERTRÄGE: BETRAG ÄNDERN AB DATUM + „VERTRÄGE PRÜFEN"
+// ════════════════════════════════════════════════════════════════════════════
+// Bezugsmonat für „aktuell": der echte Monat, wenn er im gewählten Jahr liegt.
+function vpBezugsMonat() {
+  const h = thisMonth();
+  return h.slice(0, 4) === getSelectedYear() ? h : currentMonth;
+}
+// Trägt eine Betragsänderung ein (ersetzt eine Änderung im selben Monat).
+function fixkostBetragSetzen(f, ab, amount) {
+  if (!f || !/^\d{4}-\d{2}$/.test(ab || '') || !(amount >= 0)) return false;
+  const l = (Array.isArray(f.betraege) ? f.betraege : []).filter(a => a.ab !== ab);
+  l.push({ ab, amount: Math.round(amount * 100) / 100 });
+  l.sort((a, b) => a.ab.localeCompare(b.ab));
+  f.betraege = l;
+  return true;
+}
+function fixkostBetragLoeschen(f, ab) {
+  if (!f || !Array.isArray(f.betraege)) return;
+  f.betraege = f.betraege.filter(a => a.ab !== ab);
+  if (!f.betraege.length) delete f.betraege;
+}
+// Dialog „Betrag ändern" für einen Vertrag.
+function openBetragModal(id) {
+  if (!requireUnlocked()) return;
+  const f = (state.fixkosten || []).find(x => String(x.id) === String(id));
+  if (!f) return;
+  const feld = 'padding:8px 10px;border:1px solid var(--border);border-radius:8px;background:var(--surface-2);color:var(--text);font-size:14px';
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  document.body.appendChild(overlay);
+  const zu = () => { document.removeEventListener('keydown', kh); overlay.remove(); renderPage(); };
+  function kh(e) { if (e.key === 'Escape') zu(); }
+  document.addEventListener('keydown', kh);
+  function render() {
+    const m = vpBezugsMonat();
+    const liste = (f.betraege || []).slice().sort((a, b) => b.ab.localeCompare(a.ab));
+    overlay.innerHTML =
+      '<div class="modal" style="max-width:480px;padding:0">' +
+        '<div style="padding:18px 22px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:12px">' +
+          '<div style="font-size:28px;line-height:1">✏️</div>' +
+          '<div><h3 style="margin:0;font-size:16px;font-weight:600">Betrag ändern – ' + escapeHtml(f.name || 'Vertrag') + '</h3>' +
+          '<div style="font-size:12px;color:var(--muted)">Aktuell ' + fmtEur(fixkostBetrag(f, m)) + ' (' + monthLabel(m) + '). Der Vertrag läuft weiter, nur der Betrag ändert sich ab dem gewählten Monat.</div></div>' +
+        '</div>' +
+        '<div style="padding:18px 22px">' +
+          '<div style="display:flex;gap:10px;flex-wrap:wrap">' +
+            '<label style="font-size:12px;flex:1 1 150px">Neuer Betrag (' + currencySymbol() + ')<br><input id="_vb_amt" type="number" step="0.01" min="0" style="' + feld + ';width:100%"></label>' +
+            '<label style="font-size:12px;flex:1 1 150px">Gilt ab<br><input id="_vb_ab" type="month" value="' + m + '" style="' + feld + ';width:100%"></label>' +
+          '</div>' +
+          '<div style="font-size:11px;color:var(--muted);margin-top:6px">Frühere Monate behalten ihren alten Betrag – Kontostand und Auswertungen der Vergangenheit bleiben richtig.' +
+            (hatAktiveDynamik(f) ? ' Die ⚡ Dynamik rechnet ab dem nächsten Termin auf den neuen Betrag auf.' : '') + '</div>' +
+          '<div style="margin-top:14px;font-size:13px">' +
+            '<div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;margin-bottom:4px">Verlauf</div>' +
+            liste.map(a => '<div style="display:flex;align-items:center;gap:8px;padding:4px 0;border-bottom:1px solid var(--border)"><span style="flex:1">ab ' + monthLabel(a.ab) + '</span><strong>' + fmtEur(a.amount) + '</strong>' +
+              '<button class="btn-icon danger" data-vb-del="' + a.ab + '" title="Änderung entfernen">×</button></div>').join('') +
+            '<div style="display:flex;gap:8px;padding:4px 0;color:var(--muted)"><span style="flex:1">Grundbetrag (ab ' + monthLabel(f.start || m) + ')</span><span>' + fmtEur(+f.amount || 0) + '</span></div>' +
+          '</div>' +
+        '</div>' +
+        '<div style="padding:14px 22px;border-top:1px solid var(--border);display:flex;justify-content:flex-end;gap:8px;background:var(--surface);border-radius:0 0 14px 14px">' +
+          '<button class="btn btn-ghost" data-vb="zu">Schließen</button><button class="btn btn-primary" data-vb="ok">Änderung speichern</button>' +
+        '</div>' +
+      '</div>';
+    setTimeout(() => { const i = overlay.querySelector('#_vb_amt'); if (i) i.focus(); }, 50);
+  }
+  overlay.addEventListener('click', e => {
+    const del = e.target.closest && e.target.closest('[data-vb-del]');
+    if (del) { fixkostBetragLoeschen(f, del.dataset.vbDel); saveData(); render(); return; }
+    const b = e.target.closest && e.target.closest('[data-vb]');
+    if (!b) return;
+    if (b.dataset.vb === 'zu') { zu(); return; }
+    const n = parseFloat(String(overlay.querySelector('#_vb_amt').value).replace(',', '.'));
+    const ab = overlay.querySelector('#_vb_ab').value;
+    if (!(n >= 0)) { showToast('Bitte den neuen Betrag eingeben', 'error'); return; }
+    if (!fixkostBetragSetzen(f, ab, n)) { showToast('Bitte einen Monat wählen', 'error'); return; }
+    saveData();
+    if (typeof updateBadges === 'function') updateBadges();
+    showToast((f.name || 'Vertrag') + ': ' + fmtEur(n) + ' ab ' + monthLabel(ab));
+    zu();
+  });
+  render();
+}
+// „Verträge prüfen": alle laufenden Verträge auf einen Blick, neue Beträge mit
+// „gilt ab" eintragen. Jederzeit manuell (Fixkosten-Seite) und – wenn gewünscht –
+// automatisch alle X Monate (state.config.vertragsCheck = { intervall, letzter }).
+function vpCfg() {
+  if (!state.config) state.config = {};
+  const c = state.config.vertragsCheck || (state.config.vertragsCheck = {});
+  c.intervall = [1, 3, 6, 12].includes(+c.intervall) ? +c.intervall : 0;
+  return c;
+}
+function vpFaellig(heuteIso) {
+  const c = vpCfg();
+  if (!c.intervall) return false;
+  if (!c.letzter) return true;
+  return monthDiff(c.letzter.slice(0, 7), heuteIso.slice(0, 7)) >= c.intervall;
+}
+function vertraegePruefen() {
+  if (!requireUnlocked()) return;
+  const m = vpBezugsMonat(), c = vpCfg();
+  const zeilen = (state.fixkosten || []).filter(f => !(f.end && f.end < m))
+    .sort((a, b) => String(a.category || a.cat || '').localeCompare(String(b.category || b.cat || '')) || String(a.name || '').localeCompare(String(b.name || '')))
+    .map(f => ({ f, neu: '', ab: m }));
+  const num = 'style="width:110px;text-align:right;padding:5px 7px;border:1px solid var(--border);border-radius:6px;background:var(--surface-2);color:var(--text)"';
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  const rows = zeilen.map((z, i) => {
+    const f = z.f, iv = +f.interval || 1, akt = fixkostBetrag(f, m);
+    const hinweise = [];
+    const zukunft = (f.betraege || []).filter(a => a.ab > m).sort((a, b) => a.ab.localeCompare(b.ab))[0];
+    if (zukunft) hinweise.push('ab ' + monthLabel(zukunft.ab) + ': ' + fmtEur(zukunft.amount));
+    if (hatAktiveDynamik(f)) hinweise.push('⚡ Dynamik');
+    if (f.laufzeitEnde) hinweise.push('endet ' + monthLabel(f.laufzeitEnde));
+    if (f.sparenLink) hinweise.push('Sparplan');
+    return '<tr><td><strong>' + escapeHtml(f.name || '–') + '</strong><div style="font-size:11px;color:var(--muted)">' + escapeHtml(f.category || f.cat || '') + ' · ' + (JW_RHYTHMUS[iv] || 'alle ' + iv + ' Monate') + '</div></td>' +
+      '<td class="amount">' + fmtEur(akt) + '</td>' +
+      '<td><input type="number" step="0.01" min="0" data-vp="neu" data-i="' + i + '" placeholder="' + akt.toFixed(2) + '" ' + num + '></td>' +
+      '<td><input type="month" data-vp="ab" data-i="' + i + '" value="' + m + '" style="padding:5px 7px;border:1px solid var(--border);border-radius:6px;background:var(--surface-2);color:var(--text)"></td>' +
+      '<td style="font-size:11px;color:var(--muted)">' + hinweise.join(' · ') + '</td></tr>';
+  }).join('');
+  const summe = zeilen.reduce((s, z) => s + fixkostBetrag(z.f, m) / (+z.f.interval || 1), 0);
+  overlay.innerHTML =
+    '<div class="modal" style="width:min(860px,96vw);max-width:860px;padding:0;max-height:92vh;display:flex;flex-direction:column">' +
+      '<div style="padding:16px 22px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:12px">' +
+        '<div style="font-size:28px;line-height:1">🔍</div>' +
+        '<div><h3 style="margin:0;font-size:16px;font-weight:600">Verträge prüfen</h3>' +
+        '<div style="font-size:12px;color:var(--muted)">Stimmen die Beträge noch? Trag nur dort einen neuen Betrag ein, wo sich etwas geändert hat – er gilt ab dem gewählten Monat.' +
+          (c.letzter ? ' Zuletzt geprüft: ' + c.letzter.split('-').reverse().join('.') + '.' : '') + '</div></div>' +
+      '</div>' +
+      '<div style="padding:16px 22px;overflow:auto;flex:1">' +
+        (zeilen.length
+          ? '<div class="table-wrap"><table><thead><tr><th>Vertrag</th><th style="text-align:right">Aktuell (' + monthLabel(m) + ')</th><th>Neuer Betrag</th><th>Gilt ab</th><th>Hinweis</th></tr></thead><tbody>' + rows +
+            '</tbody><tfoot><tr><td><strong>Pro Monat (umgerechnet)</strong></td><td class="amount"><strong>' + fmtEur(summe) + '</strong></td><td></td><td></td><td></td></tr></tfoot></table></div>'
+          : '<div style="font-size:13px;color:var(--muted)">Keine laufenden Verträge in ' + getSelectedYear() + '.</div>') +
+        '<div style="margin-top:14px;font-size:13px;display:flex;align-items:center;gap:8px;flex-wrap:wrap">🔔 Automatisch ans Prüfen erinnern: ' +
+          '<select id="_vp_iv" style="padding:5px 7px;border:1px solid var(--border);border-radius:6px;background:var(--surface-2);color:var(--text)">' +
+            [[0, 'nie'], [1, 'jeden Monat'], [3, 'alle 3 Monate'], [6, 'alle 6 Monate'], [12, 'einmal im Jahr']].map(o => '<option value="' + o[0] + '"' + (c.intervall === o[0] ? ' selected' : '') + '>' + o[1] + '</option>').join('') +
+          '</select></div>' +
+      '</div>' +
+      '<div style="padding:12px 22px;border-top:1px solid var(--border);display:flex;justify-content:flex-end;gap:8px;background:var(--surface);border-radius:0 0 14px 14px">' +
+        '<button class="btn btn-ghost" data-vp-btn="zu">Abbrechen</button><button class="btn btn-primary" data-vp-btn="ok">Geprüft – speichern</button>' +
+      '</div>' +
+    '</div>';
+  document.body.appendChild(overlay);
+  overlay.addEventListener('change', e => {
+    const t = e.target;
+    if (t.dataset && t.dataset.vp) zeilen[+t.dataset.i][t.dataset.vp] = t.value;
+  });
+  overlay.addEventListener('click', e => {
+    const b = e.target.closest && e.target.closest('[data-vp-btn]');
+    if (!b) return;
+    if (b.dataset.vpBtn === 'zu') { overlay.remove(); return; }
+    let geaendert = 0;
+    for (const z of zeilen) {
+      if (String(z.neu).trim() === '') continue;
+      const n = parseFloat(String(z.neu).replace(',', '.'));
+      if (!(n >= 0) || !/^\d{4}-\d{2}$/.test(z.ab)) { showToast('Bitte Betrag und Monat bei „' + (z.f.name || 'Vertrag') + '" prüfen', 'error'); return; }
+      if (Math.abs(n - fixkostBetrag(z.f, z.ab)) < 0.01) continue;
+      fixkostBetragSetzen(z.f, z.ab, n);
+      geaendert++;
+    }
+    c.intervall = +overlay.querySelector('#_vp_iv').value || 0;
+    c.letzter = azHeute();
+    delete c.spaeterAm;
+    saveData();
+    if (typeof updateBadges === 'function') updateBadges();
+    overlay.remove();
+    renderPage();
+    showToast('Verträge geprüft' + (geaendert ? ' – ' + geaendert + (geaendert === 1 ? ' Betrag' : ' Beträge') + ' geändert' : ' – keine Änderung'));
+  });
+}
+// Beim Start: nach Ablauf des Intervalls ans Prüfen erinnern (nur im laufenden Jahr).
+async function vertragsCheckPruefung() {
+  const c = vpCfg(), heute = azHeute();
+  if (!vpFaellig(heute) || c.spaeterAm === heute) return;
+  if (getSelectedYear() !== heute.slice(0, 4) || isSelectedYearLocked()) return;
+  if (document.querySelector('.modal-overlay:not(.hidden)')) return;
+  const ok = await uiConfirm({ title: 'Verträge prüfen?', icon: '🔍',
+    message: c.letzter ? 'Die letzte Prüfung war am ' + c.letzter.split('-').reverse().join('.') + '. Stimmen die Beträge deiner Verträge noch?'
+                       : 'Stimmen die Beträge deiner Verträge noch?',
+    okLabel: 'Jetzt prüfen', cancelLabel: 'Später' });
+  if (!ok) { c.spaeterAm = heute; saveData(); return; }
+  vertraegePruefen();
+}
+window.openBetragModal  = openBetragModal;
+window.vertraegePruefen = vertraegePruefen;
+
+// ════════════════════════════════════════════════════════════════════════════
 // JAHRESWECHSEL-ASSISTENT
 // ════════════════════════════════════════════════════════════════════════════
 // Ab dem 01.01. fragt die App beim Start, ob das neue Jahr angelegt werden soll.
@@ -11876,11 +12081,19 @@ function jwFixkostPlan(f, ny) {
     const m = prev + '-' + String(i).padStart(2, '0');
     if (fixkostenAktivImMonat(f, m)) betragAlt = fixkostBetrag(f, m);
   }
-  return { src: f, uebernehmen, grund, start, end, betragAlt, amount: +f.amount || 0 };
+  // amount = Betrag bei der ersten Fälligkeit im neuen Jahr; ändert ihn der Nutzer
+  // im Assistenten, wird daraus eine Betragsänderung ab diesem Monat.
+  const amount = fixkostBetrag(f, start);
+  return { src: f, uebernehmen, grund, start, end, betragAlt, amount, amountOrig: amount };
 }
-// Beträge im neuen Jahr (erste und letzte Fälligkeit) für den ggf. geänderten Grundbetrag.
+function jwBetraege(p) {
+  const l = (p.src.betraege || []).map(a => Object.assign({}, a));
+  if (Math.abs(p.amount - p.amountOrig) < 0.01) return l;
+  return l.filter(a => a.ab !== p.start).concat([{ ab: p.start, amount: p.amount }]).sort((a, b) => a.ab.localeCompare(b.ab));
+}
+// Beträge im neuen Jahr (erste und letzte Fälligkeit) inkl. einer im Assistenten eingetragenen Änderung.
 function jwFixkostBetraege(p) {
-  const f = Object.assign({}, p.src, { amount: p.amount, start: p.start, end: p.end });
+  const f = Object.assign({}, p.src, { betraege: jwBetraege(p), start: p.start, end: p.end });
   let letzte = p.start;
   const iv = +f.interval || 1;
   while (monthShift(letzte, iv) <= p.end) letzte = monthShift(letzte, iv);
@@ -11953,7 +12166,9 @@ function jwAnwenden(plan) {
   // 2) Verträge (Fixkosten/Sparpläne) – Rhythmus bleibt am ursprünglichen Monat
   const idMap = {};
   yd.fixkosten = plan.fixkosten.filter(p => p.uebernehmen).map(p => {
-    const copy = Object.assign({}, p.src, { id: uid(), start: p.start, end: p.end, amount: p.amount });
+    const copy = Object.assign({}, p.src, { id: uid(), start: p.start, end: p.end });
+    const betraege = jwBetraege(p);
+    if (betraege.length) copy.betraege = betraege; else delete copy.betraege;
     if (p.src.dynamik) copy.dynamik = Object.assign({}, p.src.dynamik, { uebersprungen: (p.src.dynamik.uebersprungen || []).slice() });
     if (p.src.sparenLink) copy.sparenLink = Object.assign({}, p.src.sparenLink);
     idMap[String(p.src.id)] = copy.id;
@@ -12110,7 +12325,7 @@ function jahreswechselAssistent(ny) {
         '<td><strong>' + escapeHtml(f.name || '–') + '</strong><div style="font-size:11px;color:var(--muted)">' + escapeHtml(f.category || f.cat || '') + ' · ' + (JW_RHYTHMUS[iv] || 'alle ' + iv + ' Monate') + '</div></td>' +
         '<td class="amount">' + (p.betragAlt !== null ? fmtEur(p.betragAlt) : '–') + '</td>' +
         '<td class="amount">' + fmtEur(b.neu) + (Math.abs(diff) >= 0.01 ? '<div style="font-size:11px;color:' + (diff > 0 ? 'var(--red)' : 'var(--green)') + '">' + (diff > 0 ? '+' : '') + fmtEur(diff) + '</div>' : '') + '</td>' +
-        '<td><input type="number" step="0.01" data-jw="fixamt" data-i="' + i + '" value="' + p.amount.toFixed(2) + '" ' + num + (dyn ? ' readonly title="Grundbetrag – Dynamik rechnet darauf auf"' : '') + '></td>' +
+        '<td><input type="number" step="0.01" data-jw="fixamt" data-i="' + i + '" value="' + p.amount.toFixed(2) + '" ' + num + ' title="Neuer Betrag ab ' + monat(p.start) + '"></td>' +
         '<td style="font-size:11px;color:var(--muted)">' + hinweise.join(' · ') + '</td></tr>';
     }).join('');
     const liste = (titel, arr, typ, text) => arr.length
@@ -12118,9 +12333,9 @@ function jahreswechselAssistent(ny) {
         arr.map((p, i) => '<tr' + (p.uebernehmen ? '' : ' style="opacity:.55"') + '><td style="width:30px">' + cb(typ, i, p.uebernehmen) + '</td><td>' + text(p.src) + '</td>' +
           '<td class="amount">' + fmtEur(+p.src.amount || 0) + ' / Monat</td><td style="font-size:11px;color:var(--muted)">' + (p.grund || '') + '</td></tr>').join('') +
         '</tbody></table></div>' : '';
-    return '<p style="font-size:13px;margin:0 0 10px">Diese Verträge laufen in <strong>' + prev + '</strong>. Haken = wird nach ' + ny + ' übernommen. Stimmt ein Betrag nicht mehr (z. B. Beitragserhöhung), trag den neuen Grundbetrag ein.</p>' +
+    return '<p style="font-size:13px;margin:0 0 10px">Diese Verträge laufen in <strong>' + prev + '</strong>. Haken = wird nach ' + ny + ' übernommen. Stimmt ein Betrag nicht mehr (z. B. Beitragserhöhung), trag den neuen Betrag ein – er gilt ab der ersten Fälligkeit in ' + ny + '.</p>' +
       (plan.fixkosten.length
-        ? '<div class="table-wrap"><table><thead><tr><th></th><th>Vertrag</th><th style="text-align:right">Zuletzt ' + prev + '</th><th style="text-align:right">Ab ' + ny + '</th><th>Grundbetrag</th><th>Hinweis</th></tr></thead><tbody>' + rows +
+        ? '<div class="table-wrap"><table><thead><tr><th></th><th>Vertrag</th><th style="text-align:right">Zuletzt ' + prev + '</th><th style="text-align:right">Ab ' + ny + '</th><th>Neuer Betrag</th><th>Hinweis</th></tr></thead><tbody>' + rows +
           '</tbody><tfoot><tr><td></td><td><strong>Pro Monat (umgerechnet)</strong></td><td class="amount"><strong>' + fmtEur(sumAlt) + '</strong></td><td class="amount"><strong>' + fmtEur(sumNeu) + '</strong></td><td></td><td></td></tr></tfoot></table></div>'
         : '<div style="font-size:13px;color:var(--muted)">Keine Fixkosten in ' + prev + '.</div>') +
       liste('Wiederkehrende Einnahmen', plan.regel, 'regel', r => escapeHtml(r.source || 'Einnahme')) +
@@ -13409,6 +13624,7 @@ window.AZ_STANDARD_TEXT   = AZ_STANDARD_TEXT;
   // ── Jahreswechsel (ab 01.01.) bzw. Startstände prüfen; danach Nebenjob-Erinnerung ──
   setTimeout(() => {
     jwPruefung().catch(e => console.error('jwPruefung:', e))
+      .then(() => vertragsCheckPruefung()).catch(e => console.error('vertragsCheckPruefung:', e))
       .then(() => azErinnerungPruefung()).catch(e => console.error('azErinnerungPruefung:', e));
   }, 5000);
   // ── Robustheit: Backup-Ordner an Hauptprozess melden (für Backup beim Beenden)
