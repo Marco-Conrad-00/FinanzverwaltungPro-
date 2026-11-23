@@ -6,6 +6,10 @@ aus den bisherigen claude.ai-/Cowork-Sitzungen (Stand: v1.0.61, 2026-10-29).
 > ⚠️ **Das Repo ist ÖFFENTLICH.** Niemals echte Finanzdaten, Kontostände,
 > Policen-/Vertragsnummern, `data.json`, Backups oder Tokens committen –
 > auch nicht in Release-Notes, Commit-Messages oder Testdaten.
+> Das gilt auch für **Beispiele**: In CHANGELOG, Release-Notes, Tooltips und
+> Kommentaren nur erfundene Zahlen (z. B. 20,00 €, 12 €/h) – nie echte Beträge,
+> Stundenlöhne, Monate mit echten Werten, Anbieter oder Lebensumstände aus
+> Marcos Daten oder Unterlagen. Vor jedem Push den Diff darauf prüfen.
 
 ---
 
