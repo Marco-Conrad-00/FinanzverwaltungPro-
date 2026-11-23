@@ -281,6 +281,9 @@ async function checkGeldEingang() {
 // Format je Eintrag: { v: 'Version', date: 'YYYY-MM-DD', changes: ['...','...'] }
 // Änderungen dürfen mit **Fett** Markierung versehen werden.
 const CHANGELOG = [
+  { v: '1.0.73', date: '2026-11-23', changes: [
+    '**Wartungsversion.** Gleicher Funktionsumfang wie 1.0.72 (inkl. „Mein Anteil" bei Verträgen), nur mit überarbeiteten Texten im Änderungsprotokoll.',
+  ]},
   { v: '1.0.72', date: '2026-11-23', changes: [
     '**„Mein Anteil" bei Verträgen.** Zahlst du einen Vertrag nur anteilig, weil jemand anderes einen Teil erstattet, trägst du beim Vertrag „Mein Anteil (%)" ein. Der Vertrag zeigt den vollen Beitrag laut Versicherer, die verknüpfte Fixkost deinen Anteil. Betragsänderungen werden in beide Richtungen passend umgerechnet (z. B. 20,00 € voll bei 50 % = 10,00 € für dich).',
   ]},
