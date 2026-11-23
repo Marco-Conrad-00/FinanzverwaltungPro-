@@ -281,6 +281,9 @@ async function checkGeldEingang() {
 // Format je Eintrag: { v: 'Version', date: 'YYYY-MM-DD', changes: ['...','...'] }
 // Änderungen dürfen mit **Fett** Markierung versehen werden.
 const CHANGELOG = [
+  { v: '1.0.72', date: '2026-11-23', changes: [
+    '**„Mein Anteil" bei Verträgen.** Zahlst du einen Vertrag nur anteilig, weil jemand anderes einen Teil erstattet, trägst du beim Vertrag „Mein Anteil (%)" ein. Der Vertrag zeigt den vollen Beitrag laut Versicherer, die verknüpfte Fixkost deinen Anteil. Betragsänderungen werden in beide Richtungen passend umgerechnet (z. B. 20,00 € voll bei 50 % = 10,00 € für dich).',
+  ]},
   { v: '1.0.71', date: '2026-11-23', changes: [
     '**„Verträge" statt „Versicherungen".** Die Seite verwaltet jetzt alle Verträge – mit Filter nach Art: 🛡️ Versicherungen, ⚡ Energie, 📱 Telefon & Internet, 🔁 Abos, 📄 Sonstige. Bestehende Einträge werden automatisch eingeordnet (z. B. „Strom" → Energie) und lassen sich im Feld „Art" umstellen. Die Fixkosten bleiben die Übersicht über alle Abbuchungen.',
     '**Laufzeit, Kündigungsfrist, Preisgarantie.** Je Vertrag: Laufzeit bis, ob er sich danach verlängert (z. B. um 12 Monate) oder jederzeit kündbar ist, Kündigungsfrist in Wochen oder Monaten, Preisgarantie bis, Kunden- und Zählernummer. Die App rechnet aus, **bis wann du kündigen musst**, zeigt es in der Liste und in den Fixkosten (✂️) und erinnert rechtzeitig – ebenso vor dem Ende einer Preisgarantie. „Kündigen zum …" schlägt automatisch das passende Vertragsende vor.',
@@ -2632,8 +2635,9 @@ function reminderBannerHtml() {
 let selectedVersId = null;
 function getVersicherungen() { return state.versicherungen || (state.versicherungen = []); }
 const ZAHLWEISEN = ['monatlich', 'vierteljährlich', 'halbjährlich', 'jährlich', 'einmalig'];
+// Monatlicher eigener Anteil (Betrag je Monat × „Mein Anteil").
 function versMonthly(v) {
-  const a = versBetrag(v, thisMonth());
+  const a = versBetrag(v, thisMonth()) * versAnteil(v) / 100;
   return v.zahlweise === 'monatlich' ? a : v.zahlweise === 'vierteljährlich' ? a/3
        : v.zahlweise === 'halbjährlich' ? a/6 : v.zahlweise === 'jährlich' ? a/12 : a;
 }
@@ -2799,6 +2803,8 @@ function versicherungen() {
           '<label class="field">Betrag aktuell (' + currencySymbol() + ' / ' + (sel.zahlweise||'') + ')<input type="number" step="0.01" value="' + versBetrag(sel, thisMonth()).toFixed(2) + '" onchange="versBetragAendern(\'' + sel.id + '\',+this.value)" title="Bei einer Änderung fragt die App, ab wann der neue Betrag gilt"/>' +
             (aenderungHinweis(sel.betraege, thisMonth(), fmtEur) ? '<span style="font-size:11px;color:var(--accent)">' + aenderungHinweis(sel.betraege, thisMonth(), fmtEur) + '</span>' : '') + '</label>' +
           '<label class="field">Zahlweise<select onchange="updateVers(\'' + sel.id + '\',\'zahlweise\',this.value)">' + zwOpts + '</select></label>' +
+          '<label class="field">Mein Anteil (%)<input type="number" min="1" max="100" step="1" value="' + versAnteil(sel) + '" onchange="updateVers(\'' + sel.id + '\',\'anteil\',Math.min(100,Math.max(1,+this.value||100)))" title="Zahlst du nur einen Teil (z. B. 50 %, den Rest erstattet jemand anderes)? Die verknüpfte Fixkost zeigt dann deinen Anteil."/>' +
+            (versAnteil(sel) < 100 ? '<span style="font-size:11px;color:var(--muted)">Dein Anteil: ' + fmtEur(versBetrag(sel, thisMonth()) * versAnteil(sel) / 100) + ' / ' + (sel.zahlweise||'') + '</span>' : '') + '</label>' +
           '<label class="field">Beginn<input type="month" value="' + (sel.start||'') + '" onchange="updateVers(\'' + sel.id + '\',\'start\',this.value)"/></label>' +
           '<label class="field">Ende (leer = unbefristet)<input type="month" value="' + (sel.end||'') + '" onchange="updateVers(\'' + sel.id + '\',\'end\',this.value)"/></label>' +
           (art === 'energie' ? F('Zählernummer','zaehlernummer','text',sel.zaehlernummer) : '') +
@@ -2824,7 +2830,7 @@ function versicherungen() {
           (fixLinked
             ? '<span class="badge badge-green">🔗 verknüpft mit Fixkosten: ' + escapeHtml(fixLinked.name||'') + '</span>'
             : '<button class="btn btn-ghost btn-sm" onclick="versLinkFixkost(\'' + sel.id + '\')">🔗 Mit Fixkosten verknüpfen / anlegen</button>') +
-          '<span style="font-size:11px;color:var(--muted)">≈ ' + fmtEur(versMonthly(sel)) + ' / Monat</span>' +
+          '<span style="font-size:11px;color:var(--muted)">≈ ' + fmtEur(versMonthly(sel)) + ' / Monat' + (versAnteil(sel) < 100 ? ' (dein Anteil)' : '') + '</span>' +
           ((sel.name && sel.anbieter && sel.police)
             ? '<button class="btn btn-ghost btn-sm" onclick="versKuendigen(\'' + sel.id + '\')" title="Kündigungsschreiben erzeugen (PDF / E-Mail-Vorlage)" style="margin-left:auto">✉️ Schreiben</button>'
             : '<span style="font-size:11px;color:var(--muted);margin-left:auto" title="Für das Kündigungsschreiben Name, Anbieter und Vertragsnummer ausfüllen">✉️ Schreiben (Name/Anbieter/Nummer nötig)</span>') +
@@ -2862,7 +2868,7 @@ function updateVers(id, f, v) {
   if (['laufzeitBis','verlaengerungMonate','kuendFristWert','kuendFristEinheit','preisgarantieBis','end'].includes(f)) {
     try { checkAblaufReminders(); } catch (e) { console.error('checkAblaufReminders:', e); }
   }
-  if (['name','amount','zahlweise','end','art','laufzeitBis','verlaengerungMonate','kuendFristWert','kuendFristEinheit','preisgarantieBis'].includes(f)) renderPage();
+  if (['name','amount','zahlweise','end','art','anteil','laufzeitBis','verlaengerungMonate','kuendFristWert','kuendFristEinheit','preisgarantieBis'].includes(f)) renderPage();
 }
 async function deleteVersicherung(id) {
   const o = getVersicherungen().find(x => x.id === id); if (!o) return;
@@ -12069,10 +12075,13 @@ function fixkostBetragLoeschen(f, ab, ohneSync) {
 // Jahreswechsel mitkopiert. v.fixId ist der alte Verweis (nur noch Fallback).
 // Beträge: Versicherung je Zahlweise (z.B. 420 €/Jahr), Fixkost je Abbuchung im
 // eigenen Rhythmus (z.B. 35 €/Monat) → Umrechnung über die Monate.
+// v.anteil (%, Standard 100): Die Versicherung führt den vollen Beitrag, die
+// Fixkost nur den eigenen Anteil (z.B. 50 %, wenn jemand anderes die Hälfte erstattet).
 const ZW_MONATE = { 'monatlich': 1, 'vierteljährlich': 3, 'halbjährlich': 6, 'jährlich': 12 };
 function zwMonate(z) { return ZW_MONATE[z] || 1; }
-function versZuFix(v, f, betrag) { return Math.round((+betrag || 0) / zwMonate(v.zahlweise) * (+f.interval || 1) * 100) / 100; }
-function fixZuVers(f, v, betrag) { return Math.round((+betrag || 0) / (+f.interval || 1) * zwMonate(v.zahlweise) * 100) / 100; }
+function versAnteil(v) { const a = parseFloat(v && v.anteil); return a > 0 && a <= 100 ? a : 100; }
+function versZuFix(v, f, betrag) { return Math.round((+betrag || 0) / zwMonate(v.zahlweise) * (+f.interval || 1) * versAnteil(v) / 100 * 100) / 100; }
+function fixZuVers(f, v, betrag) { return Math.round((+betrag || 0) / (+f.interval || 1) * zwMonate(v.zahlweise) * 100 / versAnteil(v) * 100) / 100; }
 function versFuerFix(f) {
   if (!f) return null;
   const l = getVersicherungen();

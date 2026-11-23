@@ -100,7 +100,8 @@ ersetzen, wenn die App komplett beendet ist (inkl. System-Tray).
 - **Versicherung ↔ Fixkost** (v1.0.70): Verknüpfung steht an der Fixkost
   (`f.versId`, wird beim Jahreswechsel mitkopiert; `v.fixId` nur Altbestand).
   Betragsänderungen immer über `fixkostBetragSetzen` / `versBetragSetzen` – die
-  synchronisieren die Gegenseite (Umrechnung `versZuFix`/`fixZuVers`). Betrag der
+  synchronisieren die Gegenseite (Umrechnung `versZuFix`/`fixZuVers` inkl.
+  `v.anteil` = „Mein Anteil %", Vertrag voll / Fixkost Anteil). Betrag der
   Versicherung über `versBetrag(v, m)`, nie direkt `v.amount`. Kündigung:
   `vertragKuendigungAnwenden` (setzt `laufzeitEnde`, `gekuendigtZum`, optional
   Folgetarif mit `vorgaengerId`/`nachfolgerId`).
