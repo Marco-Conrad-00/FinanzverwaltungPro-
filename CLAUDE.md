@@ -97,6 +97,13 @@ ersetzen, wenn die App komplett beendet ist (inkl. System-Tray).
   ersetzt den Grundbetrag ab dem Monat (`fixkostAenderung`); Dynamik-Termine bis
   dahin gelten als enthalten. Setzen nur über `fixkostBetragSetzen`. „Verträge
   prüfen": `vertraegePruefen`, Erinnerung über `state.config.vertragsCheck`.
+- **Versicherung ↔ Fixkost** (v1.0.70): Verknüpfung steht an der Fixkost
+  (`f.versId`, wird beim Jahreswechsel mitkopiert; `v.fixId` nur Altbestand).
+  Betragsänderungen immer über `fixkostBetragSetzen` / `versBetragSetzen` – die
+  synchronisieren die Gegenseite (Umrechnung `versZuFix`/`fixZuVers`). Betrag der
+  Versicherung über `versBetrag(v, m)`, nie direkt `v.amount`. Kündigung:
+  `vertragKuendigungAnwenden` (setzt `laufzeitEnde`, `gekuendigtZum`, optional
+  Folgetarif mit `vorgaengerId`/`nachfolgerId`).
 - **Währungen**: `etfKurse` stehen in Handelswährung → Werte immer über
   `kursEUR(kInfo)` (FX live via frankfurter.app, Fallback `FX_DEFAULT`).
 - **Sparplan ↔ Depot**: `f.sparenLink.zielDepot`, Auto-Buchungen über

@@ -255,6 +255,11 @@ async function checkGeldEingang() {
 // Format je Eintrag: { v: 'Version', date: 'YYYY-MM-DD', changes: ['...','...'] }
 // Änderungen dürfen mit **Fett** Markierung versehen werden.
 const CHANGELOG = [
+  { v: '1.0.70', date: '2026-11-23', changes: [
+    '**Versicherungen und Fixkosten sind jetzt gekoppelt.** Änderst du den Betrag an einer Stelle – in „Verträge prüfen", über ✏️ in den Fixkosten oder direkt bei der Versicherung –, wird er in der anderen Tabelle mit demselben „gilt ab"-Datum übernommen. Die App rechnet dabei um (z. B. 480 €/Jahr bei der Versicherung = 40 €/Monat in den Fixkosten). Bereits eingetragene Änderungen werden beim ersten Start einmalig abgeglichen. Die Verknüpfung bleibt jetzt auch über den Jahreswechsel erhalten.',
+    '**„Geändert am" und „neu ab".** Bei Versicherung und Fixkost steht jetzt, ab wann ein neuer Betrag gilt und wann er eingetragen wurde; die Versicherung zeigt den kompletten Beitragsverlauf. Weichen Versicherung und Fixkost voneinander ab, weist die App darauf hin und gleicht auf Knopfdruck an.',
+    '**Kündigen zum Datum – optional mit neuem Tarif.** Über 🚫 in den Fixkosten oder „Kündigen zum …" bei der Versicherung trägst du das Kündigungsdatum ein. Die App berechnet die letzte Abbuchung und beendet Versicherung und Fixkost gemeinsam. Auf Wunsch legt sie direkt den Folgetarif an (z. B. Stromwechsel): neuer Name, Anbieter, Betrag und Beginn – Kategorie, Konto, Rhythmus und Fälligkeitstag werden übernommen. Danach kann das Kündigungsschreiben mit dem konkreten Datum erstellt werden.',
+  ]},
   { v: '1.0.69', date: '2026-11-16', changes: [
     '**Vertragsbetrag ändern ab Datum.** In der Fixkosten-Tabelle hat jeder Vertrag einen ✏️-Knopf: neuen Betrag und „gilt ab" eintragen – fertig. Der Vertrag läuft weiter, frühere Monate behalten den alten Betrag, Kontostand und Auswertungen bleiben richtig. Du musst ihn nicht mehr beenden und neu anlegen. Mehrere Änderungen sind möglich, der Verlauf steht im Dialog. Eine ⚡ Dynamik rechnet ab ihrem nächsten Termin auf den neuen Betrag auf.',
     '**„Verträge prüfen" – jederzeit und auf Wunsch automatisch.** Neuer Knopf „🔍 Verträge prüfen" auf der Fixkosten-Seite: alle laufenden Verträge mit aktuellem Betrag in einer Liste, neue Beträge samt „gilt ab" direkt eintragen. Im selben Dialog stellst du ein, ob die App dich automatisch erinnert (jeden Monat, alle 3, 6 oder 12 Monate).',
@@ -2597,11 +2602,11 @@ let selectedVersId = null;
 function getVersicherungen() { return state.versicherungen || (state.versicherungen = []); }
 const ZAHLWEISEN = ['monatlich', 'vierteljährlich', 'halbjährlich', 'jährlich', 'einmalig'];
 function versMonthly(v) {
-  const a = +v.amount || 0;
+  const a = versBetrag(v, thisMonth());
   return v.zahlweise === 'monatlich' ? a : v.zahlweise === 'vierteljährlich' ? a/3
        : v.zahlweise === 'halbjährlich' ? a/6 : v.zahlweise === 'jährlich' ? a/12 : a;
 }
-function versFixLinked(v) { return v.fixId ? ((getYearData().fixkosten||[]).find(f => String(f.id) === String(v.fixId)) || null) : null; }
+function versFixLinked(v) { return (getYearData().fixkosten || []).find(f => versFuerFix(f) === v) || null; }
 
 function versicherungen() {
   const list = getVersicherungen();
@@ -2613,8 +2618,10 @@ function versicherungen() {
         '<strong style="font-size:14px">' + (v.name||'Unbenannt').replace(/</g,'&lt;') + '</strong>' +
         (v.docPath ? '<span title="Dokument hinterlegt">📎</span>' : '') + '</div>' +
       '<div style="font-size:12px;color:var(--muted);margin-top:2px">' + ((v.typ||'') + (v.typ&&v.anbieter?' · ':'') + (v.anbieter||'')).replace(/</g,'&lt;') + '</div>' +
-      '<div style="font-size:12px;margin-top:4px">' + fmtEur(+v.amount||0) + ' <span style="color:var(--muted)">/ ' + (v.zahlweise||'') + '</span>' +
-        (v.end ? ' · <span style="color:var(--muted)">Ende ' + monthLabel(v.end) + '</span>' : '') + '</div>' +
+      '<div style="font-size:12px;margin-top:4px">' + fmtEur(versBetrag(v, thisMonth())) + ' <span style="color:var(--muted)">/ ' + (v.zahlweise||'') + '</span>' +
+        (v.gekuendigtZum ? ' · <span style="color:var(--red)">gekündigt zum ' + v.gekuendigtZum.split('-').reverse().join('.') + '</span>'
+          : v.end ? ' · <span style="color:var(--muted)">Ende ' + monthLabel(v.end) + '</span>' : '') + '</div>' +
+        ((v.betraege || []).some(a => a.ab > thisMonth()) ? '<div style="font-size:11px;color:var(--accent);margin-top:2px">' + aenderungHinweis(v.betraege, thisMonth(), fmtEur) + '</div>' : '') +
     '</button>';
   }).join('') : '<div class="empty-state" style="padding:24px"><div class="empty-icon">🛡️</div><p>Noch keine Versicherungen/Verträge.</p></div>';
 
@@ -2646,7 +2653,8 @@ function versicherungen() {
           F('Typ (z.B. Zusatzversicherung)','typ','text',sel.typ) +
           F('Anbieter','anbieter','text',sel.anbieter) +
           F('Policennummer','police','text',sel.police) +
-          '<label class="field">Betrag (' + currencySymbol() + ')<input type="number" step="0.01" value="' + (+sel.amount||0).toFixed(2) + '" onchange="updateVers(\'' + sel.id + '\',\'amount\',+this.value)"/></label>' +
+          '<label class="field">Betrag aktuell (' + currencySymbol() + ' / ' + (sel.zahlweise||'') + ')<input type="number" step="0.01" value="' + versBetrag(sel, thisMonth()).toFixed(2) + '" onchange="versBetragAendern(\'' + sel.id + '\',+this.value)" title="Bei einer Änderung fragt die App, ab wann der neue Betrag gilt"/>' +
+            (aenderungHinweis(sel.betraege, thisMonth(), fmtEur) ? '<span style="font-size:11px;color:var(--accent)">' + aenderungHinweis(sel.betraege, thisMonth(), fmtEur) + '</span>' : '') + '</label>' +
           '<label class="field">Zahlweise<select onchange="updateVers(\'' + sel.id + '\',\'zahlweise\',this.value)">' + zwOpts + '</select></label>' +
           '<label class="field">Beginn<input type="month" value="' + (sel.start||'') + '" onchange="updateVers(\'' + sel.id + '\',\'start\',this.value)"/></label>' +
           '<label class="field">Ende (leer = unbefristet)<input type="month" value="' + (sel.end||'') + '" onchange="updateVers(\'' + sel.id + '\',\'end\',this.value)"/></label>' +
@@ -2654,14 +2662,16 @@ function versicherungen() {
           F('Kontakt E-Mail','kontaktMail','text',sel.kontaktMail) +
           '<label class="field" style="grid-column:1/-1">Notiz<input type="text" value="' + (sel.note||'').replace(/"/g,'&quot;') + '" onchange="updateVers(\'' + sel.id + '\',\'note\',this.value)"/></label>' +
         '</div>' +
+        versDetailHinweise(sel, fixLinked) +
         '<div style="margin-top:10px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">' +
           (fixLinked
             ? '<span class="badge badge-green">🔗 verknüpft mit Fixkosten: ' + (fixLinked.name||'').replace(/</g,'&lt;') + '</span>'
             : '<button class="btn btn-ghost btn-sm" onclick="versLinkFixkost(\'' + sel.id + '\')">🔗 Mit Fixkosten verknüpfen / anlegen</button>') +
           '<span style="font-size:11px;color:var(--muted)">≈ ' + fmtEur(versMonthly(sel)) + ' / Monat</span>' +
           ((sel.name && sel.anbieter && sel.police)
-            ? '<button class="btn btn-ghost btn-sm" onclick="versKuendigen(\'' + sel.id + '\')" title="Kündigungsschreiben erzeugen (PDF / E-Mail-Vorlage)" style="margin-left:auto">✉️ Kündigen</button>'
-            : '<span style="font-size:11px;color:var(--muted);margin-left:auto" title="Für die Kündigung Name, Anbieter und Policennummer ausfüllen">✉️ Kündigen (Name/Anbieter/Police nötig)</span>') +
+            ? '<button class="btn btn-ghost btn-sm" onclick="versKuendigen(\'' + sel.id + '\')" title="Kündigungsschreiben erzeugen (PDF / E-Mail-Vorlage)" style="margin-left:auto">✉️ Schreiben</button>'
+            : '<span style="font-size:11px;color:var(--muted);margin-left:auto" title="Für das Kündigungsschreiben Name, Anbieter und Policennummer ausfüllen">✉️ Schreiben (Name/Anbieter/Police nötig)</span>') +
+          (sel.gekuendigtZum ? '' : '<button class="btn btn-ghost btn-sm" onclick="vertragKuendigen(\'vers\',\'' + sel.id + '\')" title="Vertrag zum Datum beenden – optional durch neuen Tarif ersetzen">🚫 Kündigen zum …</button>') +
         '</div>' +
         '<div style="margin-top:14px">' +
           '<p style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px">Dokument</p>' + docArea +
@@ -2747,7 +2757,7 @@ async function versLinkFixkost(id) {
   const o = getVersicherungen().find(x => x.id === id); if (!o) return;
   const nm = (o.name||'').trim().toLowerCase();
   const match = nm ? (getYearData().fixkosten||[]).find(f => (f.name||'').trim().toLowerCase() === nm) : null;
-  if (match) { o.fixId = match.id; saveData(); renderPage(); showToast('Mit vorhandener Fixkost verknüpft', 'info'); return; }
+  if (match) { o.fixId = match.id; match.versId = o.id; saveData(); renderPage(); showToast('Mit vorhandener Fixkost verknüpft', 'info'); return; }
   // Kein Namens-Treffer → bestehende Fixkost manuell wählen ODER neue anlegen
   const wahl = await askFixkostWahl({
     message: 'Keine Fixkost namens „' + (o.name||'') + '" gefunden. Wähle eine bestehende Fixkost zum Verknüpfen – oder lege eine neue an (≈ ' + fmtEur(versMonthly(o)) + ' / Monat).'
@@ -2757,6 +2767,7 @@ async function versLinkFixkost(id) {
     // wahl kommt als String aus dem Dialog – echte Fixkost-ID (kann Zahl sein) übernehmen
     const f = (getYearData().fixkosten||[]).find(x => String(x.id) === String(wahl));
     o.fixId = f ? f.id : wahl;
+    if (f) f.versId = o.id;
     saveData(); renderPage();
     showToast('Verknüpft mit „' + (f ? (f.name||'Fixkost') : 'Fixkost') + '"', 'info');
     return;
@@ -2764,6 +2775,7 @@ async function versLinkFixkost(id) {
   const nf = { id: uid(), name: o.name || 'Versicherung', category: 'Versicherungen', cat: 'Versicherungen',
     amount: Math.round(versMonthly(o) * 100) / 100, day: 1, start: o.start || currentMonth, end: o.end || '',
     laufzeitEnde: o.end || '', kontoId: (typeof defaultKontoId === 'function' ? defaultKontoId() : undefined) };
+  nf.versId = o.id;
   getYearData().fixkosten.push(nf); o.fixId = nf.id; saveData(); renderPage(); showToast('Fixkost angelegt & verknüpft', 'info');
 }
 // ── VERSICHERUNG KÜNDIGEN (Schreiben als Text / PDF / E-Mail-Vorlage) ────────
@@ -2775,8 +2787,9 @@ function versKuendigungText(o) {
   const heute  = new Date().toLocaleDateString('de-DE', { day:'2-digit', month:'2-digit', year:'numeric' });
   const ortDat = (m.ort || '[Ort]') + ', ' + heute;
   const betreff = 'Kündigung ' + [o.typ, o.name].filter(Boolean).join(' ') + ' – Versicherungsnummer ' + (o.police || '');
-  const endeSatz = o.end
-    ? ' fristgerecht zum nächstmöglichen Zeitpunkt, hilfsweise zum ' + monthLabel(o.end)
+  const endeSatz = o.gekuendigtZum
+    ? ' fristgerecht zum ' + o.gekuendigtZum.split('-').reverse().join('.') + ', hilfsweise zum nächstmöglichen Zeitpunkt'
+    : o.end ? ' fristgerecht zum nächstmöglichen Zeitpunkt, hilfsweise zum ' + monthLabel(o.end)
     : ' fristgerecht zum nächstmöglichen Zeitpunkt';
   return [
     abName, abStr, abOrt, '',
@@ -4925,15 +4938,15 @@ function fixkosten() {
             const _vkn = _vk ? _vk.name : 'Default';
             const _vonBtn = `<button class="btn-icon" title="Von Konto (woher das Geld abgeht): ${_vkn} – klicken zum Ändern" onclick="pickFixkKonto('${f.id}')" style="width:auto;min-width:0;padding:0 8px;font-size:12px;white-space:nowrap;gap:4px">🏦 ${_vkn}</button>`;
             return `<tr style="${active?'':'opacity:.4'}">
-              <td><input type="text" value="${f.name}" onchange="updateFixk('${f.id}','name',this.value)" /></td>
+              <td><input type="text" value="${f.name}" onchange="updateFixk('${f.id}','name',this.value)" />${fixVertragsInfo(f)}</td>
               <td><select onchange="updateFixk('${f.id}','category',this.value)">${['Wohnen','Versicherung','Abo','Kredit','Sparen','Freizeit','Sonstiges'].map(c=>`<option value="${c}" ${c===(f.category||f.cat)?'selected':''}>${c}</option>`).join('')}</select></td>
               <td><select onchange="updateFixk('${f.id}','interval',+this.value)" title="Wie oft wird abgebucht? Voller Betrag im ersten Monat des Intervalls.">${[[1,'monatlich'],[2,'alle 2 Monate'],[3,'alle 3 Monate'],[6,'alle 6 Monate'],[12,'jährlich']].map(([v,l])=>`<option value="${v}" ${(+f.interval||1)===v?'selected':''}>${l}</option>`).join('')}</select></td>
               <td><input type="month" value="${f.start}" onchange="updateFixk('${f.id}','start',this.value)" style="width:145px"/></td>
               <td><input type="month" value="${f.end}" onchange="updateFixk('${f.id}','end',this.value)" style="width:145px"/></td>
               <td><input type="month" value="${f.laufzeitEnde||''}" onchange="updateFixk('${f.id}','laufzeitEnde',this.value)" style="width:145px" title="Echtes Vertragsende – wird beim Jahreswechsel übernommen; leer = unbefristet"/></td>
               <td><input type="number" value="${f.day||1}" onchange="updateFixk('${f.id}','day',+this.value)" style="width:60px;text-align:center" min="1" max="31"/></td>
-              <td style="white-space:nowrap"><input type="number" value="${(+f.amount||0).toFixed(2)}" onchange="updateFixk('${f.id}','amount',+this.value)" step="0.01" style="width:90px;text-align:right" title="Grundbetrag${hatAktiveDynamik(f)?' (ohne Dynamik)':''}"/> ${currencySymbol()}${(() => { if (!hatAktiveDynamik(f)) return ''; const eff = fixkostBetrag(f, currentMonth); const d = f.dynamik; const istZukunft = d.abMonat > currentMonth; const lbl = istZukunft ? ('ab ' + monthLabel(d.abMonat)) : 'akt.'; const wlbl = d.typ==='prozent' ? ('+'+fmt(+d.wert||0)+' %') : ('+'+fmtEur(+d.wert||0)); return `<div style="font-size:10px;color:var(--accent);white-space:nowrap;margin-top:2px" title="Dynamik ${wlbl}${d.intervallMonate>0?(' alle '+d.intervallMonate+' Monate'):' einmalig'} ab ${monthLabel(d.abMonat)}">⚡ ${fmtEur(eff)} ${lbl}</div>`; })()}${(() => { const l = f.betraege || []; if (!l.length) return ''; const ae = fixkostAenderung(f, currentMonth); const next = l.filter(a => a.ab > currentMonth).sort((a, b) => a.ab.localeCompare(b.ab))[0]; return `<div style="font-size:10px;color:var(--accent);white-space:nowrap;margin-top:2px" title="Betragsänderung – Verlauf über ✏️">` + (ae ? `✏️ ${fmtEur(fixkostBetrag(f, currentMonth))} seit ${monthLabel(ae.ab)}` : '') + (next ? `${ae ? ' · ' : '✏️ '}${fmtEur(next.amount)} ab ${monthLabel(next.ab)}` : '') + `</div>`; })()}</td>
-              <td style="white-space:nowrap"><button class="btn-icon" title="Betrag ändern ab einem Datum (Vertrag läuft weiter)" onclick="openBetragModal('${f.id}')" style="width:auto;min-width:0;padding:0 8px;font-size:12px;${(f.betraege||[]).length?'color:var(--accent)':''}">✏️</button><button class="btn-icon" title="Dynamik (automatische Erhöhung) einrichten/bearbeiten" onclick="openDynamikModal('${f.id}')" style="width:auto;min-width:0;padding:0 8px;font-size:12px;${hatAktiveDynamik(f)?'color:var(--accent)':''}">⚡</button>${_vonBtn}${_zielBtn}${_depotBtn}<button class="btn-icon danger" onclick="deleteFixk('${f.id}')">×</button></td>
+              <td style="white-space:nowrap"><input type="number" value="${(+f.amount||0).toFixed(2)}" onchange="updateFixk('${f.id}','amount',+this.value)" step="0.01" style="width:90px;text-align:right" title="Grundbetrag${hatAktiveDynamik(f)?' (ohne Dynamik)':''}"/> ${currencySymbol()}${(() => { if (!hatAktiveDynamik(f)) return ''; const eff = fixkostBetrag(f, currentMonth); const d = f.dynamik; const istZukunft = d.abMonat > currentMonth; const lbl = istZukunft ? ('ab ' + monthLabel(d.abMonat)) : 'akt.'; const wlbl = d.typ==='prozent' ? ('+'+fmt(+d.wert||0)+' %') : ('+'+fmtEur(+d.wert||0)); return `<div style="font-size:10px;color:var(--accent);white-space:nowrap;margin-top:2px" title="Dynamik ${wlbl}${d.intervallMonate>0?(' alle '+d.intervallMonate+' Monate'):' einmalig'} ab ${monthLabel(d.abMonat)}">⚡ ${fmtEur(eff)} ${lbl}</div>`; })()}${(f.betraege || []).length ? '<div style="font-size:10px;color:var(--accent);white-space:nowrap;margin-top:2px">' + aenderungHinweis(f.betraege, currentMonth, fmtEur) + '</div>' : ''}</td>
+              <td style="white-space:nowrap">${f.gekuendigtZum ? '' : `<button class="btn-icon" title="Kündigen zum Datum – optional durch neuen Tarif ersetzen" onclick="vertragKuendigen('fix','${f.id}')" style="width:auto;min-width:0;padding:0 8px;font-size:12px">🚫</button>`}<button class="btn-icon" title="Betrag ändern ab einem Datum (Vertrag läuft weiter)" onclick="openBetragModal('${f.id}')" style="width:auto;min-width:0;padding:0 8px;font-size:12px;${(f.betraege||[]).length?'color:var(--accent)':''}">✏️</button><button class="btn-icon" title="Dynamik (automatische Erhöhung) einrichten/bearbeiten" onclick="openDynamikModal('${f.id}')" style="width:auto;min-width:0;padding:0 8px;font-size:12px;${hatAktiveDynamik(f)?'color:var(--accent)':''}">⚡</button>${_vonBtn}${_zielBtn}${_depotBtn}<button class="btn-icon danger" onclick="deleteFixk('${f.id}')">×</button></td>
             </tr>`;
           }).join('')}
         </tbody>
@@ -5243,7 +5256,10 @@ async function runSparenAutoEintragung() {
 window.runSparenAutoEintragung = runSparenAutoEintragung;
 
 function updateFixk(id,field,val){
-  if (!requireUnlocked()) return;const f=state.fixkosten.find(x=>String(x.id) === String(id));if(f){f[field]=val;saveData();}}
+  if (!requireUnlocked()) return;const f=state.fixkosten.find(x=>String(x.id) === String(id));if(f){f[field]=val;
+  // Grundbetrag einer verknüpften Versicherung mitziehen (Änderungen ab Datum laufen über ✏️)
+  if (field === 'amount') { const v = versFuerFix(f); if (v) v.amount = fixZuVers(f, v, val); }
+  saveData();}}
 async function deleteFixk(id) {
   if (!requireUnlocked()) return;
   // Check if this Fixkosten has a sparenLink → ask whether to also clean up auto-sparen entries
@@ -11863,20 +11879,311 @@ function vpBezugsMonat() {
   const h = thisMonth();
   return h.slice(0, 4) === getSelectedYear() ? h : currentMonth;
 }
-// Trägt eine Betragsänderung ein (ersetzt eine Änderung im selben Monat).
-function fixkostBetragSetzen(f, ab, amount) {
+// Trägt eine Betragsänderung ein (ersetzt eine Änderung im selben Monat) und
+// überträgt sie auf eine verknüpfte Versicherung (umgerechnet auf deren Zahlweise).
+function fixkostBetragSetzen(f, ab, amount, ohneSync) {
   if (!f || !/^\d{4}-\d{2}$/.test(ab || '') || !(amount >= 0)) return false;
   const l = (Array.isArray(f.betraege) ? f.betraege : []).filter(a => a.ab !== ab);
-  l.push({ ab, amount: Math.round(amount * 100) / 100 });
+  l.push({ ab, amount: Math.round(amount * 100) / 100, am: today() });
   l.sort((a, b) => a.ab.localeCompare(b.ab));
   f.betraege = l;
+  if (!ohneSync) { const v = versFuerFix(f); if (v) versBetragSetzen(v, ab, fixZuVers(f, v, amount), true); }
   return true;
 }
-function fixkostBetragLoeschen(f, ab) {
+function fixkostBetragLoeschen(f, ab, ohneSync) {
   if (!f || !Array.isArray(f.betraege)) return;
   f.betraege = f.betraege.filter(a => a.ab !== ab);
   if (!f.betraege.length) delete f.betraege;
+  if (!ohneSync) { const v = versFuerFix(f); if (v) versBetragLoeschen(v, ab, true); }
 }
+
+// ── Kopplung Versicherung ↔ Fixkost ────────────────────────────────────────
+// Die Versicherung ist global (über alle Jahre), Fixkosten gibt es je Jahr. Die
+// Verknüpfung steht deshalb an der Fixkost (f.versId) – sie wird beim
+// Jahreswechsel mitkopiert. v.fixId ist der alte Verweis (nur noch Fallback).
+// Beträge: Versicherung je Zahlweise (z.B. 420 €/Jahr), Fixkost je Abbuchung im
+// eigenen Rhythmus (z.B. 35 €/Monat) → Umrechnung über die Monate.
+const ZW_MONATE = { 'monatlich': 1, 'vierteljährlich': 3, 'halbjährlich': 6, 'jährlich': 12 };
+function zwMonate(z) { return ZW_MONATE[z] || 1; }
+function versZuFix(v, f, betrag) { return Math.round((+betrag || 0) / zwMonate(v.zahlweise) * (+f.interval || 1) * 100) / 100; }
+function fixZuVers(f, v, betrag) { return Math.round((+betrag || 0) / (+f.interval || 1) * zwMonate(v.zahlweise) * 100) / 100; }
+function versFuerFix(f) {
+  if (!f) return null;
+  const l = getVersicherungen();
+  return (f.versId != null && l.find(v => String(v.id) === String(f.versId))) ||
+         l.find(v => v.fixId != null && v.fixId !== '' && String(v.fixId) === String(f.id)) || null;
+}
+// Betrag der Versicherung im Monat m (Grundbetrag + Änderungen ab Datum).
+function versBetrag(v, m) {
+  let amt = +v.amount || 0, best = '';
+  (v.betraege || []).forEach(a => { if (a && a.ab && a.ab <= m && a.ab >= best) { best = a.ab; amt = +a.amount || 0; } });
+  return amt;
+}
+function versBetragSetzen(v, ab, amount, ohneSync) {
+  if (!v || !/^\d{4}-\d{2}$/.test(ab || '') || !(amount >= 0)) return false;
+  const l = (Array.isArray(v.betraege) ? v.betraege : []).filter(a => a.ab !== ab);
+  l.push({ ab, amount: Math.round(amount * 100) / 100, am: today() });
+  l.sort((a, b) => a.ab.localeCompare(b.ab));
+  v.betraege = l;
+  if (!ohneSync) versFixAlle(v).forEach(f => fixkostBetragSetzen(f, ab, versZuFix(v, f, amount), true));
+  return true;
+}
+function versBetragLoeschen(v, ab, ohneSync) {
+  if (!v || !Array.isArray(v.betraege)) return;
+  v.betraege = v.betraege.filter(a => a.ab !== ab);
+  if (!v.betraege.length) delete v.betraege;
+  if (!ohneSync) versFixAlle(v).forEach(f => fixkostBetragLoeschen(f, ab, true));
+}
+// Alle verknüpften Fixkosten (über alle Jahre) – eine Änderung ab einem Monat
+// gilt auch für Folgejahre, in denen der Vertrag schon angelegt ist.
+function versFixAlle(v) {
+  const out = [];
+  Object.keys(state.years || {}).forEach(y => {
+    const yd = state.years[y];
+    if (!yd || yd.status === 'closed') return;
+    (yd.fixkosten || []).forEach(f => { if (versFuerFix(f) === v) out.push(f); });
+  });
+  return out;
+}
+// Einmalig beim Start: alte Verknüpfungen (v.fixId) an die Fixkost schreiben und
+// Betragsänderungen, die bisher nur an einer Seite stehen, abgleichen.
+function versLinksMigrieren() {
+  let geaendert = false;
+  getVersicherungen().forEach(v => {
+    Object.keys(state.years || {}).forEach(y => {
+      (state.years[y].fixkosten || []).forEach(f => {
+        if (f.versId == null && v.fixId != null && v.fixId !== '' && String(v.fixId) === String(f.id)) { f.versId = v.id; geaendert = true; }
+      });
+    });
+    versFixAlle(v).forEach(f => {
+      (f.betraege || []).forEach(a => {
+        if (!(v.betraege || []).some(b => b.ab === a.ab)) {
+          versBetragSetzen(v, a.ab, fixZuVers(f, v, a.amount), true);
+          if (a.am) v.betraege.find(b => b.ab === a.ab).am = a.am;
+          geaendert = true;
+        }
+      });
+      (v.betraege || []).forEach(b => {
+        if (b.ab >= (f.start || '') && b.ab <= (f.end || '9999') && !(f.betraege || []).some(a => a.ab === b.ab)) {
+          fixkostBetragSetzen(f, b.ab, versZuFix(v, f, b.amount), true);
+          if (b.am) f.betraege.find(a => a.ab === b.ab).am = b.am;
+          geaendert = true;
+        }
+      });
+    });
+  });
+  if (geaendert) saveData();
+}
+// Text „neu ab … (geändert am …)" für eine Änderungsliste.
+function aenderungHinweis(liste, m, fmt) {
+  const l = (liste || []).slice().sort((a, b) => a.ab.localeCompare(b.ab));
+  const next = l.find(a => a.ab > m);
+  const last = l.filter(a => a.ab <= m).pop();
+  const am = a => a.am ? ', geändert am ' + a.am.split('-').reverse().join('.') : '';
+  if (next) return '✏️ neu ab ' + monthLabel(next.ab) + ': ' + fmt(next.amount) + am(next);
+  if (last) return '✏️ seit ' + monthLabel(last.ab) + ': ' + fmt(last.amount) + am(last);
+  return '';
+}
+const datumDE = iso => String(iso || '').split('-').reverse().join('.');
+// Betrag einer Versicherung im Detail ändern → fragt „gilt ab" und zieht die
+// verknüpfte Fixkost mit. Der allererste Betrag wird ohne Rückfrage gesetzt.
+async function versBetragAendern(id, neu) {
+  const v = getVersicherungen().find(x => String(x.id) === String(id));
+  if (!v) return;
+  const m = thisMonth(), alt = versBetrag(v, m);
+  if (!(neu >= 0) || Math.abs(neu - alt) < 0.005) { renderPage(); return; }
+  if (!alt && !(v.betraege || []).length) {
+    v.amount = Math.round(neu * 100) / 100;
+    versFixAlle(v).forEach(f => { if (!(f.betraege || []).length) f.amount = versZuFix(v, f, neu); });
+    saveData(); renderPage(); return;
+  }
+  const f = versFixLinked(v);
+  const ab = await uiPrompt({ title: 'Ab wann gilt der neue Betrag?', icon: '📅', type: 'month', value: m, okLabel: 'Übernehmen',
+    message: escapeHtml(v.name || 'Vertrag') + ': ' + fmtEur(alt) + ' → <strong>' + fmtEur(neu) + '</strong> je ' + escapeHtml(v.zahlweise || 'Zahlung') +
+      '. Frühere Monate behalten den alten Betrag.' + (f ? ' Die verknüpfte Fixkost „' + escapeHtml(f.name || '') + '" wird mit angepasst.' : '') });
+  if (ab === null || !/^\d{4}-\d{2}$/.test(ab)) { renderPage(); return; }
+  versBetragSetzen(v, ab, neu);
+  saveData();
+  if (typeof updateBadges === 'function') updateBadges();
+  renderPage();
+  showToast((v.name || 'Vertrag') + ': ' + fmtEur(neu) + ' ab ' + monthLabel(ab) + (f ? ' – Fixkost angepasst' : ''));
+}
+// Hinweise im Versicherungs-Detail: Verlauf, Abweichung zur Fixkost, Kündigung, Folgetarif.
+function versDetailHinweise(v, f) {
+  const box = (farbe, html) => '<div style="margin-top:10px;padding:8px 12px;border-radius:8px;font-size:12px;border:1px solid ' + farbe + '">' + html + '</div>';
+  let out = '';
+  if (v.gekuendigtZum) {
+    const nf = v.nachfolgerId && getVersicherungen().find(x => String(x.id) === String(v.nachfolgerId));
+    out += box('var(--red)', '🚫 <strong>Gekündigt zum ' + datumDE(v.gekuendigtZum) + '</strong>' + (v.gekuendigtAm ? ' (eingetragen am ' + datumDE(v.gekuendigtAm) + ')' : '') +
+      (nf ? ' · Folgetarif: <a href="#" onclick="selectVers(\'' + nf.id + '\');return false">' + escapeHtml(nf.name || '') + '</a> ab ' + monthLabel(nf.start) : ''));
+  }
+  if (v.vorgaengerId) {
+    const vg = getVersicherungen().find(x => String(x.id) === String(v.vorgaengerId));
+    if (vg) out += box('var(--border)', '↪ Ersetzt <a href="#" onclick="selectVers(\'' + vg.id + '\');return false">' + escapeHtml(vg.name || '') + '</a>' + (vg.gekuendigtZum ? ' (gekündigt zum ' + datumDE(vg.gekuendigtZum) + ')' : ''));
+  }
+  if ((v.betraege || []).length) {
+    const l = v.betraege.slice().sort((a, b) => b.ab.localeCompare(a.ab));
+    out += box('var(--border)', '<strong>Beitragsverlauf</strong><br>' + l.map(a => 'ab ' + monthLabel(a.ab) + ': ' + fmtEur(a.amount) + (a.am ? ' <span style="color:var(--muted)">(geändert am ' + datumDE(a.am) + ')</span>' : '')).join('<br>') +
+      '<br><span style="color:var(--muted)">davor: ' + fmtEur(+v.amount || 0) + '</span>');
+  }
+  if (f && !hatAktiveDynamik(f)) {
+    const m = vpBezugsMonat(), soll = versZuFix(v, f, versBetrag(v, m)), ist = fixkostBetrag(f, m);
+    if (Math.abs(soll - ist) >= 0.01) {
+      out += box('#d97706', '⚠ Die Fixkost „' + escapeHtml(f.name || '') + '" bucht in ' + monthLabel(m) + ' <strong>' + fmtEur(ist) + '</strong>, laut Vertrag wären es <strong>' + fmtEur(soll) + '</strong>. ' +
+        '<button class="btn btn-ghost btn-sm" onclick="versAngleichen(\'' + v.id + '\')">Fixkost angleichen</button>');
+    }
+  }
+  return out;
+}
+async function versAngleichen(id) {
+  const v = getVersicherungen().find(x => String(x.id) === String(id));
+  const f = v && versFixLinked(v);
+  if (!f || !requireUnlocked()) return;
+  const ab = await uiPrompt({ title: 'Fixkost angleichen', icon: '🔗', type: 'month', value: vpBezugsMonat(), okLabel: 'Angleichen',
+    message: 'Ab welchem Monat soll „' + escapeHtml(f.name || '') + '" den Betrag laut Vertrag buchen?' });
+  if (ab === null || !/^\d{4}-\d{2}$/.test(ab)) return;
+  fixkostBetragSetzen(f, ab, versZuFix(v, f, versBetrag(v, ab)), true);
+  saveData(); renderPage();
+  showToast('Fixkost angeglichen ab ' + monthLabel(ab));
+}
+// Kleine Zusatzinfos in der Fixkosten-Tabelle (Verknüpfung, Kündigung, Folgetarif).
+function fixVertragsInfo(f) {
+  const t = [];
+  const v = versFuerFix(f);
+  if (v) t.push('<span title="Verknüpft mit Versicherung/Vertrag „' + escapeHtml(v.name || '') + '" – Betragsänderungen gelten für beide">🛡️ ' + escapeHtml(v.name || 'Vertrag') + '</span>');
+  if (f.gekuendigtZum) t.push('<span style="color:var(--red)">🚫 gekündigt zum ' + datumDE(f.gekuendigtZum) + '</span>');
+  if (f.vorgaengerId) t.push('<span>↪ Folgetarif</span>');
+  return t.length ? '<div style="font-size:10px;color:var(--muted);margin-top:2px;white-space:nowrap">' + t.join(' · ') + '</div>' : '';
+}
+// ── Kündigen zum Datum (optional mit Folgetarif) ───────────────────────────
+// Letzter Monat, in dem noch abgebucht wird: Liegt der Abbuchungstag nach dem
+// Kündigungsdatum, ist der Vormonat der letzte.
+function vkLetzterMonat(datum, tag) {
+  const ym = datum.slice(0, 7);
+  return (+tag || 1) <= +datum.slice(8, 10) ? ym : monthShift(ym, -1);
+}
+function vkMonatsende(ym) {
+  const [y, m] = ym.split('-').map(Number);
+  return ym + '-' + String(new Date(Date.UTC(y, m, 0)).getUTCDate()).padStart(2, '0');
+}
+// Setzt die Kündigung um (ohne UI) – testbar. o = { zum, ersetzen, name, anbieter, betrag, start }
+function vertragKuendigungAnwenden(f, v, o) {
+  const lm = vkLetzterMonat(o.zum, f ? f.day : 1);
+  (v ? versFixAlle(v) : (f ? [f] : [])).forEach(fx => {
+    fx.laufzeitEnde = lm; fx.gekuendigtZum = o.zum; fx.gekuendigtAm = today();
+    if (!fx.end || lm < fx.end) fx.end = lm;
+  });
+  if (v) { v.end = lm; v.gekuendigtZum = o.zum; v.gekuendigtAm = today(); }
+  if (!o.ersetzen) return { lm };
+  const start = o.start, betrag = Math.round((+o.betrag || 0) * 100) / 100;
+  let nv = null, nf = null;
+  if (v) {
+    nv = Object.assign({}, v, { id: uid(), name: o.name || v.name, anbieter: o.anbieter || '', police: '', amount: betrag, start, end: '',
+      docName: '', docPath: '', fixId: '', note: 'Folgetarif von „' + (v.name || '') + '"', vorgaengerId: v.id });
+    ['betraege', 'gekuendigtZum', 'gekuendigtAm', 'nachfolgerId'].forEach(k => delete nv[k]);
+    getVersicherungen().push(nv);
+    v.nachfolgerId = nv.id;
+  }
+  if (f) {
+    const sy = getSelectedYear(), yNeu = start.slice(0, 4);
+    const zielJahr = (state.years[yNeu] && state.years[yNeu].status !== 'closed') ? yNeu : sy;
+    nf = { id: uid(), name: o.name || f.name, category: f.category, cat: f.cat, interval: f.interval, day: f.day, kontoId: f.kontoId,
+      start, end: (yNeu > zielJahr ? yNeu : zielJahr) + '-12', vorgaengerId: f.id };
+    nf.amount = nv ? versZuFix(nv, nf, betrag) : betrag;
+    if (nv) { nf.versId = nv.id; nv.fixId = nf.id; }
+    state.years[zielJahr].fixkosten.push(nf);
+    f.nachfolgerId = nf.id;
+    // Bereits angelegte Folgejahre bekommen den neuen Tarif ebenfalls
+    Object.keys(state.years).filter(y => y > zielJahr && state.years[y].status !== 'closed').forEach(y => {
+      const c = Object.assign({}, nf, { id: uid(), start: jwNaechsteFaelligkeit(nf, y + '-01'), end: y + '-12' });
+      state.years[y].fixkosten.push(c);
+    });
+  }
+  return { lm, nv, nf };
+}
+function vertragKuendigen(art, id) {
+  if (!requireUnlocked()) return;
+  let v = null, f = null;
+  if (art === 'vers') { v = getVersicherungen().find(x => String(x.id) === String(id)); if (!v) return; f = versFixLinked(v); }
+  else { f = (state.fixkosten || []).find(x => String(x.id) === String(id)); if (!f) return; v = versFuerFix(f); }
+  const name = (v && v.name) || (f && f.name) || 'Vertrag';
+  const basisM = (f && f.laufzeitEnde) || (v && v.end) || monthShift(thisMonth(), 2);
+  const st = { zum: vkMonatsende(basisM), ersetzen: false, name, anbieter: (v && v.anbieter) || '', betrag: '', start: '',
+    schreiben: !!(v && v.name && v.anbieter && v.police) };
+  const einheit = v ? 'je ' + (v.zahlweise || 'Zahlung') : (+(f && f.interval) || 1) === 1 ? 'pro Monat' : 'je Abbuchung';
+  const feld = 'padding:8px 10px;border:1px solid var(--border);border-radius:8px;background:var(--surface-2);color:var(--text);font-size:14px;width:100%';
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  document.body.appendChild(overlay);
+  const zu = () => { document.removeEventListener('keydown', kh); overlay.remove(); };
+  function kh(e) { if (e.key === 'Escape') zu(); }
+  document.addEventListener('keydown', kh);
+  function render() {
+    const lm = /^\d{4}-\d{2}-\d{2}$/.test(st.zum) ? vkLetzterMonat(st.zum, f ? f.day : 1) : '';
+    if (lm && !st.startGesetzt) st.start = monthShift(lm, 1);
+    const akt = v ? versBetrag(v, thisMonth()) : fixkostBetrag(f, vpBezugsMonat());
+    overlay.innerHTML =
+      '<div class="modal" style="max-width:540px;padding:0">' +
+        '<div style="padding:18px 22px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:12px">' +
+          '<div style="font-size:28px;line-height:1">🚫</div>' +
+          '<div><h3 style="margin:0;font-size:16px;font-weight:600">Kündigen – ' + escapeHtml(name) + '</h3>' +
+          '<div style="font-size:12px;color:var(--muted)">Aktuell ' + fmtEur(akt) + ' ' + einheit + (f && v ? ' · Versicherung und Fixkost werden gemeinsam beendet' : '') + '</div></div>' +
+        '</div>' +
+        '<div style="padding:18px 22px">' +
+          '<label style="font-size:12px;display:block">Gekündigt zum<br><input id="_vk_zum" type="date" value="' + st.zum + '" style="' + feld + '"></label>' +
+          (lm && f ? '<div style="font-size:12px;color:var(--muted);margin-top:6px">Letzte Abbuchung: <strong>' + monthLabel(lm) + '</strong> (fällig am ' + (+f.day || 1) + '.)</div>' : '') +
+          '<label style="display:flex;align-items:center;gap:8px;margin-top:16px;font-size:13px;font-weight:600"><input id="_vk_ers" type="checkbox" style="width:16px;height:16px;margin:0"' + (st.ersetzen ? ' checked' : '') + '> Durch neuen Tarif ersetzen (z. B. Stromwechsel)</label>' +
+          (st.ersetzen
+            ? '<div style="display:flex;flex-wrap:wrap;gap:10px;margin-top:10px">' +
+                '<label style="font-size:12px;flex:1 1 220px">Name<input id="_vk_name" type="text" value="' + escapeHtml(st.name) + '" style="' + feld + '"></label>' +
+                (v ? '<label style="font-size:12px;flex:1 1 180px">Neuer Anbieter<input id="_vk_anb" type="text" value="' + escapeHtml(st.anbieter) + '" style="' + feld + '"></label>' : '') +
+                '<label style="font-size:12px;flex:1 1 140px">Betrag ' + einheit + ' (' + currencySymbol() + ')<input id="_vk_betrag" type="number" step="0.01" min="0" value="' + escapeHtml(String(st.betrag)) + '" style="' + feld + '"></label>' +
+                '<label style="font-size:12px;flex:1 1 140px">Beginn<input id="_vk_start" type="month" value="' + st.start + '" style="' + feld + '"></label>' +
+              '</div>' +
+              '<div style="font-size:11px;color:var(--muted);margin-top:6px">Kategorie, Konto, Rhythmus und Fälligkeitstag werden übernommen' + (v ? '; eine neue Versicherung wird angelegt und mit der neuen Fixkost verknüpft' : '') + '.</div>'
+            : '') +
+          (st.schreiben ? '<label style="display:flex;align-items:center;gap:8px;margin-top:14px;font-size:13px"><input id="_vk_brief" type="checkbox" style="width:16px;height:16px;margin:0" checked> Danach Kündigungsschreiben erstellen</label>' : '') +
+        '</div>' +
+        '<div style="padding:14px 22px;border-top:1px solid var(--border);display:flex;justify-content:flex-end;gap:8px;background:var(--surface);border-radius:0 0 14px 14px">' +
+          '<button class="btn btn-ghost" data-vk="zu">Abbrechen</button><button class="btn btn-primary" data-vk="ok">Kündigung eintragen</button>' +
+        '</div>' +
+      '</div>';
+  }
+  const lesen = () => {
+    const q = s => overlay.querySelector(s);
+    if (q('#_vk_zum')) st.zum = q('#_vk_zum').value;
+    if (q('#_vk_name')) st.name = q('#_vk_name').value;
+    if (q('#_vk_anb')) st.anbieter = q('#_vk_anb').value;
+    if (q('#_vk_betrag')) st.betrag = q('#_vk_betrag').value;
+    if (q('#_vk_start')) { if (q('#_vk_start').value !== st.start) st.startGesetzt = true; st.start = q('#_vk_start').value; }
+    if (q('#_vk_brief')) st.brief = q('#_vk_brief').checked;
+  };
+  overlay.addEventListener('change', e => {
+    if (e.target.id === '_vk_ers') { lesen(); st.ersetzen = e.target.checked; render(); }
+    else if (e.target.id === '_vk_zum') { lesen(); render(); }
+  });
+  overlay.addEventListener('click', e => {
+    const b = e.target.closest && e.target.closest('[data-vk]');
+    if (!b) return;
+    if (b.dataset.vk === 'zu') { zu(); return; }
+    lesen();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(st.zum)) { showToast('Bitte das Kündigungsdatum wählen', 'error'); return; }
+    const betrag = parseFloat(String(st.betrag).replace(',', '.'));
+    if (st.ersetzen && (!(betrag >= 0) || !/^\d{4}-\d{2}$/.test(st.start))) { showToast('Bitte Betrag und Beginn des neuen Tarifs eintragen', 'error'); return; }
+    const r = vertragKuendigungAnwenden(f, v, { zum: st.zum, ersetzen: st.ersetzen, name: st.name.trim(), anbieter: st.anbieter.trim(), betrag, start: st.start });
+    saveData();
+    if (typeof updateBadges === 'function') updateBadges();
+    zu();
+    if (r.nv && currentPage === 'versicherungen') selectedVersId = r.nv.id;
+    renderPage();
+    showToast(name + ': gekündigt zum ' + datumDE(st.zum) + (r.nf || r.nv ? ' – neuer Tarif ab ' + monthLabel(st.start) : ''));
+    if (st.schreiben && st.brief !== false && v) setTimeout(() => versKuendigen(v.id), 300);
+  });
+  render();
+}
+window.versBetragAendern = versBetragAendern;
+window.versAngleichen    = versAngleichen;
+window.vertragKuendigen  = vertragKuendigen;
 // Dialog „Betrag ändern" für einen Vertrag.
 function openBetragModal(id) {
   if (!requireUnlocked()) return;
@@ -11897,7 +12204,8 @@ function openBetragModal(id) {
         '<div style="padding:18px 22px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:12px">' +
           '<div style="font-size:28px;line-height:1">✏️</div>' +
           '<div><h3 style="margin:0;font-size:16px;font-weight:600">Betrag ändern – ' + escapeHtml(f.name || 'Vertrag') + '</h3>' +
-          '<div style="font-size:12px;color:var(--muted)">Aktuell ' + fmtEur(fixkostBetrag(f, m)) + ' (' + monthLabel(m) + '). Der Vertrag läuft weiter, nur der Betrag ändert sich ab dem gewählten Monat.</div></div>' +
+          '<div style="font-size:12px;color:var(--muted)">Aktuell ' + fmtEur(fixkostBetrag(f, m)) + ' (' + monthLabel(m) + '). Der Vertrag läuft weiter, nur der Betrag ändert sich ab dem gewählten Monat.' +
+            (versFuerFix(f) ? ' Die verknüpfte Versicherung „' + escapeHtml(versFuerFix(f).name || '') + '" wird mit angepasst.' : '') + '</div></div>' +
         '</div>' +
         '<div style="padding:18px 22px">' +
           '<div style="display:flex;gap:10px;flex-wrap:wrap">' +
@@ -11908,7 +12216,7 @@ function openBetragModal(id) {
             (hatAktiveDynamik(f) ? ' Die ⚡ Dynamik rechnet ab dem nächsten Termin auf den neuen Betrag auf.' : '') + '</div>' +
           '<div style="margin-top:14px;font-size:13px">' +
             '<div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;margin-bottom:4px">Verlauf</div>' +
-            liste.map(a => '<div style="display:flex;align-items:center;gap:8px;padding:4px 0;border-bottom:1px solid var(--border)"><span style="flex:1">ab ' + monthLabel(a.ab) + '</span><strong>' + fmtEur(a.amount) + '</strong>' +
+            liste.map(a => '<div style="display:flex;align-items:center;gap:8px;padding:4px 0;border-bottom:1px solid var(--border)"><span style="flex:1">ab ' + monthLabel(a.ab) + (a.am ? ' <span style="font-size:11px;color:var(--muted)">(geändert am ' + datumDE(a.am) + ')</span>' : '') + '</span><strong>' + fmtEur(a.amount) + '</strong>' +
               '<button class="btn-icon danger" data-vb-del="' + a.ab + '" title="Änderung entfernen">×</button></div>').join('') +
             '<div style="display:flex;gap:8px;padding:4px 0;color:var(--muted)"><span style="flex:1">Grundbetrag (ab ' + monthLabel(f.start || m) + ')</span><span>' + fmtEur(+f.amount || 0) + '</span></div>' +
           '</div>' +
@@ -11965,6 +12273,8 @@ function vertraegePruefen() {
     const hinweise = [];
     const zukunft = (f.betraege || []).filter(a => a.ab > m).sort((a, b) => a.ab.localeCompare(b.ab))[0];
     if (zukunft) hinweise.push('ab ' + monthLabel(zukunft.ab) + ': ' + fmtEur(zukunft.amount));
+    if (versFuerFix(f)) hinweise.push('🛡️ mit Versicherung verknüpft');
+    if (f.gekuendigtZum) hinweise.push('🚫 gekündigt zum ' + datumDE(f.gekuendigtZum));
     if (hatAktiveDynamik(f)) hinweise.push('⚡ Dynamik');
     if (f.laufzeitEnde) hinweise.push('endet ' + monthLabel(f.laufzeitEnde));
     if (f.sparenLink) hinweise.push('Sparplan');
@@ -12169,6 +12479,10 @@ function jwAnwenden(plan) {
     const copy = Object.assign({}, p.src, { id: uid(), start: p.start, end: p.end });
     const betraege = jwBetraege(p);
     if (betraege.length) copy.betraege = betraege; else delete copy.betraege;
+    if (Math.abs(p.amount - p.amountOrig) >= 0.01) {
+      const v = versFuerFix(copy);
+      if (v) versBetragSetzen(v, p.start, fixZuVers(copy, v, p.amount), true);
+    }
     if (p.src.dynamik) copy.dynamik = Object.assign({}, p.src.dynamik, { uebersprungen: (p.src.dynamik.uebersprungen || []).slice() });
     if (p.src.sparenLink) copy.sparenLink = Object.assign({}, p.src.sparenLink);
     idMap[String(p.src.id)] = copy.id;
@@ -12295,6 +12609,7 @@ async function jwPdf(yr) {
 // Der Assistent selbst (dynamisches Overlay, Schritte 1–3).
 function jahreswechselAssistent(ny) {
   ny = String(ny);
+  versLinksMigrieren();
   const plan = jwPlan(ny);
   const prev = plan.prev;
   let schritt = 1, fertig = null;
@@ -13584,6 +13899,7 @@ window.AZ_STANDARD_TEXT   = AZ_STANDARD_TEXT;
 
 (async () => {
   await loadData();
+  try { versLinksMigrieren(); } catch (e) { console.error('versLinksMigrieren:', e); }
   // Apply selected year's months to allMonths2026
   const yr = getSelectedYear();
   const newMonths = monthsBetween(yr + '-01', yr + '-12');
