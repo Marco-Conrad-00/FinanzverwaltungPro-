@@ -104,6 +104,11 @@ ersetzen, wenn die App komplett beendet ist (inkl. System-Tray).
   Versicherung über `versBetrag(v, m)`, nie direkt `v.amount`. Kündigung:
   `vertragKuendigungAnwenden` (setzt `laufzeitEnde`, `gekuendigtZum`, optional
   Folgetarif mit `vorgaengerId`/`nachfolgerId`).
+- **Verträge** (v1.0.71): `state.versicherungen` hält ALLE Verträge (Name
+  historisch), Art in `v.art` (`VT_ARTEN`, `vtArt`). Fristen: `laufzeitBis`,
+  `verlaengerungMonate`, `kuendFristWert/-Einheit`, `preisgarantieBis` →
+  `vtFristInfo(v)` liefert `ende`/`kuendBis` (Monatsende bleibt Monatsende).
+  Erinnerungen in `checkAblaufReminders` (Marker `frist:`/`preis:` + Datum).
 - **Währungen**: `etfKurse` stehen in Handelswährung → Werte immer über
   `kursEUR(kInfo)` (FX live via frankfurter.app, Fallback `FX_DEFAULT`).
 - **Sparplan ↔ Depot**: `f.sparenLink.zielDepot`, Auto-Buchungen über

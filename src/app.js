@@ -192,6 +192,7 @@ function checkAblaufReminders() {
   // Auch die eigenständig verwalteten Versicherungen/Verträge prüfen
   (state.versicherungen || []).forEach(v => {
     const end = (v.end || '').trim();
+    if (v.gekuendigtZum) return;                   // selbst gekündigt – keine Ablauf-Erinnerung
     if (!/^\d{4}-\d{2}$/.test(end)) return;
     if (end.endsWith('-12')) return;
     if (end < nowYm) return;
@@ -200,10 +201,35 @@ function checkAblaufReminders() {
     if (rems.some(r => r.autoAblauf === marker)) return;
     rems.push({
       id: uid(),
-      title: '⏳ Versicherung läuft aus: ' + (v.name || 'Unbenannt') + ' (Ende ' + monthLabel(end) + ')',
+      title: '⏳ ' + (vtArt(v) === 'versicherung' ? 'Versicherung' : 'Vertrag') + ' läuft aus: ' + (v.name || 'Unbenannt') + ' (Ende ' + monthLabel(end) + ')',
       when: 'monthStart', day: 1, repeatMonths: 1, active: true, notify: true,
       lastDone: '', anchorYm: nowYm, autoAblauf: marker, autoEnd: end,
     });
+  });
+  // Kündigungsfrist und Preisgarantie (Verträge mit Laufzeit/Frist)
+  const heuteIso = new Date().toISOString().slice(0, 10);
+  (state.versicherungen || []).forEach(v => {
+    const fi = vtFristInfo(v, heuteIso);
+    if (fi && fi.kuendBis && nowYm >= monthShift(fi.kuendBis.slice(0, 7), -vorlauf)) {
+      const marker = 'frist:' + v.id + ':' + fi.kuendBis;
+      if (!rems.some(r => r.autoAblauf === marker)) rems.push({
+        id: uid(),
+        title: '✂️ Kündigungsfrist: ' + (v.name || 'Vertrag') + ' – kündigen bis ' + datumDE(fi.kuendBis) +
+          (fi.verl ? ', sonst Verlängerung um ' + fi.verl + ' Monat' + (fi.verl === 1 ? '' : 'e') : '') + ' (Ende ' + datumDE(fi.ende) + ')',
+        when: 'monthStart', day: 1, repeatMonths: 1, active: true, notify: true,
+        lastDone: '', anchorYm: nowYm, autoAblauf: marker, autoEnd: fi.kuendBis.slice(0, 7),
+      });
+    }
+    const pg = v.preisgarantieBis;
+    if (!v.gekuendigtZum && /^\d{4}-\d{2}-\d{2}$/.test(pg || '') && pg >= heuteIso && nowYm >= monthShift(pg.slice(0, 7), -vorlauf)) {
+      const marker = 'preis:' + v.id + ':' + pg;
+      if (!rems.some(r => r.autoAblauf === marker)) rems.push({
+        id: uid(),
+        title: '💶 Preisgarantie endet am ' + datumDE(pg) + ': ' + (v.name || 'Vertrag') + ' – Tarif prüfen',
+        when: 'monthStart', day: 1, repeatMonths: 1, active: true, notify: true,
+        lastDone: '', anchorYm: nowYm, autoAblauf: marker, autoEnd: pg.slice(0, 7),
+      });
+    }
   });
   // Aufräumen: abgelaufene Auto-Erinnerungen entfernen
   state.reminders = rems.filter(r => !(r.autoAblauf && r.autoEnd && r.autoEnd < nowYm));
@@ -255,6 +281,11 @@ async function checkGeldEingang() {
 // Format je Eintrag: { v: 'Version', date: 'YYYY-MM-DD', changes: ['...','...'] }
 // Änderungen dürfen mit **Fett** Markierung versehen werden.
 const CHANGELOG = [
+  { v: '1.0.71', date: '2026-11-23', changes: [
+    '**„Verträge" statt „Versicherungen".** Die Seite verwaltet jetzt alle Verträge – mit Filter nach Art: 🛡️ Versicherungen, ⚡ Energie, 📱 Telefon & Internet, 🔁 Abos, 📄 Sonstige. Bestehende Einträge werden automatisch eingeordnet (z. B. „Strom" → Energie) und lassen sich im Feld „Art" umstellen. Die Fixkosten bleiben die Übersicht über alle Abbuchungen.',
+    '**Laufzeit, Kündigungsfrist, Preisgarantie.** Je Vertrag: Laufzeit bis, ob er sich danach verlängert (z. B. um 12 Monate) oder jederzeit kündbar ist, Kündigungsfrist in Wochen oder Monaten, Preisgarantie bis, Kunden- und Zählernummer. Die App rechnet aus, **bis wann du kündigen musst**, zeigt es in der Liste und in den Fixkosten (✂️) und erinnert rechtzeitig – ebenso vor dem Ende einer Preisgarantie. „Kündigen zum …" schlägt automatisch das passende Vertragsende vor.',
+    '**Vertrag direkt aus den Fixkosten anlegen.** Neuer 📄-Knopf in der Fixkosten-Zeile: übernimmt Name, Betrag, Zahlweise, Beginn und bisherige Betragsänderungen und verknüpft beides. Danach nur noch Anbieter, Nummer und Kündigungsfrist ergänzen.',
+  ]},
   { v: '1.0.70', date: '2026-11-23', changes: [
     '**Versicherungen und Fixkosten sind jetzt gekoppelt.** Änderst du den Betrag an einer Stelle – in „Verträge prüfen", über ✏️ in den Fixkosten oder direkt bei der Versicherung –, wird er in der anderen Tabelle mit demselben „gilt ab"-Datum übernommen. Die App rechnet dabei um (z. B. 480 €/Jahr bei der Versicherung = 40 €/Monat in den Fixkosten). Bereits eingetragene Änderungen werden beim ersten Start einmalig abgeglichen. Die Verknüpfung bleibt jetzt auch über den Jahreswechsel erhalten.',
     '**„Geändert am" und „neu ab".** Bei Versicherung und Fixkost steht jetzt, ab wann ein neuer Betrag gilt und wann er eingetragen wurde; die Versicherung zeigt den kompletten Beitragsverlauf. Weichen Versicherung und Fixkost voneinander ab, weist die App darauf hin und gleicht auf Knopfdruck an.',
@@ -2201,7 +2232,7 @@ const NAV_DEF = [
   { sec: 'planung', label: 'Planung', items: [
     ['fixkosten','🔁 Fixkosten'], ['sparen','🏦 Sparen & Depot'], ['umbuchungen','🔄 Umbuchungen'],
     ['zaehler','⚡ Zählerstände'], ['pv','☀️ PV-Anlage'], ['finanzprodukte','📋 Finanzprodukte'],
-    ['versicherungen','🛡️ Versicherungen'], ['analyse','📊 Analyse'], ['tabellen','📝 Eigene Tabellen'] ] },
+    ['versicherungen','📄 Verträge'], ['analyse','📊 Analyse'], ['tabellen','📝 Eigene Tabellen'] ] },
   { sec: 'verwaltung', label: 'Verwaltung', items: [
     ['archiveYear','📦 Jahr archivieren'] ] },
 ];
@@ -2321,7 +2352,7 @@ function navigate(page) {
     pv: ['Planung', 'PV-Anlage'],
     analyse: ['Auswertung', 'Analyse'],
     finanzprodukte: ['Planung', 'Finanzprodukte'],
-    versicherungen: ['Planung', 'Versicherungen & Verträge'],
+    versicherungen: ['Planung', 'Verträge & Versicherungen'],
     einstellungen: ['App', 'Einstellungen'],
     tabellen: ['Planung', 'Eigene Tabellen'],
     einstellungen: ['App', 'Einstellungen'],
@@ -2608,32 +2639,139 @@ function versMonthly(v) {
 }
 function versFixLinked(v) { return (getYearData().fixkosten || []).find(f => versFuerFix(f) === v) || null; }
 
+// ── Vertragsarten, Laufzeit & Kündigungsfrist ──────────────────────────────
+// state.versicherungen enthält alle Verträge (Name historisch). v.art ordnet sie
+// ein; Felder für Laufzeit/Frist: laufzeitBis ('YYYY-MM-DD', aktuelles Ende der
+// Mindest-/Vertragslaufzeit), verlaengerungMonate (0 = danach jederzeit
+// kündbar), kuendFristWert + kuendFristEinheit ('wochen'|'monate'),
+// preisgarantieBis, kundennummer, zaehlernummer.
+const VT_ARTEN = [['versicherung', '🛡️', 'Versicherungen'], ['energie', '⚡', 'Energie'], ['telekom', '📱', 'Telefon & Internet'],
+  ['abo', '🔁', 'Abos'], ['sonstige', '📄', 'Sonstige']];
+let vtFilter = 'alle';
+function vtArtAusText(t) {
+  t = String(t || '').toLowerCase();
+  if (/strom|gas\b|erdgas|energie|wärme|fernwärme|stadtwerke|wasser/.test(t)) return 'energie';
+  if (/handy|mobilfunk|mobil|internet|dsl|glasfaser|telefon|festnetz|telekom|vodafone|\bo2\b|1&1|congstar|kabel/.test(t)) return 'telekom';
+  if (/netflix|spotify|disney|prime|\babo\b|abonnement|youtube|zeitung|magazin|fitness|gym|icloud|adobe|microsoft 365|dazn|sky\b|audible/.test(t)) return 'abo';
+  if (/versicherung|haftpflicht|hausrat|kfz|kranken|zahn|unfall|rechtsschutz|lebens|rente|berufsunfähig|\bbu\b|police/.test(t)) return 'versicherung';
+  return '';
+}
+function vtArt(v) {
+  if (v && VT_ARTEN.some(a => a[0] === v.art)) return v.art;
+  return vtArtAusText([v && v.name, v && v.typ, v && v.anbieter].join(' ')) || 'versicherung';
+}
+function vtArtInfo(art) { return VT_ARTEN.find(a => a[0] === art) || VT_ARTEN[4]; }
+function vtMigrieren() {
+  let n = 0;
+  getVersicherungen().forEach(v => { if (!VT_ARTEN.some(a => a[0] === v.art)) { v.art = vtArt(v); n++; } });
+  if (n) saveData();
+}
+// Datumsrechnung (YYYY-MM-DD). Ein Monatsende bleibt Monatsende (31.01. + 1 Monat = 28./29.02.).
+function vtTageImMonat(y, m) { return new Date(Date.UTC(y, m, 0)).getUTCDate(); }
+function vtDatumPlusMonate(iso, n) {
+  let [y, m, d] = iso.split('-').map(Number);
+  const warEnde = d === vtTageImMonat(y, m);
+  m += n; while (m > 12) { m -= 12; y++; } while (m < 1) { m += 12; y--; }
+  const max = vtTageImMonat(y, m);
+  return y + '-' + String(m).padStart(2, '0') + '-' + String(warEnde ? max : Math.min(d, max)).padStart(2, '0');
+}
+function vtDatumPlusTage(iso, n) {
+  const [y, m, d] = iso.split('-').map(Number);
+  return new Date(Date.UTC(y, m - 1, d + n)).toISOString().slice(0, 10);
+}
+function vtTageBis(von, bis) {
+  const t = iso => { const [y, m, d] = iso.split('-').map(Number); return Date.UTC(y, m - 1, d); };
+  return Math.round((t(bis) - t(von)) / 86400000);
+}
+function vtFristText(v) {
+  const w = +v.kuendFristWert || 0;
+  if (!w) return '';
+  return w + ' ' + (v.kuendFristEinheit === 'wochen' ? (w === 1 ? 'Woche' : 'Wochen') : (w === 1 ? 'Monat' : 'Monate'));
+}
+// Laufzeitende, „kündigen bis" und Tage bis dahin – oder „jederzeit kündbar".
+function vtFristInfo(v, heute) {
+  heute = heute || azHeute();
+  if (!v || v.gekuendigtZum) return null;
+  const w = +v.kuendFristWert || 0, wochen = v.kuendFristEinheit === 'wochen';
+  const minus = d => !w ? d : wochen ? vtDatumPlusTage(d, -7 * w) : vtDatumPlusMonate(d, -w);
+  const plus = d => !w ? d : wochen ? vtDatumPlusTage(d, 7 * w) : vtDatumPlusMonate(d, w);
+  const verl = +v.verlaengerungMonate || 0, fristText = vtFristText(v);
+  if (/^\d{4}-\d{2}-\d{2}$/.test(v.laufzeitBis || '')) {
+    let ende = v.laufzeitBis, guard = 0;
+    while (minus(ende) < heute && verl > 0 && guard++ < 600) ende = vtDatumPlusMonate(ende, verl);
+    if (minus(ende) >= heute) return { ende, kuendBis: minus(ende), tage: vtTageBis(heute, minus(ende)), verl, fristText };
+    return { jederzeit: true, fruehestesEnde: plus(heute), fristText };
+  }
+  if (w) return { jederzeit: true, fruehestesEnde: plus(heute), fristText };
+  return null;
+}
+function vtFristZeile(v) {
+  const fi = vtFristInfo(v);
+  if (!fi) return '';
+  if (fi.jederzeit) return 'Jederzeit kündbar' + (fi.fristText ? ' mit ' + fi.fristText + ' Frist' : '') + ' – frühestens zum ' + datumDE(fi.fruehestesEnde);
+  return 'Kündigen bis <strong>' + datumDE(fi.kuendBis) + '</strong> (noch ' + fi.tage + ' Tag' + (fi.tage === 1 ? '' : 'e') + ') zum ' + datumDE(fi.ende) +
+    (fi.verl ? ', sonst Verlängerung um ' + fi.verl + ' Monat' + (fi.verl === 1 ? '' : 'e') : '');
+}
+// Fixkost → neuen Vertrag anlegen (Name, Betrag, Beginn, Ende übernehmen) und verknüpfen.
+const VT_INTERVALL_ZW = { 1: 'monatlich', 3: 'vierteljährlich', 6: 'halbjährlich', 12: 'jährlich' };
+function fixVertragAnlegen(id) {
+  if (!requireUnlocked()) return;
+  const f = (state.fixkosten || []).find(x => String(x.id) === String(id));
+  if (!f || versFuerFix(f)) return;
+  const kat = String(f.category || f.cat || '');
+  const art = /versicherung/i.test(kat) ? 'versicherung' : /abo/i.test(kat) ? 'abo' : (vtArtAusText(f.name) || 'sonstige');
+  const v = { id: uid(), art, name: f.name || 'Vertrag', typ: '', anbieter: '', police: '', zahlweise: VT_INTERVALL_ZW[+f.interval || 1] || 'monatlich',
+    start: f.start || thisMonth(), end: f.laufzeitEnde || '', note: '', kontaktTel: '', kontaktMail: '', docName: '', docPath: '', fixId: f.id };
+  v.amount = fixZuVers(f, v, +f.amount || 0);
+  if ((f.betraege || []).length) v.betraege = f.betraege.map(a => ({ ab: a.ab, amount: fixZuVers(f, v, a.amount), am: a.am || today() }));
+  getVersicherungen().push(v);
+  f.versId = v.id;
+  saveData();
+  selectedVersId = v.id;
+  vtFilter = 'alle';
+  navigate('versicherungen');
+  showToast('Vertrag angelegt – ergänze Anbieter, Nummer und Kündigungsfrist', 'info');
+}
+function setVtFilter(a) { vtFilter = a; renderPage(); }
+
 function versicherungen() {
-  const list = getVersicherungen();
-  const sel = list.find(v => v.id === selectedVersId) || null;
+  const alle = getVersicherungen();
+  const list = vtFilter === 'alle' ? alle : alle.filter(v => vtArt(v) === vtFilter);
+  const sel = alle.find(v => v.id === selectedVersId) || null;
+  const chip = (val, label, n) => '<button onclick="setVtFilter(\'' + val + '\')" style="font-size:12px;padding:6px 12px;border-radius:999px;cursor:pointer;border:1px solid ' +
+    (vtFilter === val ? 'var(--accent)' : 'var(--border)') + ';background:' + (vtFilter === val ? 'color-mix(in srgb,var(--accent) 16%,transparent)' : 'transparent') +
+    ';color:' + (vtFilter === val ? 'var(--accent)' : 'var(--muted)') + '">' + label + ' <span style="opacity:.7">' + n + '</span></button>';
+  const chips = chip('alle', 'Alle', alle.length) + VT_ARTEN.map(a => chip(a[0], a[1] + ' ' + a[2], alle.filter(v => vtArt(v) === a[0]).length)).join('');
+  const heute = azHeute();
   const listHtml = list.length ? list.map(v => {
     const aktiv = v.id === selectedVersId;
-    return '<button onclick="selectVers(\'' + v.id + '\')" style="display:block;width:100%;text-align:left;border:1px solid ' + (aktiv?'var(--accent)':'var(--border)') + ';background:' + (aktiv?'var(--accent-light)':'var(--paper)') + ';border-radius:10px;padding:10px 12px;margin-bottom:8px;cursor:pointer">' +
+    const fi = vtFristInfo(v);
+    const pg = /^\d{4}-\d{2}-\d{2}$/.test(v.preisgarantieBis || '') && v.preisgarantieBis >= heute ? vtTageBis(heute, v.preisgarantieBis) : null;
+    return '<button onclick="selectVers(\'' + v.id + '\')" style="display:block;width:100%;text-align:left;border:1px solid ' + (aktiv?'var(--accent)':'var(--border)') + ';background:' + (aktiv?'var(--accent-light)':'var(--paper)') + ';border-radius:10px;padding:10px 12px;margin-bottom:8px;cursor:pointer' + (v.gekuendigtZum && v.end && v.end < thisMonth() ? ';opacity:.55' : '') + '">' +
       '<div style="display:flex;justify-content:space-between;gap:8px;align-items:center">' +
-        '<strong style="font-size:14px">' + (v.name||'Unbenannt').replace(/</g,'&lt;') + '</strong>' +
+        '<strong style="font-size:14px">' + vtArtInfo(vtArt(v))[1] + ' ' + escapeHtml(v.name || 'Unbenannt') + '</strong>' +
         (v.docPath ? '<span title="Dokument hinterlegt">📎</span>' : '') + '</div>' +
-      '<div style="font-size:12px;color:var(--muted);margin-top:2px">' + ((v.typ||'') + (v.typ&&v.anbieter?' · ':'') + (v.anbieter||'')).replace(/</g,'&lt;') + '</div>' +
+      '<div style="font-size:12px;color:var(--muted);margin-top:2px">' + escapeHtml((v.typ||'') + (v.typ&&v.anbieter?' · ':'') + (v.anbieter||'')) + '</div>' +
       '<div style="font-size:12px;margin-top:4px">' + fmtEur(versBetrag(v, thisMonth())) + ' <span style="color:var(--muted)">/ ' + (v.zahlweise||'') + '</span>' +
-        (v.gekuendigtZum ? ' · <span style="color:var(--red)">gekündigt zum ' + v.gekuendigtZum.split('-').reverse().join('.') + '</span>'
+        (v.gekuendigtZum ? ' · <span style="color:var(--red)">gekündigt zum ' + datumDE(v.gekuendigtZum) + '</span>'
           : v.end ? ' · <span style="color:var(--muted)">Ende ' + monthLabel(v.end) + '</span>' : '') + '</div>' +
-        ((v.betraege || []).some(a => a.ab > thisMonth()) ? '<div style="font-size:11px;color:var(--accent);margin-top:2px">' + aenderungHinweis(v.betraege, thisMonth(), fmtEur) + '</div>' : '') +
+      (fi && fi.kuendBis && fi.tage <= 90 ? '<div style="font-size:11px;color:' + (fi.tage <= 30 ? 'var(--red)' : '#d97706') + ';margin-top:2px">✂️ kündbar bis ' + datumDE(fi.kuendBis) + ' (' + fi.tage + ' T.)</div>' : '') +
+      (pg !== null && pg <= 60 ? '<div style="font-size:11px;color:#d97706;margin-top:2px">💶 Preisgarantie endet ' + datumDE(v.preisgarantieBis) + '</div>' : '') +
+      ((v.betraege || []).some(a => a.ab > thisMonth()) ? '<div style="font-size:11px;color:var(--accent);margin-top:2px">' + aenderungHinweis(v.betraege, thisMonth(), fmtEur) + '</div>' : '') +
     '</button>';
-  }).join('') : '<div class="empty-state" style="padding:24px"><div class="empty-icon">🛡️</div><p>Noch keine Versicherungen/Verträge.</p></div>';
+  }).join('') : '<div class="empty-state" style="padding:24px"><div class="empty-icon">📄</div><p>' + (alle.length ? 'Keine Verträge in dieser Kategorie.' : 'Noch keine Verträge.') + '</p></div>';
 
   let detailHtml;
   if (!sel) {
-    detailHtml = '<div class="empty-state" style="padding:40px"><div class="empty-icon">👈</div><p>Wähle links einen Eintrag oder lege einen neuen an.</p></div>';
+    detailHtml = '<div class="empty-state" style="padding:40px"><div class="empty-icon">👈</div><p>Wähle links einen Vertrag oder lege einen neuen an.</p>' +
+      '<p style="font-size:12px;color:var(--muted)">Tipp: Bestehende Fixkosten (z. B. Strom, Handy) lassen sich dort über 📄 direkt als Vertrag anlegen.</p></div>';
   } else {
+    const art = vtArt(sel);
     const fixLinked = versFixLinked(sel);
     const zwOpts = ZAHLWEISEN.map(z => '<option value="' + z + '"' + (z===sel.zahlweise?' selected':'') + '>' + z + '</option>').join('');
     const docArea = sel.docPath
       ? '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:8px 0">' +
-          '<span class="badge badge-muted">📎 ' + (sel.docName||'Dokument').replace(/</g,'&lt;') + '</span>' +
+          '<span class="badge badge-muted">📎 ' + escapeHtml(sel.docName||'Dokument') + '</span>' +
           '<button class="btn btn-ghost btn-sm" onclick="versOpenDoc(\'' + sel.id + '\')">Extern öffnen</button>' +
           '<button class="btn btn-ghost btn-sm" onclick="versPickDoc(\'' + sel.id + '\')">Ersetzen</button>' +
           '<button class="btn btn-ghost btn-sm" onclick="versRemoveDoc(\'' + sel.id + '\')">Entfernen</button>' +
@@ -2644,33 +2782,52 @@ function versicherungen() {
       : '<button class="btn btn-primary btn-sm" onclick="versPickDoc(\'' + sel.id + '\')">📎 PDF anhängen</button>';
     const F = (label, field, type, val, extra) => '<label class="field">' + label +
       '<input type="' + (type||'text') + '" value="' + String(val==null?'':val).replace(/"/g,'&quot;') + '" onchange="updateVers(\'' + sel.id + '\',\'' + field + '\',' + (type==='number'?'+this.value':'this.value') + ')" ' + (extra||'') + '/></label>';
+    const sel2 = (field, opts, val) => '<select onchange="updateVers(\'' + sel.id + '\',\'' + field + '\',' + (typeof opts[0][0] === 'number' ? '+this.value' : 'this.value') + ')">' +
+      opts.map(o => '<option value="' + o[0] + '"' + (String(o[0]) === String(val) ? ' selected' : '') + '>' + o[1] + '</option>').join('') + '</select>';
+    const fz = vtFristZeile(sel);
     detailHtml =
       '<div class="card">' +
-        '<div class="card-header"><h3>' + (sel.name||'Versicherung').replace(/</g,'&lt;') + '</h3>' +
+        '<div class="card-header"><h3>' + vtArtInfo(art)[1] + ' ' + escapeHtml(sel.name||'Vertrag') + '</h3>' +
           '<button class="btn-icon danger" onclick="deleteVersicherung(\'' + sel.id + '\')" title="Löschen">×</button></div>' +
         '<div class="form-grid form-grid-2">' +
           F('Name','name','text',sel.name) +
-          F('Typ (z.B. Zusatzversicherung)','typ','text',sel.typ) +
+          '<label class="field">Art' + sel2('art', VT_ARTEN.map(a => [a[0], a[1] + ' ' + a[2]]), art) + '</label>' +
           F('Anbieter','anbieter','text',sel.anbieter) +
-          F('Policennummer','police','text',sel.police) +
+          F('Tarif / Typ','typ','text',sel.typ) +
+          F(art === 'versicherung' ? 'Versicherungs-/Policennummer' : 'Vertragsnummer','police','text',sel.police) +
+          F('Kundennummer','kundennummer','text',sel.kundennummer) +
           '<label class="field">Betrag aktuell (' + currencySymbol() + ' / ' + (sel.zahlweise||'') + ')<input type="number" step="0.01" value="' + versBetrag(sel, thisMonth()).toFixed(2) + '" onchange="versBetragAendern(\'' + sel.id + '\',+this.value)" title="Bei einer Änderung fragt die App, ab wann der neue Betrag gilt"/>' +
             (aenderungHinweis(sel.betraege, thisMonth(), fmtEur) ? '<span style="font-size:11px;color:var(--accent)">' + aenderungHinweis(sel.betraege, thisMonth(), fmtEur) + '</span>' : '') + '</label>' +
           '<label class="field">Zahlweise<select onchange="updateVers(\'' + sel.id + '\',\'zahlweise\',this.value)">' + zwOpts + '</select></label>' +
           '<label class="field">Beginn<input type="month" value="' + (sel.start||'') + '" onchange="updateVers(\'' + sel.id + '\',\'start\',this.value)"/></label>' +
           '<label class="field">Ende (leer = unbefristet)<input type="month" value="' + (sel.end||'') + '" onchange="updateVers(\'' + sel.id + '\',\'end\',this.value)"/></label>' +
+          (art === 'energie' ? F('Zählernummer','zaehlernummer','text',sel.zaehlernummer) : '') +
           F('Kontakt Telefon','kontaktTel','text',sel.kontaktTel) +
           F('Kontakt E-Mail','kontaktMail','text',sel.kontaktMail) +
           '<label class="field" style="grid-column:1/-1">Notiz<input type="text" value="' + (sel.note||'').replace(/"/g,'&quot;') + '" onchange="updateVers(\'' + sel.id + '\',\'note\',this.value)"/></label>' +
         '</div>' +
+        '<div style="margin-top:16px">' +
+          '<p style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px">Laufzeit & Kündigung</p>' +
+          '<div class="form-grid form-grid-2">' +
+            F('Laufzeit bis (aktuelles Vertragsende)','laufzeitBis','date',sel.laufzeitBis) +
+            '<label class="field">Danach' + sel2('verlaengerungMonate', [[0, 'jederzeit kündbar (keine Verlängerung)'], [1, 'verlängert sich um 1 Monat'], [3, 'verlängert sich um 3 Monate'],
+              [6, 'verlängert sich um 6 Monate'], [12, 'verlängert sich um 12 Monate'], [24, 'verlängert sich um 24 Monate']], +sel.verlaengerungMonate || 0) + '</label>' +
+            '<label class="field">Kündigungsfrist<div style="display:flex;gap:6px"><input type="number" min="0" step="1" value="' + (+sel.kuendFristWert || '') + '" placeholder="z. B. 1" style="width:90px" onchange="updateVers(\'' + sel.id + '\',\'kuendFristWert\',+this.value)"/>' +
+              sel2('kuendFristEinheit', [['monate', 'Monate'], ['wochen', 'Wochen']], sel.kuendFristEinheit || 'monate') + '</div></label>' +
+            F('Preisgarantie bis','preisgarantieBis','date',sel.preisgarantieBis) +
+          '</div>' +
+          (fz ? '<div style="margin-top:8px;padding:8px 12px;border-radius:8px;font-size:12px;border:1px solid var(--border)">✂️ ' + fz + '</div>' : '') +
+          (!sel.laufzeitBis && !sel.kuendFristWert && !sel.gekuendigtZum ? '<div style="font-size:11px;color:var(--muted);margin-top:6px">Mit Laufzeit und Kündigungsfrist erinnert die App rechtzeitig, bis wann du kündigen musst.</div>' : '') +
+        '</div>' +
         versDetailHinweise(sel, fixLinked) +
         '<div style="margin-top:10px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">' +
           (fixLinked
-            ? '<span class="badge badge-green">🔗 verknüpft mit Fixkosten: ' + (fixLinked.name||'').replace(/</g,'&lt;') + '</span>'
+            ? '<span class="badge badge-green">🔗 verknüpft mit Fixkosten: ' + escapeHtml(fixLinked.name||'') + '</span>'
             : '<button class="btn btn-ghost btn-sm" onclick="versLinkFixkost(\'' + sel.id + '\')">🔗 Mit Fixkosten verknüpfen / anlegen</button>') +
           '<span style="font-size:11px;color:var(--muted)">≈ ' + fmtEur(versMonthly(sel)) + ' / Monat</span>' +
           ((sel.name && sel.anbieter && sel.police)
             ? '<button class="btn btn-ghost btn-sm" onclick="versKuendigen(\'' + sel.id + '\')" title="Kündigungsschreiben erzeugen (PDF / E-Mail-Vorlage)" style="margin-left:auto">✉️ Schreiben</button>'
-            : '<span style="font-size:11px;color:var(--muted);margin-left:auto" title="Für das Kündigungsschreiben Name, Anbieter und Policennummer ausfüllen">✉️ Schreiben (Name/Anbieter/Police nötig)</span>') +
+            : '<span style="font-size:11px;color:var(--muted);margin-left:auto" title="Für das Kündigungsschreiben Name, Anbieter und Vertragsnummer ausfüllen">✉️ Schreiben (Name/Anbieter/Nummer nötig)</span>') +
           (sel.gekuendigtZum ? '' : '<button class="btn btn-ghost btn-sm" onclick="vertragKuendigen(\'vers\',\'' + sel.id + '\')" title="Vertrag zum Datum beenden – optional durch neuen Tarif ersetzen">🚫 Kündigen zum …</button>') +
         '</div>' +
         '<div style="margin-top:14px">' +
@@ -2680,9 +2837,12 @@ function versicherungen() {
   }
 
   return '<div>' +
-    '<div style="display:flex;justify-content:flex-end;gap:8px;margin-bottom:14px">' +
-      '<button class="btn btn-ghost" onclick="versAusPdf()" title="PDF wählen – Name, Police, Beginn/Ende usw. werden aus dem Dokument vorausgefüllt (bitte prüfen)">📄 Aus PDF anlegen</button>' +
-      '<button class="btn btn-primary" onclick="addVersicherung()">+ Versicherung / Vertrag</button>' +
+    '<div style="display:flex;justify-content:space-between;gap:8px;margin-bottom:14px;flex-wrap:wrap;align-items:center">' +
+      '<div style="display:flex;gap:6px;flex-wrap:wrap">' + chips + '</div>' +
+      '<div style="display:flex;gap:8px">' +
+        '<button class="btn btn-ghost" onclick="versAusPdf()" title="PDF wählen – Name, Nummer, Beginn/Ende usw. werden aus dem Dokument vorausgefüllt (bitte prüfen)">📄 Aus PDF anlegen</button>' +
+        '<button class="btn btn-primary" onclick="addVersicherung()">+ Vertrag</button>' +
+      '</div>' +
     '</div>' +
     '<div style="display:grid;grid-template-columns:320px 1fr;gap:16px;align-items:start">' +
       '<div>' + listHtml + '</div><div>' + detailHtml + '</div>' +
@@ -2690,15 +2850,19 @@ function versicherungen() {
 }
 function selectVers(id) { selectedVersId = id; renderPage(); }
 function addVersicherung() {
-  const v = { id: uid(), name: 'Neue Versicherung', typ: '', anbieter: '', police: '', amount: 0,
-    zahlweise: 'jährlich', start: (currentMonth || new Date().toISOString().slice(0,7)), end: '', note: '',
+  const art = vtFilter !== 'alle' ? vtFilter : 'sonstige';
+  const v = { id: uid(), art, name: art === 'versicherung' ? 'Neue Versicherung' : 'Neuer Vertrag', typ: '', anbieter: '', police: '', amount: 0,
+    zahlweise: art === 'versicherung' ? 'jährlich' : 'monatlich', start: (currentMonth || new Date().toISOString().slice(0,7)), end: '', note: '',
     kontaktTel: '', kontaktMail: '', docName: '', docPath: '', fixId: '' };
   getVersicherungen().push(v); selectedVersId = v.id; saveData(); renderPage();
 }
 function updateVers(id, f, v) {
   const o = getVersicherungen().find(x => x.id === id); if (!o) return;
   o[f] = v; saveData();
-  if (['name','amount','zahlweise','end'].includes(f)) renderPage();
+  if (['laufzeitBis','verlaengerungMonate','kuendFristWert','kuendFristEinheit','preisgarantieBis','end'].includes(f)) {
+    try { checkAblaufReminders(); } catch (e) { console.error('checkAblaufReminders:', e); }
+  }
+  if (['name','amount','zahlweise','end','art','laufzeitBis','verlaengerungMonate','kuendFristWert','kuendFristEinheit','preisgarantieBis'].includes(f)) renderPage();
 }
 async function deleteVersicherung(id) {
   const o = getVersicherungen().find(x => x.id === id); if (!o) return;
@@ -2786,7 +2950,9 @@ function versKuendigungText(o) {
   const abOrt  = ((m.plz||'') + ' ' + (m.ort||'')).trim() || '[PLZ Ort]';
   const heute  = new Date().toLocaleDateString('de-DE', { day:'2-digit', month:'2-digit', year:'numeric' });
   const ortDat = (m.ort || '[Ort]') + ', ' + heute;
-  const betreff = 'Kündigung ' + [o.typ, o.name].filter(Boolean).join(' ') + ' – Versicherungsnummer ' + (o.police || '');
+  const nrLabel = vtArt(o) === 'versicherung' ? 'Versicherungsnummer' : 'Vertragsnummer';
+  const extra = [o.kundennummer ? 'Kundennummer ' + o.kundennummer : '', o.zaehlernummer ? 'Zählernummer ' + o.zaehlernummer : ''].filter(Boolean).join(', ');
+  const betreff = 'Kündigung ' + [o.typ, o.name].filter(Boolean).join(' ') + ' – ' + nrLabel + ' ' + (o.police || '') + (extra ? ' (' + extra + ')' : '');
   const endeSatz = o.gekuendigtZum
     ? ' fristgerecht zum ' + o.gekuendigtZum.split('-').reverse().join('.') + ', hilfsweise zum nächstmöglichen Zeitpunkt'
     : o.end ? ' fristgerecht zum nächstmöglichen Zeitpunkt, hilfsweise zum ' + monthLabel(o.end)
@@ -2797,7 +2963,7 @@ function versKuendigungText(o) {
     ortDat, '',
     betreff, '',
     'Sehr geehrte Damen und Herren,', '',
-    'hiermit kündige ich den oben genannten Vertrag (Versicherungsnummer ' + (o.police || '') + ')' + endeSatz + '.', '',
+    'hiermit kündige ich den oben genannten Vertrag (' + nrLabel + ' ' + (o.police || '') + ')' + endeSatz + '.', '',
     'Bitte bestätigen Sie mir die Kündigung sowie das genaue Vertragsende schriftlich. Etwaige Lastschrifteinzüge stellen Sie bitte zum Vertragsende ein.', '',
     'Mit freundlichen Grüßen', '', abName,
   ].join('\n');
@@ -4946,7 +5112,7 @@ function fixkosten() {
               <td><input type="month" value="${f.laufzeitEnde||''}" onchange="updateFixk('${f.id}','laufzeitEnde',this.value)" style="width:145px" title="Echtes Vertragsende – wird beim Jahreswechsel übernommen; leer = unbefristet"/></td>
               <td><input type="number" value="${f.day||1}" onchange="updateFixk('${f.id}','day',+this.value)" style="width:60px;text-align:center" min="1" max="31"/></td>
               <td style="white-space:nowrap"><input type="number" value="${(+f.amount||0).toFixed(2)}" onchange="updateFixk('${f.id}','amount',+this.value)" step="0.01" style="width:90px;text-align:right" title="Grundbetrag${hatAktiveDynamik(f)?' (ohne Dynamik)':''}"/> ${currencySymbol()}${(() => { if (!hatAktiveDynamik(f)) return ''; const eff = fixkostBetrag(f, currentMonth); const d = f.dynamik; const istZukunft = d.abMonat > currentMonth; const lbl = istZukunft ? ('ab ' + monthLabel(d.abMonat)) : 'akt.'; const wlbl = d.typ==='prozent' ? ('+'+fmt(+d.wert||0)+' %') : ('+'+fmtEur(+d.wert||0)); return `<div style="font-size:10px;color:var(--accent);white-space:nowrap;margin-top:2px" title="Dynamik ${wlbl}${d.intervallMonate>0?(' alle '+d.intervallMonate+' Monate'):' einmalig'} ab ${monthLabel(d.abMonat)}">⚡ ${fmtEur(eff)} ${lbl}</div>`; })()}${(f.betraege || []).length ? '<div style="font-size:10px;color:var(--accent);white-space:nowrap;margin-top:2px">' + aenderungHinweis(f.betraege, currentMonth, fmtEur) + '</div>' : ''}</td>
-              <td style="white-space:nowrap">${f.gekuendigtZum ? '' : `<button class="btn-icon" title="Kündigen zum Datum – optional durch neuen Tarif ersetzen" onclick="vertragKuendigen('fix','${f.id}')" style="width:auto;min-width:0;padding:0 8px;font-size:12px">🚫</button>`}<button class="btn-icon" title="Betrag ändern ab einem Datum (Vertrag läuft weiter)" onclick="openBetragModal('${f.id}')" style="width:auto;min-width:0;padding:0 8px;font-size:12px;${(f.betraege||[]).length?'color:var(--accent)':''}">✏️</button><button class="btn-icon" title="Dynamik (automatische Erhöhung) einrichten/bearbeiten" onclick="openDynamikModal('${f.id}')" style="width:auto;min-width:0;padding:0 8px;font-size:12px;${hatAktiveDynamik(f)?'color:var(--accent)':''}">⚡</button>${_vonBtn}${_zielBtn}${_depotBtn}<button class="btn-icon danger" onclick="deleteFixk('${f.id}')">×</button></td>
+              <td style="white-space:nowrap">${versFuerFix(f) ? '' : `<button class="btn-icon" title="Vertrag dazu anlegen (Anbieter, Nummer, Kündigungsfrist, Dokument)" onclick="fixVertragAnlegen('${f.id}')" style="width:auto;min-width:0;padding:0 8px;font-size:12px">📄</button>`}${f.gekuendigtZum ? '' : `<button class="btn-icon" title="Kündigen zum Datum – optional durch neuen Tarif ersetzen" onclick="vertragKuendigen('fix','${f.id}')" style="width:auto;min-width:0;padding:0 8px;font-size:12px">🚫</button>`}<button class="btn-icon" title="Betrag ändern ab einem Datum (Vertrag läuft weiter)" onclick="openBetragModal('${f.id}')" style="width:auto;min-width:0;padding:0 8px;font-size:12px;${(f.betraege||[]).length?'color:var(--accent)':''}">✏️</button><button class="btn-icon" title="Dynamik (automatische Erhöhung) einrichten/bearbeiten" onclick="openDynamikModal('${f.id}')" style="width:auto;min-width:0;padding:0 8px;font-size:12px;${hatAktiveDynamik(f)?'color:var(--accent)':''}">⚡</button>${_vonBtn}${_zielBtn}${_depotBtn}<button class="btn-icon danger" onclick="deleteFixk('${f.id}')">×</button></td>
             </tr>`;
           }).join('')}
         </tbody>
@@ -12050,7 +12216,9 @@ async function versAngleichen(id) {
 function fixVertragsInfo(f) {
   const t = [];
   const v = versFuerFix(f);
-  if (v) t.push('<span title="Verknüpft mit Versicherung/Vertrag „' + escapeHtml(v.name || '') + '" – Betragsänderungen gelten für beide">🛡️ ' + escapeHtml(v.name || 'Vertrag') + '</span>');
+  if (v) t.push('<span title="Verknüpft mit Vertrag „' + escapeHtml(v.name || '') + '" – Betragsänderungen gelten für beide">' + vtArtInfo(vtArt(v))[1] + ' ' + escapeHtml(v.name || 'Vertrag') + '</span>');
+  const fi = v && vtFristInfo(v);
+  if (fi && fi.kuendBis && fi.tage <= 90) t.push('<span style="color:' + (fi.tage <= 30 ? 'var(--red)' : '#d97706') + '">✂️ kündbar bis ' + datumDE(fi.kuendBis) + '</span>');
   if (f.gekuendigtZum) t.push('<span style="color:var(--red)">🚫 gekündigt zum ' + datumDE(f.gekuendigtZum) + '</span>');
   if (f.vorgaengerId) t.push('<span>↪ Folgetarif</span>');
   return t.length ? '<div style="font-size:10px;color:var(--muted);margin-top:2px;white-space:nowrap">' + t.join(' · ') + '</div>' : '';
@@ -12080,7 +12248,7 @@ function vertragKuendigungAnwenden(f, v, o) {
   if (v) {
     nv = Object.assign({}, v, { id: uid(), name: o.name || v.name, anbieter: o.anbieter || '', police: '', amount: betrag, start, end: '',
       docName: '', docPath: '', fixId: '', note: 'Folgetarif von „' + (v.name || '') + '"', vorgaengerId: v.id });
-    ['betraege', 'gekuendigtZum', 'gekuendigtAm', 'nachfolgerId'].forEach(k => delete nv[k]);
+    ['betraege', 'gekuendigtZum', 'gekuendigtAm', 'nachfolgerId', 'laufzeitBis', 'preisgarantieBis', 'kundennummer'].forEach(k => delete nv[k]);
     getVersicherungen().push(nv);
     v.nachfolgerId = nv.id;
   }
@@ -12108,7 +12276,8 @@ function vertragKuendigen(art, id) {
   else { f = (state.fixkosten || []).find(x => String(x.id) === String(id)); if (!f) return; v = versFuerFix(f); }
   const name = (v && v.name) || (f && f.name) || 'Vertrag';
   const basisM = (f && f.laufzeitEnde) || (v && v.end) || monthShift(thisMonth(), 2);
-  const st = { zum: vkMonatsende(basisM), ersetzen: false, name, anbieter: (v && v.anbieter) || '', betrag: '', start: '',
+  const fi = v ? vtFristInfo(v) : null;
+  const st = { zum: fi ? (fi.ende || fi.fruehestesEnde) : vkMonatsende(basisM), ersetzen: false, name, anbieter: (v && v.anbieter) || '', betrag: '', start: '',
     schreiben: !!(v && v.name && v.anbieter && v.police) };
   const einheit = v ? 'je ' + (v.zahlweise || 'Zahlung') : (+(f && f.interval) || 1) === 1 ? 'pro Monat' : 'je Abbuchung';
   const feld = 'padding:8px 10px;border:1px solid var(--border);border-radius:8px;background:var(--surface-2);color:var(--text);font-size:14px;width:100%';
@@ -12184,6 +12353,8 @@ function vertragKuendigen(art, id) {
 window.versBetragAendern = versBetragAendern;
 window.versAngleichen    = versAngleichen;
 window.vertragKuendigen  = vertragKuendigen;
+window.setVtFilter       = setVtFilter;
+window.fixVertragAnlegen = fixVertragAnlegen;
 // Dialog „Betrag ändern" für einen Vertrag.
 function openBetragModal(id) {
   if (!requireUnlocked()) return;
@@ -13900,6 +14071,7 @@ window.AZ_STANDARD_TEXT   = AZ_STANDARD_TEXT;
 (async () => {
   await loadData();
   try { versLinksMigrieren(); } catch (e) { console.error('versLinksMigrieren:', e); }
+  try { vtMigrieren(); } catch (e) { console.error('vtMigrieren:', e); }
   // Apply selected year's months to allMonths2026
   const yr = getSelectedYear();
   const newMonths = monthsBetween(yr + '-01', yr + '-12');
