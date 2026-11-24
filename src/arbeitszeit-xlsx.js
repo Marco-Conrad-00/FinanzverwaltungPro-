@@ -67,11 +67,12 @@ async function fillMonth(templateBuf, { jahr, monat, zeilen }) {
   xml = setCell(xml, 'H7', excelSerial(jahr + '-' + String(monat).padStart(2, '0') + '-01'));
   // Alle Tageszeilen leeren (falls eine bereits befüllte Datei als Vorlage dient)
   for (let tag = 1; tag <= 31; tag++) {
-    for (const col of ['C', 'E', 'G', 'H', 'I']) xml = setCell(xml, col + (10 + tag), null);
+    for (const col of ['C', 'D', 'E', 'G', 'H', 'I']) xml = setCell(xml, col + (10 + tag), null);
   }
   for (const z of zeilen || []) {
     const r = 10 + z.tag;
     if (z.beginn != null) xml = setCell(xml, 'C' + r, z.beginn);
+    if (z.pause)          xml = setCell(xml, 'D' + r, z.pause);   // Pause als HHMM (30 = 0:30)
     if (z.ende != null)   xml = setCell(xml, 'E' + r, z.ende);
     if (z.kuerzel)        xml = setCell(xml, 'G' + r, z.kuerzel);
     if (z.aufgezeichnet)  xml = setCell(xml, 'H' + r, excelSerial(z.aufgezeichnet));
@@ -147,12 +148,13 @@ async function readMonth(buf) {
   const zeilen = [];
   for (let tag = 1; tag <= tageImMonat; tag++) {
     const r = 10 + tag;
-    const beginn = hhmm(z['C' + r]), ende = hhmm(z['E' + r]);
+    const beginn = hhmm(z['C' + r]), ende = hhmm(z['E' + r]), pause = hhmm(z['D' + r]);
     const kuerzel = typeof z['G' + r] === 'string' ? z['G' + r].trim() : '';
     if (!(beginn && ende) && !kuerzel) continue;
     zeilen.push({
       datum: start.slice(0, 8) + String(tag).padStart(2, '0'),
       beginn: beginn && ende ? beginn : '', ende: beginn && ende ? ende : '',
+      pause: beginn && ende && pause && pause !== '00:00' ? pause : '',
       kuerzel,
       aufgezeichnet: typeof z['H' + r] === 'number' ? serialToIso(z['H' + r]) : '',
       bemerkung: z['I' + r] != null ? String(z['I' + r]).trim() : '',

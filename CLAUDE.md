@@ -134,6 +134,10 @@ ersetzen, wenn die App komplett beendet ist (inkl. System-Tray).
   Lohnzeitraum = Starttag `arbeitszeitConfig.lohnStart` (Standard 20, 1 =
   Kalendermonat) im Vormonat bis Vortag (`azLohnMonat`); DATEV-Listen bleiben
   je Kalendermonat.
+  Pausenregel (v1.0.74): ab `arbeitszeitConfig.pausenRegelAb` kein Verschieben
+  mehr – über 6 h dokumentiert `azDokuZeilen` Ende = echte Zeit + 30 min
+  (`AZ_PAUSE_MIN`, Excel-Spalte D), bezahlt bleibt die echte Dauer. Alte
+  Verschiebungen ab Stichtag führt `azUeberhangPlan`/`azUeberhangDialog` zusammen.
   Excel füllt `src/arbeitszeit-xlsx.js` im Main-Process aus der vom Nutzer
   gewählten DATEV-Vorlage (Vorlage enthält Name → nie ins Repo); `readMonth`
   liest ausgefüllte Listen für den Import (`azImportPlan`). Monate mit

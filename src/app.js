@@ -281,6 +281,11 @@ async function checkGeldEingang() {
 // Format je Eintrag: { v: 'Version', date: 'YYYY-MM-DD', changes: ['...','...'] }
 // Änderungen dürfen mit **Fett** Markierung versehen werden.
 const CHANGELOG = [
+  { v: '1.0.74', date: '2026-11-24', changes: [
+    '**Arbeitszeit: Pausenregel statt Verschieben.** In den Arbeitszeit-Einstellungen gibt es „Pausenregel ab". Ab diesem Datum wird nichts mehr auf den Vortag geschoben: Bist du länger als 6 Stunden da, kommen in der Liste 30 Minuten Pause dazu (z. B. 09:00–15:30 → dokumentiert 09:00–16:00, Pause 0:30, Bemerkung „30 min Pause"). Bezahlt wird weiterhin die echte Zeit.',
+    '**Rückwirkend zusammenführen.** Beim Setzen des Datums findet die App bereits verschobene Stunden (Vortag bis 20:00 + 6 h am Tag) und schlägt vor, sie wieder zu einem Eintrag mit der echten Zeit zusammenzuführen – mit Vorschau und Häkchen je Tag. Danach lassen sich die Monate neu als Excel exportieren.',
+    '**Excel mit Pause.** Die DATEV-Liste bekommt die Pause in der Spalte „Pause"; beim Import wird sie wieder herausgerechnet.',
+  ]},
   { v: '1.0.73', date: '2026-11-23', changes: [
     '**Wartungsversion.** Gleicher Funktionsumfang wie 1.0.72 (inkl. „Mein Anteil" bei Verträgen), nur mit überarbeiteten Texten im Änderungsprotokoll.',
   ]},
@@ -13005,6 +13010,7 @@ window.jahreswechselAssistent = jahreswechselAssistent;
 // nicht ins öffentliche Repo); gefüllt wird sie in main.js (arbeitszeit-xlsx.js).
 const AZ_MAX_MIN = 360;
 const AZ_SPAET_MIN = 20 * 60;
+const AZ_PAUSE_MIN = 30;   // Pausenregel: über 6 h kommen 30 min Pause dazu
 const AZ_KUERZEL = [['', '–'], ['K', 'K – Krank'], ['U', 'U – Urlaub'], ['UU', 'UU – Unbezahlter Urlaub'],
   ['F', 'F – Feiertag'], ['SA', 'SA – Stundenweise abwesend'], ['SU', 'SU – Stundenweise Urlaub']];
 const AZ_WOCHENTAGE = ['Sonntag','Montag','Dienstag','Mittwoch','Donnerstag','Freitag','Samstag'];
@@ -13031,6 +13037,9 @@ function azCfg() {
   if (typeof c.ordner !== 'string') c.ordner = '';
   if (c.stichtag !== 'sonntag') c.stichtag = '20';
   if (c.autoExport === undefined) c.autoExport = true;
+  // Pausenregel ab Datum (YYYY-MM-DD): ab dann keine Verschiebung auf den Vortag mehr,
+  // sondern über 6 h 30 min Pause (Ende + 30 min). Leer = alte 6-h-Verschieberegel.
+  if (typeof c.pausenRegelAb !== 'string' || !/^(\d{4}-\d{2}-\d{2})?$/.test(c.pausenRegelAb)) c.pausenRegelAb = '';
   const ls = parseInt(c.lohnStart, 10);
   c.lohnStart = ls >= 1 && ls <= 28 ? ls : 20;   // max. 28, damit jeder Monat den Tag hat
   ['zuschlagSonntag', 'zuschlagFeiertag'].forEach(k => {
@@ -13078,11 +13087,13 @@ function azMonatName(ym) { const [y, m] = ym.split('-'); return PV_MONATE[+m - 1
 // Liefert je Kalendertag eine Zeile, wie sie in die DATEV-Liste kommt:
 // { datum, eintragId, beginn, ende (Minuten), minuten, echt, kuerzel, bemerkung,
 //   aufgezeichnet, verschobenRaus, verschobenRein, warnung }
+function azPausenRegelAb() { return azCfg().pausenRegelAb || ''; }
 function azDokuZeilen(liste) {
   const tage = {};
   const ueberhang = [];
   const leer = (datum, aufgezeichnet) => ({ datum, eintragId: null, beginn: null, ende: null, minuten: 0, echt: 0,
     kuerzel: '', bemerkung: '', aufgezeichnet, verschobenRaus: 0, verschobenRein: 0, warnung: '' });
+  const pausenAb = azPausenRegelAb();
   (liste || []).filter(e => e && /^\d{4}-\d{2}-\d{2}$/.test(e.datum || ''))
     .sort((a, b) => a.datum.localeCompare(b.datum))
     .forEach(e => {
@@ -13090,7 +13101,18 @@ function azDokuZeilen(liste) {
       const dauer = azDauer(e);
       t.eintragId = e.id; t.echt = dauer;
       t.kuerzel = e.kuerzel || ''; t.bemerkung = e.notiz || '';
-      if (dauer > 0) {
+      t.pause = 0;
+      if (dauer > 0 && pausenAb && e.datum >= pausenAb) {
+        // Pausenregel: nichts verschieben. Über 6 h kommen 30 min Pause dazu –
+        // dokumentiertes Ende = echtes Ende + Pause, bezahlt wird die echte Zeit.
+        t.beginn = azMin(e.von);
+        t.minuten = dauer;
+        if (dauer > AZ_MAX_MIN) {
+          t.pause = AZ_PAUSE_MIN;
+          if (!/30 min Pause/.test(t.bemerkung)) t.bemerkung = (t.bemerkung ? t.bemerkung + '; ' : '') + '30 min Pause';
+        }
+        t.ende = t.beginn + dauer + t.pause;
+      } else if (dauer > 0) {
         t.beginn = azMin(e.von);
         t.minuten = Math.min(dauer, AZ_MAX_MIN);
         t.ende = t.beginn + t.minuten;
@@ -13233,6 +13255,7 @@ function azExportDaten(ym, zeilen) {
     tag: +z.datum.slice(8),
     beginn: z.beginn != null ? azHHMM(z.beginn) : null,
     ende: z.ende != null ? azHHMM(z.ende) : null,
+    pause: z.pause ? azHHMM(z.pause) : null,
     kuerzel: z.kuerzel, aufgezeichnet: z.aufgezeichnet, bemerkung: z.bemerkung,
   })) };
 }
@@ -13505,7 +13528,10 @@ function azImportPlan(monate, liste) {
     if (mo.fehler) { dateien.push({ datei: mo.datei, fehler: mo.fehler }); return; }
     let anz = 0, min = 0;
     mo.zeilen.forEach(z => {
-      const e = { datum: z.datum, von: z.beginn, bis: z.ende, kuerzel: z.kuerzel || '', notiz: z.bemerkung || '' };
+      // Liste mit Pause: echte Arbeitszeit = Ende − Pause; der Pausenhinweis kommt aus der Regel wieder dazu
+      const bis = z.pause && z.ende ? azZeit(azMin(z.ende) - azMin(z.pause)) : z.ende;
+      const notiz = String(z.bemerkung || '').replace(/;?\s*30 min Pause/, '').trim();
+      const e = { datum: z.datum, von: z.beginn, bis, kuerzel: z.kuerzel || '', notiz };
       min += azDauer(e);
       const alt = bestehend[z.datum];
       if (alt) {
@@ -13632,6 +13658,69 @@ function azImportAnwenden(plan) {
   renderPage();
   showToast(plan.neu.length + ' Arbeitstage importiert');
 }
+// ── Pausenregel: früher verschobene Stunden wieder zusammenführen ─────────
+// Unter der alten Regel stehen Überhänge als eigener Vortag-Eintrag bis 20:00
+// vor einem Tag mit genau 6 h. Ab dem Stichtag der Pausenregel werden sie
+// wieder mit dem eigentlichen Arbeitstag zusammengeführt (Vorschau, abwählbar).
+function azUeberhangPlan(liste, ab) {
+  if (!ab) return [];
+  const nachDatum = {};
+  (liste || []).forEach(e => { if (e && e.datum) nachDatum[e.datum] = e; });
+  const out = [];
+  Object.values(nachDatum).sort((a, b) => a.datum.localeCompare(b.datum)).forEach(e2 => {
+    if (e2.datum < ab || azDauer(e2) !== AZ_MAX_MIN) return;
+    const e1 = nachDatum[azDatumPlus(e2.datum, -1)];
+    if (!e1 || e1.datum < ab || e1.bis !== azZeit(AZ_SPAET_MIN) || !(azDauer(e1) > 0) || e1.kuerzel) return;
+    const neuBis = azMin(e2.bis) + azDauer(e1);
+    if (neuBis >= 24 * 60) return;
+    out.push({ vortag: e1, tag: e2, neuBis: azZeit(neuBis), dauer: AZ_MAX_MIN + azDauer(e1),
+      sicher: /Mehrstunden/i.test(e1.notiz || '') || azDauer(e1) <= 4 * 60, an: true });
+  });
+  return out;
+}
+function azUeberhangAnwenden(plan) {
+  let n = 0;
+  plan.filter(p => p.an).forEach(p => {
+    p.tag.bis = p.neuBis;
+    state.arbeitszeit = azListe().filter(x => x !== p.vortag);
+    n++;
+  });
+  return n;
+}
+function azUeberhangDialog() {
+  const plan = azUeberhangPlan(azListe(), azPausenRegelAb());
+  if (!plan.length) { showToast('Keine verschobenen Stunden ab ' + datumDE(azPausenRegelAb()) + ' gefunden', 'info'); return; }
+  const wt = d => AZ_WOCHENTAGE[azWochentag(d)].slice(0, 2) + ' ' + datumDE(d).slice(0, 6);
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.innerHTML =
+    '<div class="modal" style="width:min(760px,95vw);max-width:760px;padding:0;max-height:90vh;display:flex;flex-direction:column">' +
+      '<div style="padding:16px 22px;border-bottom:1px solid var(--border)"><h3 style="margin:0;font-size:16px">Verschobene Stunden zusammenführen</h3>' +
+        '<div style="font-size:12px;color:var(--muted)">Ab ' + datumDE(azPausenRegelAb()) + ' gilt die Pausenregel – die früher auf den Vortag verschobenen Stunden kommen zurück an den eigentlichen Arbeitstag. Bitte prüfen, ob der Vortag wirklich nur Überhang war.</div></div>' +
+      '<div style="padding:14px 22px;overflow:auto"><div class="table-wrap"><table><thead><tr><th></th><th>Vortag (wird entfernt)</th><th>Arbeitstag bisher</th><th>Arbeitstag neu</th><th>Liste neu</th></tr></thead><tbody>' +
+        plan.map((p, i) => '<tr' + (p.sicher ? '' : ' style="background:rgba(234,179,8,.12)" title="Vortag ist länger als 4 h – evtl. eigene Arbeit, bitte prüfen"') + '>' +
+          '<td><input type="checkbox" data-i="' + i + '" style="width:16px;height:16px"' + (p.an ? ' checked' : '') + '></td>' +
+          '<td>' + wt(p.vortag.datum) + ' ' + p.vortag.von + '–' + p.vortag.bis + ' <span style="color:var(--muted)">(' + azDauerText(azDauer(p.vortag)) + ')</span></td>' +
+          '<td>' + wt(p.tag.datum) + ' ' + p.tag.von + '–' + p.tag.bis + '</td>' +
+          '<td><strong>' + p.tag.von + '–' + p.neuBis + '</strong> <span style="color:var(--muted)">(' + azDauerText(p.dauer) + ')</span></td>' +
+          '<td style="font-size:12px">' + p.tag.von + '–' + azZeit(azMin(p.neuBis) + (p.dauer > AZ_MAX_MIN ? AZ_PAUSE_MIN : 0)) + (p.dauer > AZ_MAX_MIN ? ', Pause 0:30' : '') + '</td></tr>').join('') +
+      '</tbody></table></div><div style="font-size:11px;color:var(--muted);margin-top:8px">Die bezahlten Stunden bleiben gleich, nur die Verteilung auf die Tage ändert sich. Danach die Monate über „Nur … als Excel" neu erzeugen.</div></div>' +
+      '<div style="padding:12px 22px;border-top:1px solid var(--border);display:flex;justify-content:flex-end;gap:8px;background:var(--surface);border-radius:0 0 14px 14px">' +
+        '<button class="btn btn-ghost" data-az="zu">Abbrechen</button><button class="btn btn-primary" data-az="ok">Zusammenführen</button></div>' +
+    '</div>';
+  document.body.appendChild(overlay);
+  overlay.addEventListener('change', e => { if (e.target.dataset && e.target.dataset.i != null) plan[+e.target.dataset.i].an = e.target.checked; });
+  overlay.addEventListener('click', e => {
+    const b = e.target.closest && e.target.closest('[data-az]');
+    if (!b) return;
+    if (b.dataset.az === 'ok') {
+      const n = azUeberhangAnwenden(plan);
+      azSyncEinnahmen(); saveData(); renderPage();
+      showToast(n + (n === 1 ? ' Tag' : ' Tage') + ' zusammengeführt');
+    }
+    overlay.remove();
+  });
+}
 function azBearbeiten(id) { _azEditId = id; renderPage(); }
 function azAbbrechen() { _azEditId = null; renderPage(); }
 async function azLoeschen(id) {
@@ -13672,6 +13761,13 @@ function azCfgSetzen(feld, wert) {
     azSyncEinnahmen();
     if (typeof updateBadges === 'function') updateBadges();
     showToast('Lohnzeitraum: ' + azLohnBeispiel(n), 'info');
+  } else if (feld === 'pausenRegelAb') {
+    c.pausenRegelAb = /^\d{4}-\d{2}-\d{2}$/.test(wert || '') ? wert : '';
+    azSyncEinnahmen();
+    if (typeof updateBadges === 'function') updateBadges();
+    saveData(); renderPage();
+    if (c.pausenRegelAb && azUeberhangPlan(azListe(), c.pausenRegelAb).length) azUeberhangDialog();
+    return;
   } else {
     c[feld] = typeof c[feld] === 'boolean' ? !!wert : wert;
   }
@@ -13911,7 +14007,10 @@ function arbeitszeit() {
           '<button class="btn btn-primary" onclick="azSpeichern()">' + (edit ? 'Speichern' : 'Hinzufügen') + '</button>' +
         '</div>' +
       '</div>' +
-      '<div style="font-size:11px;color:var(--muted);margin-top:8px">Trag die echten Zeiten ein. Über 6 h pro Tag verschiebt die App den Rest automatisch auf den Vortag (Ende 20:00), so wie es die Abrechnung verlangt.</div>' +
+      '<div style="font-size:11px;color:var(--muted);margin-top:8px">Trag die echten Zeiten ein. ' +
+        (c.pausenRegelAb && formWerte.datum >= c.pausenRegelAb
+          ? 'Über 6 h setzt die App in der Liste 30 min Pause dazu (Ende + 30 min); bezahlt wird die echte Zeit.'
+          : 'Über 6 h pro Tag verschiebt die App den Rest automatisch auf den Vortag (Ende 20:00).') + '</div>' +
     '</div>';
 
   let trenner = false;
@@ -13933,7 +14032,7 @@ function arbeitszeit() {
     return vorspann + '<tr' + (z.warnung ? ' style="background:rgba(234,179,8,.12)" title="' + escapeHtml(z.warnung) + '"' : '') + '>' +
       '<td style="white-space:nowrap">' + wt + ', ' + datumDe(z.datum).slice(0, 6) + (z.warnung ? ' ⚠' : '') + '</td>' +
       '<td style="white-space:nowrap">' + (e && e.von ? escapeHtml(e.von) + '–' + escapeHtml(e.bis) + ' <span style="color:var(--muted)">(' + azDauerText(z.echt) + ')</span>' : '<span style="color:var(--muted)">–</span>') + '</td>' +
-      '<td style="white-space:nowrap">' + (z.beginn != null ? azZeit(z.beginn) + '–' + azZeit(z.ende) + ' <span style="color:var(--muted)">(' + azDauerText(z.minuten) + ')</span>' : '–') +
+      '<td style="white-space:nowrap">' + (z.beginn != null ? azZeit(z.beginn) + '–' + azZeit(z.ende) + ' <span style="color:var(--muted)">(' + azDauerText(z.minuten) + (z.pause ? ', Pause 0:30' : '') + ')</span>' : '–') +
         (hinweise.length ? '<div style="font-size:11px;color:var(--muted)">' + hinweise.join(' · ') + '</div>' : '') + '</td>' +
       '<td>' + escapeHtml(z.kuerzel) + '</td>' +
       '<td style="font-size:12px">' + escapeHtml(z.bemerkung) + (z.warnung ? '<div style="font-size:11px;color:#a86b00">' + escapeHtml(z.warnung) + '</div>' : '') + '</td>' +
@@ -13993,6 +14092,10 @@ function arbeitszeit() {
           '<div><strong>Betreff:</strong> ' + escapeHtml(azPlatzhalter(c.betreff, vorschauWerte)) + '</div>' +
           '<div style="white-space:pre-wrap;margin-top:6px">' + escapeHtml(azPlatzhalter(c.text, vorschauWerte)) + '</div>' +
         '</div>' +
+        '<label class="field">Pausenregel ab<input type="date" value="' + (c.pausenRegelAb || '') + '" onchange="azCfgSetzen(\'pausenRegelAb\',this.value)">' +
+          '<span style="font-size:11px;color:var(--muted)">' + (c.pausenRegelAb ? 'Ab ' + datumDE(c.pausenRegelAb) + ': über 6 h 30 min Pause (Ende + 30 min), keine Verschiebung auf den Vortag.' +
+            (azUeberhangPlan(azListe(), c.pausenRegelAb).length ? ' · <a href="#" onclick="azUeberhangDialog();return false">Verschobene Stunden zusammenführen …</a>' : '')
+            : 'Leer = alte Regel (über 6 h auf den Vortag verschieben).') + '</span></label>' +
         '<label class="field">Lohnzeitraum beginnt am Tag<input type="number" min="1" max="28" step="1" value="' + c.lohnStart + '" onchange="azCfgSetzen(\'lohnStart\',this.value)">' +
           '<span style="font-size:11px;color:var(--muted)">' + azLohnBeispiel(c.lohnStart) + ' · 1 = Kalendermonat</span></label>' +
         '<label class="field">Versand-Stichtag<select onchange="azCfgSetzen(\'stichtag\',this.value)">' +
@@ -14076,6 +14179,7 @@ window.azImportStarten    = azImportStarten;
 window.azSchnell          = azSchnell;
 window.azSchnellDialog    = azSchnellDialog;
 window.azErinnerungTag    = azErinnerungTag;
+window.azUeberhangDialog  = azUeberhangDialog;
 window.azFixSetzen        = azFixSetzen;
 window.azFixAufheben      = azFixAufheben;
 window.AZ_STANDARD_TEXT   = AZ_STANDARD_TEXT;
