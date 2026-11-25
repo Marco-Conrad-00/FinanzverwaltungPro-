@@ -281,6 +281,9 @@ async function checkGeldEingang() {
 // Format je Eintrag: { v: 'Version', date: 'YYYY-MM-DD', changes: ['...','...'] }
 // Änderungen dürfen mit **Fett** Markierung versehen werden.
 const CHANGELOG = [
+  { v: '1.0.75', date: '2026-11-25', changes: [
+    '**Wartungsversion.** Gleicher Funktionsumfang wie 1.0.74. Das Projekt-Repository enthält jetzt nur noch die App selbst; Beispiele im Änderungsprotokoll wurden vereinheitlicht.',
+  ]},
   { v: '1.0.74', date: '2026-11-24', changes: [
     '**Arbeitszeit: Pausenregel statt Verschieben.** In den Arbeitszeit-Einstellungen gibt es „Pausenregel ab". Ab diesem Datum wird nichts mehr auf den Vortag geschoben: Bist du länger als 6 Stunden da, kommen in der Liste 30 Minuten Pause dazu (z. B. 09:00–15:30 → dokumentiert 09:00–16:00, Pause 0:30, Bemerkung „30 min Pause"). Bezahlt wird weiterhin die echte Zeit.',
     '**Rückwirkend zusammenführen.** Beim Setzen des Datums findet die App bereits verschobene Stunden (Vortag bis 20:00 + 6 h am Tag) und schlägt vor, sie wieder zu einem Eintrag mit der echten Zeit zusammenzuführen – mit Vorschau und Häkchen je Tag. Danach lassen sich die Monate neu als Excel exportieren.',
@@ -336,11 +339,11 @@ const CHANGELOG = [
     '**DATEV-Stundenliste + Mail-Entwurf.** Die App füllt deine eigene DATEV-Vorlage (einmal auswählen) und legt je Monat „Arbeitszeitdokumentation <Monat Jahr>.xlsx" im Zielordner ab. Am **Stichtag (20.)** – oder wahlweise am Sonntag nach dem letzten Samstag davor – passiert das automatisch, sobald die App läuft: Vormonat + laufender Monat, der Ordner öffnet sich und ein Mail-Entwurf an deinen Empfänger (mit CC, Betreff und Text aus den Einstellungen). Die Dateien ziehst du in die Mail – gesendet wird nie automatisch. Jederzeit auch per Knopf „Excel + Mail jetzt vorbereiten".',
   ]},
   { v: '1.0.61', date: '2026-10-11', changes: [
-    '**Dynamik: automatische Erhöhung für Fixkosten & Sparpläne.** Jede Fixkost/jeder Sparplan hat jetzt einen ⚡-Knopf: Lege fest, dass sich der Betrag ab einem Stichtag automatisch erhöht – wahlweise um einen **festen Betrag (€)** oder um **Prozent (%)**, einmalig oder wiederkehrend (z.B. jährlich). Beispiel Renten-Sparplan: +27,35 € ab dem nächsten Stichtag. Die Erhöhung wirkt überall automatisch: Abbuchung/Kontostand, automatischer Sparplan-Kauf und alle Summen. Der im Eingabefeld gepflegte Wert bleibt der **Grundbetrag**; der aktuell gültige Betrag wird mit ⚡ daneben angezeigt.',
+    '**Dynamik: automatische Erhöhung für Fixkosten & Sparpläne.** Jede Fixkost/jeder Sparplan hat jetzt einen ⚡-Knopf: Lege fest, dass sich der Betrag ab einem Stichtag automatisch erhöht – wahlweise um einen **festen Betrag (€)** oder um **Prozent (%)**, einmalig oder wiederkehrend (z.B. jährlich). Beispiel: +20,00 € ab dem nächsten Stichtag. Die Erhöhung wirkt überall automatisch: Abbuchung/Kontostand, automatischer Sparplan-Kauf und alle Summen. Der im Eingabefeld gepflegte Wert bleibt der **Grundbetrag**; der aktuell gültige Betrag wird mit ⚡ daneben angezeigt.',
     '**Aussetzen – ganz oder einzeln.** Im Dynamik-Dialog kannst du die Dynamik komplett pausieren (Schalter „aktiv") oder **einzelne Termine abhaken** (z.B. wenn du eine jährliche Erhöhung einmal nicht mitmachen willst, wie bei den Versicherungs-Dynamiken). Eine Vorschau zeigt je Termin den dann gültigen Betrag; Prozent-Erhöhungen wirken zusammengesetzt. Beim Jahreswechsel wird die Dynamik mit übernommen.',
   ]},
   { v: '1.0.60', date: '2026-09-16', changes: [
-    '**Spesen-Schalter präzisiert: Ausgaben zählen sofort, nur die Pauschale wartet auf „erhalten".** Deine (privaten) Ausgaben auf einer Reise mindern jetzt sofort dein Konto – unabhängig vom Schalter. Erst die Spesen-**Pauschale** (z.B. 47 €) kommt hinzu, sobald du die Reise auf „✓ erhalten" stellst. Beispiel: Kontostand 1.427,58 €, Ausgaben 1,83 € → sofort 1.425,75 €; nach Erhalt der Pauschale (47 €) → 1.472,75 €.',
+    '**Spesen-Schalter präzisiert: Ausgaben zählen sofort, nur die Pauschale wartet auf „erhalten".** Deine (privaten) Ausgaben auf einer Reise mindern jetzt sofort dein Konto – unabhängig vom Schalter. Erst die Spesen-**Pauschale** (z.B. 40 €) kommt hinzu, sobald du die Reise auf „✓ erhalten" stellst. Beispiel: Kontostand 1.000,00 €, Ausgaben 10,00 € → sofort 990,00 €; nach Erhalt der Pauschale (40 €) → 1.030,00 €.',
   ]},
   { v: '1.0.59', date: '2026-09-16', changes: [
     '**Spesen: „erhalten"-Schalter je Reise** – Wie beim Gehalt kannst du jetzt pro Reise festlegen, ob die Spesen schon ausgezahlt wurden. Erst wenn du auf „✓ erhalten" stellst, zählt der Spesen-Saldo zum ausgewählten Konto. Bis dahin steht die Reise auf „⏳ offen" und beeinflusst deinen Kontostand nicht (der Saldo wird ausgegraut). Standard: vergangene Monate gelten als erhalten, der laufende/kommende Monat erst nach deiner Bestätigung – so stimmen die Kontostände, obwohl die Spesen meist erst zum Monatsende kommen.',
@@ -500,7 +503,7 @@ const CHANGELOG = [
     '**Die Reiter in den Einstellungen schneiden den Inhalt beim Scrollen nicht mehr an.** Bisher verschwanden Schaltflächen und Texte halb hinter der Leiste – sie deckt den durchlaufenden Inhalt jetzt vollständig ab',
   ]},
   { v: '1.0.26', date: '2026-07-22', changes: [
-    '**Fehler behoben: Reisen rechneten mit veralteten Spesensätzen weiter.** Beim Anlegen einer Reise wurde der damals gültige Satz fest gespeichert und nie wieder angepasst – eine Reise in die Schweiz zeigte dadurch 43 € statt der ab 2026 gültigen 47 €',
+    '**Fehler behoben: Reisen rechneten mit veralteten Spesensätzen weiter.** Beim Anlegen einer Reise wurde der damals gültige Satz fest gespeichert und nie wieder angepasst – eine Reise zeigte dadurch noch den alten statt des ab 2026 gültigen Satzes',
     'Die Sätze richten sich jetzt nach Land und Reisedatum statt nach dem Zeitpunkt der Erfassung',
     'Bestehende Reisen ab 2026 werden beim nächsten Start einmalig neu berechnet; Reisen aus früheren Jahren behalten bewusst ihre damals gültigen Sätze',
     '**Die Reiter in den Einstellungen überdecken beim Scrollen keine Texte mehr** – die Leiste ist jetzt vollständig deckend und hebt sich sichtbar vom Inhalt ab',

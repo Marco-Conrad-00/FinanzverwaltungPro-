@@ -1,6 +1,6 @@
 {
   "name": "finanzverwaltung-pro",
-  "version": "1.0.74",
+  "version": "1.0.75",
   "main": "src/main.js",
   "scripts": {
     "start": "electron .",
